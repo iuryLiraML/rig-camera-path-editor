@@ -60,6 +60,9 @@ function friendlyError(message: string, visionSent: boolean): string {
   if (/\b(401|403|invalid api key|unauthorized|authentication)\b/i.test(message)) {
     return `${message}\n\nCheck your API key in Settings.`
   }
+  if (/\b(429|insufficient balance|no resource package|quota|rate limit|please recharge)\b/i.test(message)) {
+    return `${message}\n\nThis is a billing/quota issue on the provider side — your account is out of credits or hit its rate limit. Recharge at the provider's dashboard, switch provider in Settings, or wait and retry.`
+  }
   if (visionSent && /image|vision|multimodal|not support|unsupported|modality/i.test(message)) {
     return `${message}\n\nThis model may not accept the viewport screenshot — set Screenshot to Off (or Auto) in Settings.`
   }
@@ -103,10 +106,12 @@ export const useAgentStore = create<AgentState>()(
 
       visionActive: () => {
         const s = get()
-        if (s.visionMode === 'on') return true
-        if (s.visionMode === 'off') return false
         const model = (s.models[s.provider] ?? '').trim() || PROVIDERS[s.provider].defaultModel
-        return modelSupportsVision(s.provider, model)
+        const capable = modelSupportsVision(s.provider, model)
+        if (s.visionMode === 'off') return false
+        // 'on' is downgraded silently on text-only models so the request
+        // doesn't 400 with `messages.content.type is invalid`.
+        return capable
       },
 
       sendMessage: async (text) => {

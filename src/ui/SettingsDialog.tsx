@@ -85,7 +85,9 @@ export function SettingsDialog() {
                     : 'this model looks text-only — the viewport is not sent'
                 }.`
               : visionMode === 'on'
-                ? 'The viewport screenshot is always sent (fails on text-only models).'
+                ? modelSupportsVision(provider, models[provider] || PROVIDERS[provider].defaultModel)
+                  ? 'The viewport screenshot is sent with every turn.'
+                  : 'This model looks text-only — the screenshot is skipped to avoid a 400, even though Screenshot is set to On.'
                 : 'The viewport screenshot is never sent — describe the scene in words.'}
             {provider === 'zai' && ' z.ai vision needs a GLM-*V model; glm-5.2 is text-only.'}
           </div>
