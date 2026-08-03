@@ -7,11 +7,11 @@ import { useRigStore } from '../../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../../state/usePathStore'
 import { buildCurve, clamp01 } from '../../lib/curve'
 import { evalProgress, evalValue, evalVec3 } from '../../lib/keyframes'
+import { aimObject } from '../../lib/cameraOrientation'
 import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
 import { isTechMode } from '../RenderPasses'
 
-const DEG = Math.PI / 180
 const ACCENT = '#3b82f6'
 
 /** Shared handle so the PiP preview can render through this camera. */
@@ -31,6 +31,7 @@ export function CinemaCamera() {
   const camRef = useRef<THREE.PerspectiveCamera>(null)
   const bodyRef = useRef<THREE.Group>(null)
   const lookTarget = useRef(new THREE.Vector3())
+  const viewDir = useRef(new THREE.Vector3())
 
   const curve = useMemo(() => buildCurve(anchors, closed, rounding), [anchors, closed, rounding])
 
@@ -72,9 +73,11 @@ export function CinemaCamera() {
     } else {
       lookTarget.current.copy(curve.getTangentAt(eased)).add(cam.position)
     }
-    cam.up.set(0, 1, 0)
-    cam.lookAt(lookTarget.current)
-    if (rollNow !== 0) cam.rotateZ(rollNow * DEG)
+    // aimObject, not lookAt: passing over the target made lookAt's basis
+    // degenerate and the camera snapped 180 degrees in one frame. The path
+    // tangent is the reference it hands over to near the pole.
+    viewDir.current.subVectors(lookTarget.current, cam.position)
+    aimObject(cam, viewDir.current, curve.getTangentAt(eased), rollNow)
   })
 
   if (!curve) return null

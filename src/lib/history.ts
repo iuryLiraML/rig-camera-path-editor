@@ -1,13 +1,22 @@
 import { useRigStore } from '../state/useRigStore'
 import { usePathStore } from '../state/usePathStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 
 /** Undoable slice of the app state (playback/tooling state is excluded). */
 function capture() {
   const r = useRigStore.getState()
   const p = usePathStore.getState()
   const s = useSceneStore.getState()
+  const c = useCameraOptionsStore.getState()
   return {
+    // Deleting a camera was outside the undoable slice, so a mis-click threw
+    // away a whole named rig (path, duration, curve, lens and its keyframes)
+    // with no way back.
+    cameras: {
+      options: c.options,
+      activeOptionId: c.activeOptionId,
+    },
     rig: {
       duration: r.duration,
       ease: r.ease,
@@ -62,6 +71,7 @@ function apply(snapshot: Snapshot) {
   const { objects, ...sceneRest } = snapshot.scene
   useSceneStore.setState(sceneRest)
   useSceneStore.getState().restoreObjects(objects)
+  useCameraOptionsStore.setState(snapshot.cameras)
   current = snapshot
   currentJson = JSON.stringify(snapshot)
   applying = false
@@ -110,6 +120,7 @@ export function initHistory() {
   useRigStore.subscribe(onStoreChange)
   usePathStore.subscribe(onStoreChange)
   useSceneStore.subscribe(onStoreChange)
+  useCameraOptionsStore.subscribe(onStoreChange)
 }
 
 export function undo() {

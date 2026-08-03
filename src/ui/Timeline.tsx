@@ -1,11 +1,19 @@
-import { useRef, type PointerEvent as ReactPointerEvent } from 'react'
+import { useMemo, useRef, type PointerEvent as ReactPointerEvent } from 'react'
 import { useEditorStore, type SelectableId } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { evalProgress, evalValue, evalVec3 } from '../lib/keyframes'
+import {
+  evalModelTransform,
+  evalProgress,
+  evalValue,
+  evalVec3,
+  type ModelKey,
+} from '../lib/keyframes'
+import type { EaseKind } from '../lib/easing'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
 import { CAMERA_CHANNELS } from './cameraChannels'
+import { normalizeSamples, sampleOverTime, TrackCurve } from './TrackCurve'
 import { GUTTER, useViewportInsets } from './viewportInsets'
 import { saveCurrentAsShot } from '../lib/projects'
 import { PlayIcon } from './icons'
@@ -81,6 +89,7 @@ function Track({
   onAdd,
   addTitle,
   note,
+  curve,
 }: {
   label: string
   selectId: SelectableId
@@ -92,6 +101,8 @@ function Track({
   addTitle: string
   /** when set, the track is path-driven: show this note instead of keyframes/add */
   note?: string
+  /** the channel's value over time, normalized 0..1, plotted in the lane */
+  curve?: number[]
 }) {
   const selection = useEditorStore((s) => s.selection)
   const selected = selection === selectId
@@ -108,6 +119,7 @@ function Track({
       </button>
       <div className="relative h-full min-w-0 flex-1 rounded-md bg-panel-2/50">
         <div className="absolute left-0 right-0 top-1/2 h-px bg-line" />
+        {curve && !note && <TrackCurve samples={curve} color={color} />}
         {note ? (
           <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] italic text-ink-dim">
             {note}
@@ -141,12 +153,30 @@ function Track({
   )
 }
 
+/** how far an object has moved from its first keyframed pose, normalized */
+function objectPoseCurve(keys: ModelKey[], ease: EaseKind): number[] | undefined {
+  if (keys.length < 2) return undefined
+  const first = [...keys].sort((a, b) => a.time - b.time)[0].transform.position
+  return normalizeSamples(
+    sampleOverTime((time) => {
+      const pose = evalModelTransform(time, keys, ease)
+      if (!pose) return 0
+      return Math.hypot(
+        pose.position[0] - first[0],
+        pose.position[1] - first[1],
+        pose.position[2] - first[2],
+      )
+    }),
+  )
+}
+
 export function Timeline() {
   const hasPath = usePathStore(selectCameraAnchorCount) >= 2
   const playing = useRigStore((s) => s.playing)
   const t = useRigStore((s) => s.t)
   const duration = useRigStore((s) => s.duration)
   const loop = useRigStore((s) => s.loop)
+  const ease = useRigStore((s) => s.ease)
   const progressKeys = useRigStore((s) => s.progressKeys)
   const fovKeys = useRigStore((s) => s.fovKeys)
   const rollKeys = useRigStore((s) => s.rollKeys)
@@ -202,6 +232,40 @@ export function Timeline() {
 
   const rig = useRigStore.getState()
   const scene = useSceneStore.getState()
+
+  // Curves depend on the keyframes and the default ease, never on the playhead,
+  // so they must not be recomputed on every frame of playback.
+  const progressCurve = useMemo(
+    () => sampleOverTime((time) => evalProgress(time, progressKeys, ease)),
+    [progressKeys, ease],
+  )
+  const fovCurve = useMemo(
+    () =>
+      fovKeys.length === 0
+        ? undefined
+        : normalizeSamples(sampleOverTime((time) => evalValue(time, fovKeys, 0, ease))),
+    [fovKeys, ease],
+  )
+  const rollCurve = useMemo(
+    () =>
+      rollKeys.length === 0
+        ? undefined
+        : normalizeSamples(sampleOverTime((time) => evalValue(time, rollKeys, 0, ease))),
+    [rollKeys, ease],
+  )
+  // a 3-component channel has no single value to plot: show how far the target
+  // has travelled from where it started, which is what reads as "it moves here"
+  const targetCurve = useMemo(() => {
+    if (targetKeys.length === 0) return undefined
+    const start = targetKeys.reduce((a, b) => (a.time <= b.time ? a : b)).value
+    return normalizeSamples(
+      sampleOverTime((time) => {
+        const v = evalVec3(time, targetKeys, start, ease)
+        return Math.hypot(v[0] - start[0], v[1] - start[1], v[2] - start[2])
+      }),
+    )
+  }, [targetKeys, ease])
+  const channelCurves = { fov: fovCurve, roll: rollCurve, target: targetCurve }
 
   const scrub = (e: ReactPointerEvent) => {
     if (!areaRef.current) return
@@ -322,6 +386,7 @@ export function Timeline() {
               )
             }}
             addTitle="Pin the camera's path position at the playhead"
+            curve={progressCurve}
           />
           {/* Lens and framing channels appear once they are animated — the ◆ next
               to FOV, Roll and Target in the right panel creates the first key,
@@ -335,7 +400,6 @@ export function Timeline() {
                 label={channel.label}
                 selectId="cinema-camera"
                 color="#60a5fa"
-                note={channel.note}
                 keys={keys.map((k) => ({
                   id: k.id,
                   time: k.time,
@@ -345,6 +409,7 @@ export function Timeline() {
                   useRigStore.getState().updateChannelKeyTime(channel.id, keyId, time)
                 }
                 onDelete={(keyId) => useRigStore.getState().removeChannelKey(channel.id, keyId)}
+                curve={channelCurves[channel.id]}
                 onAdd={() => {
                   const state = useRigStore.getState()
                   if (channel.id === 'target') {
@@ -367,6 +432,7 @@ export function Timeline() {
             )
           })}
           {objects.map((object) => {
+            const poseCurve = objectPoseCurve(object.keys, ease)
             const followName = object.follow
               ? object.follow.pathId === CAMERA_PATH_ID
                 ? 'Camera Path'
@@ -388,6 +454,7 @@ export function Timeline() {
                 onDelete={(keyId) => scene.removeObjectKey(object.id, keyId)}
                 onAdd={() => scene.addObjectKey(object.id, useRigStore.getState().t)}
                 addTitle="Save the current pose at the playhead"
+                curve={poseCurve}
               />
             )
           })}

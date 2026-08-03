@@ -7,6 +7,7 @@ import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneSto
 import { useRigStore } from '../state/useRigStore'
 import { usePathStore } from '../state/usePathStore'
 import { evalModelTransform } from '../lib/keyframes'
+import { aimObject } from '../lib/cameraOrientation'
 import { buildCurve, clamp01 } from '../lib/curve'
 import { useEditorOnly } from '../lib/editorOnly'
 import { isTechMode } from './RenderPasses'
@@ -15,7 +16,6 @@ const DEG = Math.PI / 180
 const RAD = 180 / Math.PI
 
 /** reusable temporaries for the follow-path frame math (avoid per-frame allocs) */
-const _lookAt = new THREE.Vector3()
 
 /** live wrapper groups per object id, for framing (F) and preset bounding boxes */
 export const objectGroups = new Map<string, THREE.Group>()
@@ -127,11 +127,10 @@ function ObjectNode({ object }: { object: SceneObject }) {
       g.position.set(p.x, p.y + follow.height, p.z)
       g.scale.set(...object.transform.scale)
       if (follow.align) {
+        // same degeneracy as the camera: a path that turns vertical made
+        // lookAt's basis collapse and the object flipped in one frame
         const tan = followCurve.getTangentAt(phase)
-        _lookAt.set(p.x + tan.x, p.y + follow.height + tan.y, p.z + tan.z)
-        g.up.set(0, 1, 0)
-        g.lookAt(_lookAt)
-        if (follow.bank !== 0) g.rotateZ(follow.bank * DEG)
+        aimObject(g, tan, null, follow.bank, 'object')
       } else {
         const r = object.transform.rotation
         g.rotation.set(r[0] * DEG, r[1] * DEG, r[2] * DEG)

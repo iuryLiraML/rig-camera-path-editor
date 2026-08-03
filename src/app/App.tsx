@@ -23,6 +23,7 @@ import { redo, undo } from '../lib/history'
 import { importModelFile } from '../lib/sceneIO'
 import { nextRequiredProjectAction } from '../lib/projectWorkflow'
 import { useProjectStore } from '../state/useProjectStore'
+import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 
 function ViewSwitcher() {
   const appView = useEditorStore((s) => s.appView)
@@ -142,6 +143,16 @@ function useShortcuts() {
         case 'Backspace':
           if (path.selectedAnchorId) {
             path.removeAnchor(path.selectedAnchorId)
+          } else if (editor.selection === 'cinema-camera' && !editor.playMode) {
+            // Delete removed objects and anchors but silently did nothing on a
+            // camera, which reinforced that cameras were undeletable
+            const cameras = useCameraOptionsStore.getState()
+            if (cameras.options.length > 1) {
+              cameras.removeOption(cameras.activeOptionId)
+              useSceneStore.getState().showNotice('Camera deleted')
+            } else {
+              useSceneStore.getState().showNotice('The last camera cannot be deleted')
+            }
           } else if (editor.selection?.startsWith('obj:') && !editor.playMode) {
             useSceneStore.getState().removeObject(editor.selection.slice(4))
             editor.select(null)

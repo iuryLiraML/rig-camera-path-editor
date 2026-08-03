@@ -1,8 +1,10 @@
+import { useState } from 'react'
 
 import { useEditorStore, type ExportAspect, type ExportRes } from '../state/useEditorStore'
 import { AssistantPanel } from './AssistantPanel'
 import { defaultFollow, useSceneStore, type Vec3 } from '../state/useSceneStore'
-import { openRigImportDialog, useRigStore, type RigChannel } from '../state/useRigStore'
+import { getRigSnapshot, openRigImportDialog, useRigStore, type RigChannel } from '../state/useRigStore'
+import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { evalProgress, evalValue, evalVec3 } from '../lib/keyframes'
 import { easeGroups, easeDef, type EaseKind } from '../lib/easing'
@@ -741,6 +743,7 @@ function CinemaCameraSections() {
         />
       </Section>
       <CameraFormatSection />
+      <CameraOptionSection />
       <Section title="Look At">
         <Row label="Mode">
           <Segmented
@@ -789,6 +792,58 @@ function CinemaCameraSections() {
         )}
       </Section>
     </>
+  )
+}
+
+/**
+ * Identity of the selected camera. The only way to delete one used to be a
+ * hover-only "x" in the outliner, so from here — where you actually edit a
+ * camera — it looked like cameras could not be removed at all.
+ */
+function CameraOptionSection() {
+  const options = useCameraOptionsStore((s) => s.options)
+  const activeId = useCameraOptionsStore((s) => s.activeOptionId)
+  const active = options.find((option) => option.id === activeId)
+  const [confirming, setConfirming] = useState(false)
+  if (!active) return null
+
+  return (
+    <Section title="Camera">
+      <Row label="Name">
+        <input
+          value={active.name}
+          onChange={(e) => useCameraOptionsStore.getState().renameOption(active.id, e.target.value)}
+          className="w-full rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none focus:ring-1 focus:ring-accent"
+        />
+      </Row>
+      <div className="flex gap-1.5">
+        <PanelButton
+          label="Duplicate"
+          onClick={() => {
+            const id = useCameraOptionsStore.getState().createOption(`${active.name} copy`, getRigSnapshot())
+            useCameraOptionsStore.getState().switchOption(id)
+          }}
+        />
+        {options.length > 1 ? (
+          <PanelButton
+            label={confirming ? 'Delete for good?' : 'Delete'}
+            tone="danger"
+            onClick={() => {
+              if (!confirming) {
+                setConfirming(true)
+                return
+              }
+              useCameraOptionsStore.getState().removeOption(active.id)
+              setConfirming(false)
+            }}
+          />
+        ) : (
+          <span className="self-center text-[10px] text-ink-dim">
+            The last camera cannot be deleted
+          </span>
+        )}
+      </div>
+    </Section>
   )
 }
 

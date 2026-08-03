@@ -9,7 +9,6 @@ import type { ScalarChannel } from '../state/useRigStore'
 export interface CameraChannel {
   id: ScalarChannel | 'target'
   label: string
-  note?: string
   pick: (keys: {
     fovKeys: ValueKey[]
     rollKeys: ValueKey[]
@@ -24,21 +23,18 @@ export const CAMERA_CHANNELS: CameraChannel[] = [
   {
     id: 'fov',
     label: 'FOV',
-    note: 'lens',
     pick: (k) => k.fovKeys,
     describe: () => '',
   },
   {
     id: 'roll',
     label: 'Roll',
-    note: 'lens',
     pick: (k) => k.rollKeys,
     describe: () => '',
   },
   {
     id: 'target',
     label: 'Look-At',
-    note: 'framing',
     pick: (k) => k.targetKeys,
     describe: () => '',
   },

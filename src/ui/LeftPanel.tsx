@@ -20,6 +20,7 @@ import {
   SearchIcon,
   SunIcon,
   TargetIcon,
+  TrashIcon,
 } from './icons'
 
 function TreeItem({
@@ -82,7 +83,15 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
   const selected = active && selection === 'cinema-camera'
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
+  const [confirming, setConfirming] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  // drop the armed confirmation as soon as the pointer leaves the row
+  useEffect(() => {
+    if (!confirming) return
+    const cancel = setTimeout(() => setConfirming(false), 4000)
+    return () => clearTimeout(cancel)
+  }, [confirming])
 
   useEffect(() => {
     setDraft(name)
@@ -134,20 +143,37 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
           <span className="truncate">{name}</span>
         )}
       </button>
-      {canRemove && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation()
-            useCameraOptionsStore.getState().removeOption(id)
-          }}
-          className={`shrink-0 rounded px-1 text-[10px] opacity-0 group-hover:opacity-100 ${
-            selected ? 'text-white/80 hover:bg-white/15' : 'text-ink-dim hover:bg-panel hover:text-ink'
-          }`}
-          title="Remove camera"
-        >
-          ×
-        </button>
-      )}
+{/* This was a 10px "x" at opacity-0 until you hovered the exact row, which
+          read as "cameras cannot be deleted". Always visible, real icon, and it
+          asks once before throwing away a camera move. */}
+      {canRemove &&
+        (confirming ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              useCameraOptionsStore.getState().removeOption(id)
+            }}
+            className="shrink-0 rounded px-1.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/15"
+            title={`Delete "${name}" for good`}
+          >
+            Delete?
+          </button>
+        ) : (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              setConfirming(true)
+            }}
+            className={`shrink-0 rounded p-1 ${
+              selected
+                ? 'text-white/70 hover:bg-white/15 hover:text-white'
+                : 'text-ink-dim hover:bg-panel hover:text-red-400'
+            }`}
+            title="Delete camera"
+          >
+            <TrashIcon size={12} />
+          </button>
+        ))}
     </div>
   )
 }

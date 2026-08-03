@@ -83,6 +83,12 @@ export const BookIcon = (p: IconProps) => (
   </svg>
 )
 
+export const TrashIcon = ({ size = 13 }: { size?: number }) => (
+  <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3">
+    <path d="M3 5h10M6.5 5V3.5h3V5M4.5 5l.5 8h6l.5-8" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+)
+
 export const CameraIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <rect x="2" y="4.5" width="8.5" height="7" rx="1.5" />
