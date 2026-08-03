@@ -247,6 +247,33 @@ export async function exportFrame() {
   }
 }
 
+/**
+ * A shot's still, rendered the way the shot will look: cinema camera, export
+ * aspect, no grid, path or gizmos. `captureThumbnail` copies the visible canvas
+ * instead, so every Board card and Projects card was a screenshot of the editor
+ * viewport — helpers, anchors and all — rather than the frame.
+ */
+export async function captureShotStill(maxWidth = 480): Promise<Blob | null> {
+  const { advance } = renderBridge
+  if (!advance || !renderBridge.setFrameloop || isRecording()) return null
+  const { canvas, width, height, restore } = await setupOffline(true)
+  if (!canvas) {
+    restore()
+    return null
+  }
+  try {
+    advance(performance.now())
+    const scale = Math.min(1, maxWidth / width)
+    const copy = document.createElement('canvas')
+    copy.width = Math.max(2, Math.round(width * scale))
+    copy.height = Math.max(2, Math.round(height * scale))
+    copy.getContext('2d')!.drawImage(canvas, 0, 0, copy.width, copy.height)
+    return await new Promise<Blob | null>((resolve) => copy.toBlob(resolve, 'image/jpeg', 0.8))
+  } finally {
+    restore()
+  }
+}
+
 /** Realtime WebM capture — fallback for browsers without WebCodecs. */
 function recordWebmRealtime() {
   if (isRecording()) return

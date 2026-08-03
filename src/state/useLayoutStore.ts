@@ -81,46 +81,147 @@ export function computeRects(
 
 const ROOT_ID = 'pane-editor'
 
+/**
+ * Named layouts, exposed in the viewport footer. The raw split/join gestures
+ * stayed the only way in and out of a split, and none of them could return you
+ * to a single pane — 'single' is the guaranteed way back.
+ *
+ * 'director' is the reason the split exists in this app: the point of this
+ * editor is driving a camera along a path, so seeing the path and the resulting
+ * framing at the same time is the actual job — the PiP did it by overlapping,
+ * this does it side by side.
+ */
+export type LayoutPreset = 'single' | 'director' | 'quad'
+
+const leaf = (id: string, view: PaneView): AreaNode => ({ kind: 'leaf', id, view })
+
+/**
+ * Where a preset's dividers go. Ratios are fractions of the whole canvas, but a
+ * divider at 0.5 of the canvas is not at the middle of what the user sees — the
+ * panels cover unequal strips — so the caller passes the ratios it wants,
+ * measured against the free area.
+ */
+export interface PresetRatios {
+  v: number
+  h: number
+}
+
+const DEFAULT_RATIOS: PresetRatios = { v: 0.5, h: 0.5 }
+
+/** deterministic trees, so the preset a user picks is the tree we can detect */
+function presetTree(preset: LayoutPreset, ratios: PresetRatios = DEFAULT_RATIOS): AreaNode {
+  if (preset === 'single') return leaf(ROOT_ID, 'editor')
+  if (preset === 'director') {
+    return {
+      kind: 'split',
+      id: 'split-root',
+      dir: 'v',
+      ratio: ratios.v,
+      a: leaf(ROOT_ID, 'editor'),
+      b: leaf('pane-camera', 'camera'),
+    }
+  }
+  return {
+    kind: 'split',
+    id: 'split-root',
+    dir: 'v',
+    ratio: ratios.v,
+    a: {
+      kind: 'split',
+      id: 'split-left',
+      dir: 'h',
+      ratio: ratios.h,
+      a: leaf(ROOT_ID, 'editor'),
+      b: leaf('pane-front', 'front'),
+    },
+    b: {
+      kind: 'split',
+      id: 'split-right',
+      dir: 'h',
+      ratio: ratios.h,
+      a: leaf('pane-camera', 'camera'),
+      b: leaf('pane-top', 'top'),
+    },
+  }
+}
+
+/** which preset the current tree is, ignoring divider positions ('' = custom) */
+export function detectPreset(root: AreaNode): LayoutPreset | '' {
+  const shape = (node: AreaNode): string =>
+    node.kind === 'leaf' ? node.view : `(${node.dir}${shape(node.a)}${shape(node.b)})`
+  const current = shape(root)
+  for (const p of ['single', 'director', 'quad'] as const) {
+    if (shape(presetTree(p)) === current) return p
+  }
+  return ''
+}
+
 interface LayoutState {
   root: AreaNode
   /** the single interactive pane (always view 'editor'); never removed */
   activePaneId: string
-  /** split a pane in two; the new pane is a fixed view */
+  /** split a pane in two; the new pane takes the first unused fixed view */
   splitPane: (id: string, dir: 'v' | 'h') => void
   /** close a (non-active) pane back into its sibling */
   joinPane: (id: string) => void
   setSplitRatio: (splitId: string, ratio: number) => void
   setPaneView: (id: string, view: PaneView) => void
+  /** move the interactive editor into another pane; they swap views */
+  setActivePane: (id: string) => void
+  applyPreset: (preset: LayoutPreset, ratios?: PresetRatios) => void
   paneCount: () => number
 }
 
 export const useLayoutStore = create<LayoutState>((set, get) => ({
-  root: { kind: 'leaf', id: ROOT_ID, view: 'editor' },
+  root: presetTree('single'),
   activePaneId: ROOT_ID,
 
   splitPane: (id, dir) =>
-    set((s) => ({
-      root: replaceLeaf(s.root, id, (leaf) => ({
-        kind: 'split',
-        id: newId('split'),
-        dir,
-        ratio: 0.5,
-        a: leaf, // keeps the original id (so the active pane stays valid)
-        b: { kind: 'leaf', id: newId('pane'), view: 'camera' },
-      })),
-    })),
+    set((s) => {
+      // every new pane defaulted to 'camera', so a hand-built quad showed the
+      // same camera three times — take the first view not already on screen
+      const used = new Set(leafList(s.root).map((l) => l.view))
+      const view = FIXED_VIEWS.find((v) => !used.has(v)) ?? 'camera'
+      return {
+        root: replaceLeaf(s.root, id, (target) => ({
+          kind: 'split',
+          id: newId('split'),
+          dir,
+          ratio: 0.5,
+          a: target, // keeps the original id (so the active pane stays valid)
+          b: { kind: 'leaf', id: newId('pane'), view },
+        })),
+      }
+    }),
 
   joinPane: (id) =>
     set((s) => (id === s.activePaneId ? s : { root: dropLeaf(s.root, id) })),
 
   setSplitRatio: (splitId, ratio) => set((s) => ({ root: setRatio(s.root, splitId, ratio) })),
 
-  setPaneView: (id, view) =>
+  setPaneView: (id, view) => {
+    // 'editor' is not a view you assign — it means "make this the active pane"
+    if (view === 'editor') {
+      get().setActivePane(id)
+      return
+    }
+    if (id === get().activePaneId) return
+    set((s) => ({ root: mapLeaf(s.root, id, { view }) }))
+  },
+
+  setActivePane: (id) =>
     set((s) => {
-      // the active pane stays 'editor'; only secondary panes take a fixed view
-      if (id === s.activePaneId || view === 'editor') return s
-      return { root: mapLeaf(s.root, id, { view }) }
+      if (id === s.activePaneId) return s
+      const target = leafList(s.root).find((l) => l.id === id)
+      if (!target) return s
+      // the pane losing the editor inherits the view the new one was showing
+      let root = mapLeaf(s.root, s.activePaneId, { view: target.view })
+      root = mapLeaf(root, id, { view: 'editor' })
+      return { root, activePaneId: id }
     }),
+
+  applyPreset: (preset, ratios) =>
+    set({ root: presetTree(preset, ratios), activePaneId: ROOT_ID }),
 
   paneCount: () => leafList(get().root).length,
 }))

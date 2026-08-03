@@ -34,6 +34,7 @@ interface AgentState {
   // conversation (session only — API history kept in module scope)
   chat: ChatEntry[]
   status: 'idle' | 'thinking'
+  taskProgress: string | null
   error: string | null
   forcedSkill: string | null
 
@@ -75,20 +76,27 @@ let abortController: AbortController | null = null
 
 const defaultModels: Record<ProviderKind, string> = {
   anthropic: PROVIDERS.anthropic.defaultModel,
-  openrouter: PROVIDERS.openrouter.defaultModel,
-  zai: PROVIDERS.zai.defaultModel,
+  kimi: PROVIDERS.kimi.defaultModel,
+}
+
+const emptyKeys: Record<ProviderKind, string> = { anthropic: '', kimi: '' }
+
+/** Providers were reduced to Anthropic + Kimi; anything else falls back. */
+function normaliseProvider(value: unknown): ProviderKind {
+  return value === 'anthropic' || value === 'kimi' ? value : 'anthropic'
 }
 
 export const useAgentStore = create<AgentState>()(
   persist(
     (set, get) => ({
       provider: 'anthropic',
-      keys: { anthropic: '', openrouter: '', zai: '' },
+      keys: { ...emptyKeys },
       models: { ...defaultModels },
       visionMode: 'auto',
       guidelines: '',
       chat: [],
       status: 'idle',
+      taskProgress: null,
       error: null,
       forcedSkill: null,
 
@@ -135,6 +143,7 @@ export const useAgentStore = create<AgentState>()(
         set((s) => ({
           chat: [...s.chat, { id: makeEntryId(), role: 'user', text, tools: [] }],
           status: 'thinking',
+          taskProgress: 'Starting task…',
           error: null,
           forcedSkill: null,
         }))
@@ -156,26 +165,68 @@ export const useAgentStore = create<AgentState>()(
 
         abortController = new AbortController()
         try {
-          apiHistory = await runAgent({
-            provider: config,
-            system: buildSystemPrompt(guidelines, skills),
-            messages: apiHistory,
-            tools: TOOL_DEFS,
-            execute: executeTool,
-            signal: abortController.signal,
-            events: {
-              onText: (delta) => patchAssistant((e) => ({ text: e.text + delta })),
-              onToolResult: (name) => patchAssistant((e) => ({ tools: [...e.tools, name] })),
-            },
+          const turnsPerBatch = 32
+          const maxBatches = 3
+          let history = apiHistory
+          let exhausted = true
+
+          for (let batch = 0; batch < maxBatches; batch++) {
+            const result = await runAgent({
+              provider: config,
+              system: buildSystemPrompt(guidelines, skills),
+              messages: history,
+              tools: TOOL_DEFS,
+              execute: executeTool,
+              signal: abortController.signal,
+              maxTurns: turnsPerBatch,
+              events: {
+                onText: (delta) => patchAssistant((e) => ({ text: e.text + delta })),
+                onToolResult: (name) => patchAssistant((e) => ({ tools: [...e.tools, name] })),
+                onTurn: (turn) =>
+                  set({ taskProgress: `Working… step ${batch * turnsPerBatch + turn}` }),
+                onCheckpoint: (messages) => {
+                  apiHistory = messages
+                },
+              },
+            })
+            history = result.messages
+            apiHistory = history
+            if (result.outcome === 'completed') {
+              exhausted = false
+              break
+            }
+            if (result.outcome === 'interrupted') {
+              history = [
+                ...history,
+                {
+                  role: 'user',
+                  text:
+                    'Continue the unfinished task from where you stopped. Do not repeat completed tool work; inspect camera_options and finish every remaining requested item.',
+                },
+              ]
+              apiHistory = history
+            }
+          }
+
+          apiHistory = history
+          set({
+            status: 'idle',
+            taskProgress: null,
+            error: exhausted
+              ? 'The assistant reached the 96-step safety limit. Your completed work was preserved; send “Continue” to resume.'
+              : null,
           })
-          set({ status: 'idle' })
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e)
           const aborted = message.includes('abort') || (e as Error)?.name === 'AbortError'
           // drop the dangling user turn so the history stays valid for the next send
           if (apiHistory[apiHistory.length - 1]?.role === 'user') apiHistory.pop()
           patchAssistant(() => ({ text: aborted ? '(stopped)' : '' }))
-          set({ status: 'idle', error: aborted ? null : friendlyError(message, vision) })
+          set({
+            status: 'idle',
+            taskProgress: null,
+            error: aborted ? null : friendlyError(message, vision),
+          })
         } finally {
           abortController = null
         }
@@ -185,12 +236,12 @@ export const useAgentStore = create<AgentState>()(
 
       clearChat: () => {
         apiHistory = []
-        set({ chat: [], error: null })
+        set({ chat: [], taskProgress: null, error: null })
       },
     }),
     {
       name: 'rig-agent-settings',
-      version: 3,
+      version: 4,
       partialize: (s) => ({
         provider: s.provider,
         keys: s.keys,
@@ -201,21 +252,35 @@ export const useAgentStore = create<AgentState>()(
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>
         if (version < 2) {
-          // v1 stored a single anthropicKey + model
           return {
-            provider: 'anthropic',
-            keys: { anthropic: (p.anthropicKey as string) ?? '', openrouter: '', zai: '' },
+            provider: 'anthropic' as ProviderKind,
+            keys: { ...emptyKeys, anthropic: (p.anthropicKey as string) ?? '' },
             models: { ...defaultModels, anthropic: (p.model as string) ?? defaultModels.anthropic },
-            visionMode: 'auto',
+            visionMode: 'auto' as VisionMode,
             guidelines: (p.guidelines as string) ?? '',
           }
         }
-        // v2 used a boolean `vision`; fold it into the new visionMode
         if ('vision' in p && !('visionMode' in p)) {
           p.visionMode = p.vision === false ? 'off' : 'auto'
           delete p.vision
         }
-        return p
+        // v4 dropped OpenRouter and z.ai: keep only the keys/models that still
+        // map to a supported provider, so stale ones cannot be selected.
+        const persistedKeys = (p.keys ?? {}) as Record<string, string>
+        const persistedModels = (p.models ?? {}) as Record<string, string>
+        return {
+          provider: normaliseProvider(p.provider),
+          keys: {
+            anthropic: persistedKeys.anthropic ?? '',
+            kimi: persistedKeys.kimi ?? '',
+          },
+          models: {
+            anthropic: persistedModels.anthropic || defaultModels.anthropic,
+            kimi: persistedModels.kimi || defaultModels.kimi,
+          },
+          visionMode: (p.visionMode as VisionMode) ?? 'auto',
+          guidelines: (p.guidelines as string) ?? '',
+        }
       },
     },
   ),

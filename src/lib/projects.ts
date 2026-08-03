@@ -4,10 +4,25 @@ import { applyRigSnapshot, getRigSnapshot, useRigStore, type RigSnapshot } from 
 import { CAMERA_PATH_ID, usePathStore, type MotionPath } from '../state/usePathStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useAgentStore } from '../state/useAgentStore'
+import {
+  getCameraOptionsSnapshot,
+  makeEmptyRigSnapshot,
+  useCameraOptionsStore,
+  type CameraOption,
+} from '../state/useCameraOptionsStore'
 import { idbDelete, idbGetAll, idbPut, STORES } from './idb'
+import { syncActiveProjectToCloud } from './cloud/sync'
 import { liveSceneMetas, loadSceneFromMetas, readLegacyMetas, sweepOrphanBuffers, type ObjectMeta } from './sceneIO'
-import { resetHistory } from './history'
+import { resetHistory, setHistorySuspended } from './history'
 import { renderBridge } from './renderBridge'
+import { captureShotStill } from './recorder'
+import {
+  createLegacyProjectWorkflow,
+  createProjectWorkflow,
+  isProjectEditorReady,
+  migrateProjectWorkflow,
+  type ProjectWorkflow,
+} from './projectWorkflow'
 
 const ACTIVE_KEY = 'rig-active-project'
 
@@ -15,6 +30,10 @@ interface ProjectRecord {
   id: string
   name: string
   createdAt: number
+  /** last save; optional for records written before the Projects screen showed it */
+  updatedAt?: number
+  cloudProjectId?: string
+  workflow?: ProjectWorkflow
   guidelines: string
   savedPrompts: SavedPrompt[]
   skills: CustomSkill[]
@@ -23,6 +42,9 @@ interface ProjectRecord {
   rig: RigSnapshot
   /** full motion-path collection (incl. the camera path); optional for back-compat */
   paths?: MotionPath[]
+  /** named camera alternatives; optional for projects created before multi-camera support */
+  cameraOptions?: CameraOption[]
+  activeCameraOptionId?: string
 }
 
 function buildActiveRecord(id: string, createdAt: number): ProjectRecord {
@@ -31,6 +53,8 @@ function buildActiveRecord(id: string, createdAt: number): ProjectRecord {
     id,
     name: project.name,
     createdAt,
+    updatedAt: Date.now(),
+    workflow: project.workflow,
     guidelines: project.guidelines,
     savedPrompts: project.savedPrompts,
     skills: project.skills,
@@ -38,6 +62,8 @@ function buildActiveRecord(id: string, createdAt: number): ProjectRecord {
     sceneMeta: liveSceneMetas(),
     rig: getRigSnapshot(),
     paths: JSON.parse(JSON.stringify(usePathStore.getState().paths)),
+    cameraOptions: getCameraOptionsSnapshot(),
+    activeCameraOptionId: useCameraOptionsStore.getState().activeOptionId,
   }
 }
 
@@ -49,18 +75,32 @@ export async function saveActiveProject() {
   if (!projectId) return
   const createdAt = createdAtById.get(projectId) ?? Date.now()
   createdAtById.set(projectId, createdAt)
-  try {
-    await idbPut(STORES.projects, buildActiveRecord(projectId, createdAt))
-  } catch (e) {
-    console.error('Failed to save project', e)
-  }
+  await idbPut(STORES.projects, buildActiveRecord(projectId, createdAt))
+  void syncActiveProjectToCloud().catch((error) => console.error('Cloud sync failed', error))
 }
 
 async function refreshProjectList() {
   const records = await idbGetAll<ProjectRecord>(STORES.projects)
-  records.sort((a, b) => a.createdAt - b.createdAt)
   records.forEach((r) => createdAtById.set(r.id, r.createdAt))
-  useProjectStore.getState().setProjectList(records.map((r) => ({ id: r.id, name: r.name })))
+  // most recently touched first: that is the order you actually look for
+  const byRecency = [...records].sort(
+    (a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt),
+  )
+  useProjectStore.getState().setProjectList(
+    byRecency.map((record) => {
+      const workflow = migrateProjectWorkflow(record.workflow, record.name)
+      const shots = record.shots ?? []
+      return {
+        id: record.id,
+        name: record.name,
+        setupStatus: isProjectEditorReady(workflow) ? 'ready' : 'draft',
+        shotCount: shots.length,
+        updatedAt: record.updatedAt ?? record.createdAt,
+        thumbnail: [...shots].sort((a, b) => a.order - b.order)[0]?.thumbnail ?? undefined,
+      }
+    }),
+  )
+  records.sort((a, b) => a.createdAt - b.createdAt)
   return records
 }
 
@@ -68,6 +108,7 @@ function applyRecord(record: ProjectRecord) {
   useProjectStore.getState().loadProject({
     projectId: record.id,
     name: record.name,
+    workflow: migrateProjectWorkflow(record.workflow, record.name),
     guidelines: record.guidelines,
     savedPrompts: record.savedPrompts ?? [],
     skills: record.skills ?? [],
@@ -75,33 +116,40 @@ function applyRecord(record: ProjectRecord) {
   })
   // restore the whole path collection first, then let the rig snapshot
   // upsert the camera path (keeps old records without `paths` working)
-  if (record.paths?.length) {
-    usePathStore.setState({
-      paths: JSON.parse(JSON.stringify(record.paths)),
-      activePathId: CAMERA_PATH_ID,
-      selectedAnchorId: null,
-      selectedHandle: 'none',
-    })
-  }
-  applyRigSnapshot(record.rig)
+  usePathStore.setState({
+    paths: record.paths?.length
+      ? JSON.parse(JSON.stringify(record.paths))
+      : [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
+    activePathId: CAMERA_PATH_ID,
+    selectedAnchorId: null,
+    selectedHandle: 'none',
+  })
+  useCameraOptionsStore
+    .getState()
+    .loadOptions(record.cameraOptions, record.activeCameraOptionId, record.rig)
   localStorage.setItem(ACTIVE_KEY, record.id)
 }
 
 let watching = false
 let saveTimer: ReturnType<typeof setTimeout> | undefined
+let autosaveSuspended = false
 
 function watchForAutosave() {
   if (watching) return
   watching = true
   const schedule = () => {
+    if (autosaveSuspended) return
     clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => void saveActiveProject(), 800)
+    saveTimer = setTimeout(() => {
+      void saveActiveProject().catch((error) => console.error('Failed to autosave project', error))
+    }, 800)
   }
   useSceneStore.subscribe(schedule)
   useRigStore.subscribe((s) => {
     if (!s.playing) schedule() // playback t updates are not worth writes
   })
   usePathStore.subscribe(schedule) // path geometry lives here now
+  useCameraOptionsStore.subscribe(schedule)
   useProjectStore.subscribe(schedule)
 }
 
@@ -115,9 +163,16 @@ export async function bootProjects() {
     await loadSceneFromMetas(legacyMetas, true)
     const id = makeSceneId('proj')
     createdAtById.set(id, Date.now())
+    const hasLegacyWork =
+      legacyMetas.length > 0 ||
+      Boolean(useAgentStore.getState().guidelines.trim()) ||
+      getRigSnapshot().anchors.length > 0
     useProjectStore.getState().loadProject({
       projectId: id,
       name: 'Untitled',
+      workflow: hasLegacyWork
+        ? createLegacyProjectWorkflow('Untitled')
+        : createProjectWorkflow('Untitled'),
       guidelines: useAgentStore.getState().guidelines, // legacy location
       savedPrompts: [],
       skills: [],
@@ -134,6 +189,7 @@ export async function bootProjects() {
   }
 
   watchForAutosave()
+  useProjectStore.getState().setBooted(true)
 
   // sweep buffers no project references anymore
   const live = new Set<string>()
@@ -144,7 +200,26 @@ export async function bootProjects() {
   void sweepOrphanBuffers(live)
 }
 
-export async function switchProject(id: string) {
+let projectTransition = Promise.resolve()
+let pendingProjectTransitions = 0
+
+function serializeProjectTransition<T>(operation: () => Promise<T>): Promise<T> {
+  const run = projectTransition.then(operation, operation)
+  projectTransition = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  pendingProjectTransitions += 1
+  useProjectStore.getState().setProjectBusy(true)
+  const finish = () => {
+    pendingProjectTransitions -= 1
+    if (pendingProjectTransitions === 0) useProjectStore.getState().setProjectBusy(false)
+  }
+  void run.then(finish, finish)
+  return run
+}
+
+async function switchProjectNow(id: string) {
   const { projectId } = useProjectStore.getState()
   if (id === projectId) return
   clearTimeout(saveTimer)
@@ -167,15 +242,20 @@ export async function switchProject(id: string) {
   useSceneStore.getState().showNotice(`Switched to "${record.name}"`)
 }
 
-export async function createProject(name = 'New project') {
+export function switchProject(id: string) {
+  return serializeProjectTransition(() => switchProjectNow(id))
+}
+
+async function createProjectNow(name: string, saveCurrent: boolean) {
   clearTimeout(saveTimer)
-  await saveActiveProject()
+  if (saveCurrent) await saveActiveProject()
 
   const id = makeSceneId('proj')
   createdAtById.set(id, Date.now())
   useProjectStore.getState().loadProject({
     projectId: id,
     name,
+    workflow: createProjectWorkflow(name),
     guidelines: '',
     savedPrompts: [],
     skills: [],
@@ -183,29 +263,24 @@ export async function createProject(name = 'New project') {
   })
   localStorage.setItem(ACTIVE_KEY, id)
   await loadSceneFromMetas([], true) // fresh scene with the sample shape
-  applyRigSnapshot({
-    anchors: [],
-    closed: false,
-    drawPlaneY: 1.2,
-    duration: 6,
-    smoothness: 0.6,
-    rounding: 0.8,
-    loop: true,
-    lookAtMode: 'target',
-    target: [0, 1, 0],
-    roll: 0,
-    fov: 45,
-    progressKeys: [],
-  })
+  const emptyRig = makeEmptyRigSnapshot()
+  applyRigSnapshot(emptyRig)
+  useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
   useEditorStore.getState().select(null)
   useAgentStore.getState().clearChat()
   resetHistory()
   await saveActiveProject()
   await refreshProjectList()
   useSceneStore.getState().showNotice(`Project "${name}" created`)
+  return id
 }
 
-export async function deleteProject(id: string) {
+export function createProject(name = 'New project') {
+  return serializeProjectTransition(() => createProjectNow(name, true))
+}
+
+async function deleteProjectNow(id: string) {
+  clearTimeout(saveTimer)
   await idbDelete(STORES.projects, id)
   createdAtById.delete(id)
   const records = await refreshProjectList()
@@ -216,9 +291,14 @@ export async function deleteProject(id: string) {
       useAgentStore.getState().clearChat()
       resetHistory()
     } else {
-      await createProject('Untitled')
+      useProjectStore.setState({ projectId: '' })
+      await createProjectNow('Untitled', false)
     }
   }
+}
+
+export function deleteProject(id: string) {
+  return serializeProjectTransition(() => deleteProjectNow(id))
 }
 
 // ---------------------------------------------------------------------------
@@ -252,14 +332,16 @@ export async function saveCurrentAsShot() {
     rig: getRigSnapshot(),
     format: { aspect: editor.exportAspect, res: editor.exportRes, custom: editor.customSize },
     duration: useRigStore.getState().duration,
-    thumbnail: await captureThumbnail(),
+    // the clean cinema frame; falls back to the viewport grab if the render
+    // bridge is not ready yet
+    thumbnail: (await captureShotStill()) ?? (await captureThumbnail()),
   }
   project.addShot(shot)
   useSceneStore.getState().showNotice(`"${shot.name}" saved — open the Board to see it`)
 }
 
 export function loadShot(shot: Shot) {
-  applyRigSnapshot(shot.rig)
+  useCameraOptionsStore.getState().createOption(shot.name, shot.rig)
   const editor = useEditorStore.getState()
   editor.setExportAspect(shot.format.aspect)
   editor.setExportRes(shot.format.res)
@@ -278,34 +360,42 @@ export async function playAnimatic() {
   if (shots.length === 0) return
 
   const previousRig = getRigSnapshot()
+  clearTimeout(saveTimer)
+  autosaveSuspended = true
+  setHistorySuspended(true)
   const editor = useEditorStore.getState()
   editor.setAppView('editor')
   editor.select(null)
   editor.setPlayMode(true)
 
-  for (const shot of shots) {
-    if (!useEditorStore.getState().playMode) break // Esc exited
-    applyRigSnapshot({ ...shot.rig, loop: false })
-    const rig = useRigStore.getState()
-    rig.setT(0)
-    rig.setPlaying(true)
+  try {
+    for (const shot of shots) {
+      if (!useEditorStore.getState().playMode) break // Esc exited
+      applyRigSnapshot({ ...shot.rig, loop: false })
+      const rig = useRigStore.getState()
+      rig.setT(0)
+      rig.setPlaying(true)
 
-    await new Promise<void>((resolve) => {
-      const unsub = useRigStore.subscribe((s, prev) => {
-        if (prev.playing && !s.playing) finish()
+      await new Promise<void>((resolve) => {
+        const unsub = useRigStore.subscribe((s, prev) => {
+          if (prev.playing && !s.playing) finish()
+        })
+        const poll = setInterval(() => {
+          if (!useEditorStore.getState().playMode) finish()
+        }, 150)
+        const finish = () => {
+          unsub()
+          clearInterval(poll)
+          resolve()
+        }
       })
-      const poll = setInterval(() => {
-        if (!useEditorStore.getState().playMode) finish()
-      }, 150)
-      const finish = () => {
-        unsub()
-        clearInterval(poll)
-        resolve()
-      }
-    })
+    }
+  } finally {
+    useEditorStore.getState().setPlayMode(false)
+    useRigStore.getState().setPlaying(false)
+    applyRigSnapshot(previousRig)
+    autosaveSuspended = false
+    setHistorySuspended(false)
+    void saveActiveProject()
   }
-
-  useEditorStore.getState().setPlayMode(false)
-  useRigStore.getState().setPlaying(false)
-  applyRigSnapshot(previousRig)
 }

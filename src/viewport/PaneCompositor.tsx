@@ -5,8 +5,9 @@ import { useEditorStore } from '../state/useEditorStore'
 import { computeRects, leafList, useLayoutStore, type PaneView, type Rect } from '../state/useLayoutStore'
 import { editorOnlySet } from '../lib/editorOnly'
 import { cinemaCameraRef } from './rig/CinemaCamera'
-import { renderSceneRegion } from './RenderPasses'
+import { clearRegion, renderSceneRegion } from './RenderPasses'
 import { sceneBounds } from './SceneObjects'
+import { freeAreaRect, intersectRect, viewportInsets } from '../ui/viewportInsets'
 
 /** axis directions for the fixed views (slight y-bias so they don't read flat) */
 const VIEW_DIRS: Record<'front' | 'top' | 'right', [number, number, number]> = {
@@ -79,6 +80,9 @@ export function PaneCompositor() {
 
     const outline = editor.viewMode === 'outline'
     const rects = computeRects(root, { x: 0, y: 0, w: size.width, h: size.height }).leaves
+    // a camera pane is there to show the shot, so it must not be half-hidden
+    // behind a panel the way the spatial views can afford to be
+    const free = freeAreaRect(viewportInsets(editor.panelTab, size.width, true), size.height)
 
     // GL scissor uses bottom-up y; DOM rects are top-left
     const toGL = (r: Rect) => ({ x: r.x, y: size.height - (r.y + r.h), w: r.w, h: r.h })
@@ -86,8 +90,16 @@ export function PaneCompositor() {
     const cinema = cinemaCameraRef.current
 
     for (const leaf of leaves) {
-      const r = rects.get(leaf.id)
+      let r = rects.get(leaf.id)
       if (!r || r.w < 4 || r.h < 4) continue
+      if (leaf.view === 'camera' && leaf.id !== activePaneId) {
+        const visible = intersectRect(r, free)
+        if (visible.w >= 40 && visible.h >= 40) {
+          const full = toGL(r)
+          clearRegion(gl, scene as THREE.Scene, full.x, full.y, full.w, full.h)
+          r = visible
+        }
+      }
       const g = toGL(r)
       const aspect = r.w / Math.max(1, r.h)
 
@@ -115,7 +127,11 @@ export function PaneCompositor() {
         frameFixed(fixedCams[view], view, aspect)
         cam = fixedCams[view]
       }
-      if (!cam) continue
+      // no cinema camera yet (no path drawn): clear, don't leave stale pixels
+      if (!cam) {
+        clearRegion(gl, scene as THREE.Scene, g.x, g.y, g.w, g.h)
+        continue
+      }
 
       const restore: [THREE.Object3D, boolean][] = []
       editorOnlySet.forEach((obj) => {

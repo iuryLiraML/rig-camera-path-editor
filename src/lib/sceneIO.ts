@@ -15,6 +15,7 @@ import type { PrimitiveSpec } from './primitiveGeometry'
 import { useRigStore } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { useEditorStore } from '../state/useEditorStore'
+import { makeEmptyRigSnapshot, useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { idbDelete, idbGet, idbKeys, idbPut, STORES } from './idb'
 import { resetHistory } from './history'
 import type { ModelKey } from './keyframes'
@@ -52,7 +53,11 @@ function countTriangles(root: THREE.Object3D): number {
 }
 
 /** Imports a .glb/.gltf file as a new scene object and persists its buffer. */
-export async function importModelFile(file: File) {
+export async function importModelFile(file: File): Promise<{
+  objectId: string
+  objectName: string
+  byteSize: number
+} | null> {
   const scene = useSceneStore.getState()
   const name = file.name.replace(/\.(glb|gltf)$/i, '')
   scene.setImporting(1)
@@ -77,9 +82,11 @@ export async function importModelFile(file: File) {
     idbPut(STORES.buffers, buffer, object.id).catch((e) =>
       console.error('Failed to persist model buffer', e),
     )
+    return { objectId: object.id, objectName: object.name, byteSize: buffer.byteLength }
   } catch (error) {
     console.error('Failed to import model', error)
     scene.showNotice('Could not read this file — use a self-contained .glb')
+    return null
   } finally {
     useSceneStore.getState().setImporting(-1)
   }
@@ -183,18 +190,8 @@ export async function sweepOrphanBuffers(liveKeys: Set<string>) {
 
 /** Wipes the CURRENT project's scene and rig back to a fresh single shape. */
 export async function resetScene() {
-  useRigStore.setState({
-    duration: 6,
-    smoothness: 0.6,
-    loop: true,
-    lookAtMode: 'target',
-    target: [0, 1, 0],
-    roll: 0,
-    fov: 45,
-    playing: false,
-    t: 0,
-    progressKeys: [],
-  })
+  const emptyRig = makeEmptyRigSnapshot()
+  useRigStore.setState({ ...emptyRig, playing: false, t: 0 })
   usePathStore.setState({
     paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
     activePathId: CAMERA_PATH_ID,
@@ -202,6 +199,7 @@ export async function resetScene() {
     selectedHandle: 'none',
     drawPlaneY: 1.2,
   })
+  useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
   useSceneStore.setState({
     objects: [makeDefaultKnotObject()],
     bgColor: '#efc8c4',

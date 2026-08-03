@@ -1,14 +1,14 @@
-# ─────────────────────────────────────────────────────────────
-#  Secrets & environment — NEVER commit real keys/tokens.
-#  (Security policy: no API tokens/secrets in the repo or a deploy
-#   without Allie/Umberto's approval.)
-# ─────────────────────────────────────────────────────────────
-.env
-.env.*
-!.env.sample            # allow a placeholder-only sample if ever needed
-*.local
+# ── cloud-wip branch: versions the full app (frontend + server/) ──
+# Dependencies & build output
+node_modules/
+dist/
+*.tsbuildinfo
 
-# credentials / key material of any kind
+# Secrets / real env — NEVER commit. Templates (*.example) ARE tracked.
+.env
+.env.local
+.env.production
+.env.*.local
 *.pem
 *.key
 *.p12
@@ -16,62 +16,20 @@
 *.keystore
 *.jks
 id_rsa*
-*.crt
-secrets.*
-*secret*.json
 *credentials*.json
 *serviceaccount*.json
-.aws/
 .npmrc
 .netrc
-gha-creds-*.json
+.aws/
 
-# cloud / deploy tooling local state
+# Deploy/tooling local state & scratch
 .vercel/
 .netlify/
-.wrangler/
+.claude/
+.planning/
 
-# ─────────────────────────────────────────────────────────────
-#  Dependencies & build output
-# ─────────────────────────────────────────────────────────────
-node_modules/
-dist/
-dist-ssr/
-build/
-.cache/
-coverage/
-*.tsbuildinfo
-
-# ─────────────────────────────────────────────────────────────
-#  Logs & debug
-# ─────────────────────────────────────────────────────────────
-logs/
+# Logs & OS cruft
 *.log
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-
-# ─────────────────────────────────────────────────────────────
-#  OS & editor cruft
-# ─────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
-Desktop.ini
-.idea/
-.vscode/*
-!.vscode/extensions.json
-*.swp
-*.swo
-
-# ─────────────────────────────────────────────────────────────
-#  Project-internal, non-public working files
-# ─────────────────────────────────────────────────────────────
-.planning/
-docs/
-.claude/
-
-# in-progress cloud backend — kept out of the public frontend repo
-server/
-scripts/
-CONTEXT.md

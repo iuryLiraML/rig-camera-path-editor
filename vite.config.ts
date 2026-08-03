@@ -7,5 +7,12 @@ export default defineConfig({
   server: {
     // the project lives on a secondary drive where native fs events are unreliable
     watch: { usePolling: true, interval: 300 },
+    proxy: {
+      '/api': {
+        target: 'http://127.0.0.1:8787',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api/, ''),
+      },
+    },
   },
 })

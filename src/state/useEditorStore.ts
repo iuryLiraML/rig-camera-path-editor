@@ -7,7 +7,8 @@ export type ExportAspect = '16:9' | '1:1' | '9:16'
 export type ExportRes = 720 | 1080 | 'custom'
 export type QuickView = 'front' | 'top' | 'right'
 export type ViewMode = 'clay' | 'depth' | 'outline' | 'normals'
-export type AppView = 'editor' | 'board'
+export type AppView = 'projects' | 'editor' | 'board'
+export type PanelTab = 'design' | 'assistant'
 
 export type SelectableId =
   | 'light'
@@ -44,6 +45,9 @@ interface EditorState {
   showPreview: boolean
   /** PiP position/size — right/bottom in CSS px from those edges, fraction of viewport */
   pipRect: { right: number; bottom: number; fraction: number }
+  /** right panel tab — lifted out of the panel so the floating chrome can
+   *  derive the free viewport area from its width (see ui/viewportInsets.ts) */
+  panelTab: PanelTab
   /** settings dialog (API keys, model, guidelines) */
   showSettings: boolean
   /** incremented to ask the editor camera to frame the model (F) */
@@ -68,6 +72,7 @@ interface EditorState {
   toggleExportPass: (pass: ViewMode) => void
   setExportSize: (size: [number, number] | null) => void
   setShowPreview: (on: boolean) => void
+  setPanelTab: (tab: PanelTab) => void
   setPipRect: (rect: { right: number; bottom: number; fraction: number }) => void
   setShowSettings: (on: boolean) => void
   requestFrame: () => void
@@ -93,6 +98,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   exportSize: null,
   showPreview: true,
   pipRect: { right: 264, bottom: 192, fraction: 0.22 },
+  panelTab: 'design',
   showSettings: false,
   frameRequest: 0,
   viewRequest: null,
@@ -118,6 +124,7 @@ export const useEditorStore = create<EditorState>((set) => ({
     })),
   setExportSize: (exportSize) => set({ exportSize }),
   setShowPreview: (showPreview) => set({ showPreview }),
+  setPanelTab: (panelTab) => set({ panelTab }),
   setPipRect: (pipRect) => set({ pipRect }),
   setShowSettings: (showSettings) => set({ showSettings }),
   requestFrame: () => set((s) => ({ frameRequest: s.frameRequest + 1 })),

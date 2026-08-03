@@ -1,10 +1,11 @@
-import { useState } from 'react'
+
 import { useEditorStore, type ExportAspect, type ExportRes } from '../state/useEditorStore'
 import { AssistantPanel } from './AssistantPanel'
 import { defaultFollow, useSceneStore, type Vec3 } from '../state/useSceneStore'
-import { openRigImportDialog, useRigStore } from '../state/useRigStore'
+import { openRigImportDialog, useRigStore, type RigChannel } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
-import { evalProgress } from '../lib/keyframes'
+import { evalProgress, evalValue, evalVec3 } from '../lib/keyframes'
+import { easeGroups, easeDef, type EaseKind } from '../lib/easing'
 import { exportDimensions } from '../lib/recorder'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
 import { PRIMITIVE_DEFS } from '../lib/primitiveGeometry'
@@ -79,6 +80,107 @@ function KeyList({
 }
 
 const deg = (v: number) => `${Math.round(v)}°`
+
+/**
+ * The animation-curve picker, in the vocabulary of After Effects and Premiere:
+ * Penner families grouped by direction, with the shortlist that matters for a
+ * camera move on top. See lib/easing.ts for the bezier values and why.
+ */
+function EaseSelect({
+  value,
+  onChange,
+  title,
+}: {
+  value: EaseKind
+  onChange: (ease: EaseKind) => void
+  title?: string
+}) {
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as EaseKind)}
+      title={title ?? easeDef(value).hint}
+      className="w-full rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none focus:ring-1 focus:ring-accent"
+    >
+      {easeGroups().map((group) => (
+        <optgroup key={group.group} label={group.group}>
+          {group.items.map((item) => (
+            <option key={item.kind} value={item.kind}>
+              {item.label}
+            </option>
+          ))}
+        </optgroup>
+      ))}
+    </select>
+  )
+}
+
+/** the ◆ that pins the current value of a channel at the playhead */
+function KeyButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      title="Add a keyframe for this property at the playhead"
+      className={`shrink-0 text-[11px] leading-none transition-colors ${
+        active ? 'text-accent' : 'text-ink-dim hover:text-ink'
+      }`}
+    >
+      ◆
+    </button>
+  )
+}
+
+/**
+ * Keyframes of one channel, each with the curve used to leave it. A channel with
+ * no keys keeps its static value, so the first ◆ is what turns it into animation.
+ */
+function ChannelKeys({
+  channel,
+  keys,
+  duration,
+  format,
+}: {
+  channel: RigChannel
+  keys: { id: string; time: number; ease?: EaseKind }[]
+  duration: number
+  format: (key: { id: string; time: number }) => string
+}) {
+  const rig = useRigStore.getState()
+  if (keys.length === 0) return null
+  const sorted = [...keys].sort((a, b) => a.time - b.time)
+  return (
+    <div className="flex flex-col gap-1 pl-1">
+      {sorted.map((key, i) => (
+        <div key={key.id} className="rounded-md bg-panel-2/60 px-1.5 py-1">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] tabular-nums text-ink-dim">
+              {(key.time * duration).toFixed(1)}s
+            </span>
+            <span className="text-[10px] tabular-nums text-ink">{format(key)}</span>
+            <button
+              onClick={() => rig.removeChannelKey(channel, key.id)}
+              title="Delete keyframe"
+              className="ml-auto text-[11px] leading-none text-ink-dim hover:text-red-400"
+            >
+              ×
+            </button>
+          </div>
+          {/* the curve belongs to the segment leaving this key, so the last one
+              has nothing to ease into */}
+          {i < sorted.length - 1 && (
+            <div className="mt-1">
+              <EaseSelect
+                value={key.ease ?? useRigStore.getState().ease}
+                onChange={(ease) => rig.setKeyEase(channel, key.id, ease)}
+                title="Curve used to leave this keyframe"
+              />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
 
 function FollowSection({ objectId }: { objectId: string }) {
   const object = useSceneStore((s) => s.objects.find((o) => o.id === objectId))
@@ -500,7 +602,7 @@ function PathSections() {
 
 function CinemaCameraSections() {
   const duration = useRigStore((s) => s.duration)
-  const smoothness = useRigStore((s) => s.smoothness)
+  const ease = useRigStore((s) => s.ease)
   const loop = useRigStore((s) => s.loop)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
   const target = useRigStore((s) => s.target)
@@ -508,9 +610,18 @@ function CinemaCameraSections() {
   const fov = useRigStore((s) => s.fov)
   const t = useRigStore((s) => s.t)
   const progressKeys = useRigStore((s) => s.progressKeys)
+  const fovKeys = useRigStore((s) => s.fovKeys)
+  const rollKeys = useRigStore((s) => s.rollKeys)
+  const targetKeys = useRigStore((s) => s.targetKeys)
   const rig = useRigStore.getState()
 
-  const currentProgress = evalProgress(t, progressKeys, smoothness)
+  // a channel with keyframes shows its animated value at the playhead, so the
+  // slider always reflects what the camera is doing right now
+  const fovNow = evalValue(t, fovKeys, fov, ease)
+  const rollNow = evalValue(t, rollKeys, roll, ease)
+  const targetNow = evalVec3(t, targetKeys, target, ease)
+
+  const currentProgress = evalProgress(t, progressKeys, ease)
   const sortedKeys = [...progressKeys].sort((a, b) => a.time - b.time)
 
   return (
@@ -519,8 +630,8 @@ function CinemaCameraSections() {
         <Row label="Duration">
           <Slider value={duration} onChange={rig.setDuration} min={1} max={30} step={0.5} format={secs} />
         </Row>
-        <Row label="Smooth">
-          <Slider value={smoothness} onChange={rig.setSmoothness} format={pct} />
+        <Row label="Curve">
+          <EaseSelect value={ease} onChange={rig.setEase} />
         </Row>
         <Row label="Loop">
           <Segmented
@@ -534,6 +645,10 @@ function CinemaCameraSections() {
         </Row>
       </Section>
       <Section title="Keyframes">
+        <PanelButton
+          label="Path, presets & shape"
+          onClick={() => useEditorStore.getState().select(CAMERA_PATH_ID)}
+        />
         <div className="text-[10px] leading-relaxed text-ink-dim">
           Move the playhead, then drag the slider to pin where on the path the camera
           should be at that moment.
@@ -549,12 +664,13 @@ function CinemaCameraSections() {
             format={pct}
           />
         </Row>
-        <KeyList
-          items={sortedKeys.map((k) => ({
-            id: k.id,
-            label: `${(k.time * duration).toFixed(1)}s → ${Math.round(k.progress * 100)}% of path`,
-          }))}
-          onRemove={rig.removeProgressKey}
+        <ChannelKeys
+          channel="progress"
+          keys={sortedKeys}
+          duration={duration}
+          format={(k) =>
+            `${Math.round((sortedKeys.find((s) => s.id === k.id)?.progress ?? 0) * 100)}%`
+          }
         />
         {progressKeys.length > 0 && (
           <PanelButton label="Clear keyframes" tone="danger" onClick={rig.clearProgressKeys} />
@@ -562,11 +678,67 @@ function CinemaCameraSections() {
       </Section>
       <Section title="Lens">
         <Row label="FOV">
-          <Slider value={fov} onChange={rig.setFov} min={15} max={120} step={1} format={(v) => `${Math.round(v)}°`} />
+          <div className="flex items-center gap-2">
+            <Slider
+              value={fovNow}
+              onChange={(v) => {
+                const state = useRigStore.getState()
+                // editing an animated channel writes the keyframe at the
+                // playhead; editing a static one moves the static value
+                if (state.fovKeys.length > 0) state.upsertChannelKey('fov', state.t, v)
+                else state.setFov(v)
+              }}
+              min={15}
+              max={120}
+              step={1}
+              format={deg}
+            />
+            <KeyButton
+              active={fovKeys.length > 0}
+              onClick={() => {
+                const state = useRigStore.getState()
+                state.setPlaying(false)
+                state.upsertChannelKey('fov', state.t, fovNow)
+              }}
+            />
+          </div>
         </Row>
+        <ChannelKeys
+          channel="fov"
+          keys={fovKeys}
+          duration={duration}
+          format={(k) => deg(fovKeys.find((x) => x.id === k.id)?.value ?? 0)}
+        />
         <Row label="Roll">
-          <Slider value={roll} onChange={rig.setRoll} min={-180} max={180} step={1} format={(v) => `${Math.round(v)}°`} />
+          <div className="flex items-center gap-2">
+            <Slider
+              value={rollNow}
+              onChange={(v) => {
+                const state = useRigStore.getState()
+                if (state.rollKeys.length > 0) state.upsertChannelKey('roll', state.t, v)
+                else state.setRoll(v)
+              }}
+              min={-180}
+              max={180}
+              step={1}
+              format={deg}
+            />
+            <KeyButton
+              active={rollKeys.length > 0}
+              onClick={() => {
+                const state = useRigStore.getState()
+                state.setPlaying(false)
+                state.upsertChannelKey('roll', state.t, rollNow)
+              }}
+            />
+          </div>
         </Row>
+        <ChannelKeys
+          channel="roll"
+          keys={rollKeys}
+          duration={duration}
+          format={(k) => deg(rollKeys.find((x) => x.id === k.id)?.value ?? 0)}
+        />
       </Section>
       <CameraFormatSection />
       <Section title="Look At">
@@ -581,16 +753,39 @@ function CinemaCameraSections() {
           />
         </Row>
         {lookAtMode === 'target' && (
-          <Row label="Target">
-            <XYZInput
-              value={target}
-              onChange={(axis, v) => {
-                const next = [...target] as Vec3
-                next[axis] = v
-                rig.setTarget(next)
+          <>
+            <Row label="Target">
+              <div className="flex items-center gap-2">
+                <XYZInput
+                  value={targetNow}
+                  onChange={(axis, v) => {
+                    const state = useRigStore.getState()
+                    const next = [...targetNow] as Vec3
+                    next[axis] = v
+                    if (state.targetKeys.length > 0) state.upsertTargetKey(state.t, next)
+                    else state.setTarget(next)
+                  }}
+                />
+                <KeyButton
+                  active={targetKeys.length > 0}
+                  onClick={() => {
+                    const state = useRigStore.getState()
+                    state.setPlaying(false)
+                    state.upsertTargetKey(state.t, targetNow)
+                  }}
+                />
+              </div>
+            </Row>
+            <ChannelKeys
+              channel="target"
+              keys={targetKeys}
+              duration={duration}
+              format={(k) => {
+                const v = targetKeys.find((x) => x.id === k.id)?.value
+                return v ? v.map((n) => n.toFixed(1)).join(', ') : ''
               }}
             />
-          </Row>
+          </>
         )}
       </Section>
     </>
@@ -688,9 +883,40 @@ function SceneSections() {
   const setBgColor = useSceneStore((s) => s.setBgColor)
   const showGrid = useSceneStore((s) => s.showGrid)
   const setShowGrid = useSceneStore((s) => s.setShowGrid)
+  const hasCameraPath = usePathStore(
+    (s) => (s.paths.find((path) => path.id === CAMERA_PATH_ID)?.anchors.length ?? 0) >= 2,
+  )
 
   return (
-    <Section title="Scene">
+    <>
+      {/* The ready-made moves and the path options only existed under the
+          "Camera Path" item in the outliner, so with nothing selected — where you
+          land — there was no sign the app could build a move for you. */}
+      <Section title="Camera move">
+        <div className="grid grid-cols-2 gap-1">
+          {PRESETS.map((preset) => (
+            <button
+              key={preset.kind}
+              onClick={() => {
+                applyCameraPreset(preset.kind)
+                useEditorStore.getState().select(CAMERA_PATH_ID)
+              }}
+              title={preset.hint}
+              className="rounded-md bg-panel-2 px-2 py-1.5 text-[11px] text-ink hover:bg-panel-3"
+            >
+              {preset.label}
+            </button>
+          ))}
+        </div>
+        <PanelButton
+          label={hasCameraPath ? 'Path options & keyframes' : 'Draw a path (P)'}
+          onClick={() => {
+            if (hasCameraPath) useEditorStore.getState().select(CAMERA_PATH_ID)
+            else useEditorStore.getState().setTool('pen')
+          }}
+        />
+      </Section>
+      <Section title="Scene">
       <Row label="Background">
         <ColorField value={bgColor} onChange={setBgColor} />
       </Row>
@@ -704,14 +930,16 @@ function SceneSections() {
           onChange={(v) => setShowGrid(v === 'show')}
         />
       </Row>
-    </Section>
+      </Section>
+    </>
   )
 }
 
 export function RightPanel() {
   const selection = useEditorStore((s) => s.selection)
   const tool = useEditorStore((s) => s.tool)
-  const [tab, setTab] = useState<'design' | 'assistant'>('design')
+  const tab = useEditorStore((s) => s.panelTab)
+  const setTab = useEditorStore((s) => s.setPanelTab)
 
   return (
     <div

@@ -12,19 +12,29 @@ import { Timeline } from '../ui/Timeline'
 import { OnboardingCard } from '../ui/OnboardingCard'
 import { CameraPreviewFrame } from '../ui/CameraPreviewFrame'
 import { AreaLayer } from '../ui/AreaLayer'
+import { viewportInsets } from '../ui/viewportInsets'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { BoardView } from '../ui/BoardView'
+import { BatchGeneratePanel } from '../ui/BatchGeneratePanel'
+import { ProjectIntakeWorkspace } from '../ui/ProjectIntakeWorkspace'
+import { ProjectsWorkspace } from '../ui/ProjectsWorkspace'
 import { cancelRecording, isRecording } from '../lib/recorder'
 import { redo, undo } from '../lib/history'
 import { importModelFile } from '../lib/sceneIO'
+import { nextRequiredProjectAction } from '../lib/projectWorkflow'
+import { useProjectStore } from '../state/useProjectStore'
 
 function ViewSwitcher() {
   const appView = useEditorStore((s) => s.appView)
   const setAppView = useEditorStore((s) => s.setAppView)
   return (
-    <div className="panel absolute left-[244px] top-3 z-40 flex items-center gap-0.5 px-1 py-1">
+    <div
+      className="panel absolute top-3 z-40 flex items-center gap-0.5 px-1 py-1"
+      style={{ left: viewportInsets('design', 0, true).left }}
+    >
       {(
         [
+          { value: 'projects', label: 'Projects' },
           { value: 'editor', label: 'Editor' },
           { value: 'board', label: 'Board' },
         ] as const
@@ -144,7 +154,7 @@ function useShortcuts() {
   }, [])
 }
 
-export function App() {
+function EditorWorkspace() {
   const notice = useSceneStore((s) => s.notice)
   const importing = useSceneStore((s) => s.importing)
   const showNotice = useSceneStore((s) => s.showNotice)
@@ -197,12 +207,11 @@ export function App() {
           <OnboardingCard />
           <CameraPreviewFrame />
           <ViewSwitcher />
+          <BatchGeneratePanel />
         </>
       )}
 
       {appView === 'board' && !playMode && <BoardView />}
-
-      <SettingsDialog />
 
       {playMode && !recording && (
         <button
@@ -249,5 +258,37 @@ export function App() {
         </div>
       )}
     </div>
+  )
+}
+
+export function App() {
+  const booted = useProjectStore((state) => state.booted)
+  const workflow = useProjectStore((state) => state.workflow)
+  const appView = useEditorStore((state) => state.appView)
+
+  if (!booted) {
+    return (
+      <main
+        aria-busy="true"
+        className="flex h-full items-center justify-center bg-[#0f0f11] text-sm text-ink-dim"
+      >
+        Loading projects…
+      </main>
+    )
+  }
+
+  // Settings lives at the root so "Open Settings" works from every view
+  // (the intake steps need it to configure the AI provider key).
+  return (
+    <>
+      {appView === 'projects' ? (
+        <ProjectsWorkspace />
+      ) : nextRequiredProjectAction(workflow) !== 'editor' ? (
+        <ProjectIntakeWorkspace />
+      ) : (
+        <EditorWorkspace />
+      )}
+      <SettingsDialog />
+    </>
   )
 }

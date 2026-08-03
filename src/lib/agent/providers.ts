@@ -22,7 +22,7 @@ export type AgentMessage =
   | { role: 'assistant'; text: string; toolCalls: ToolCall[] }
   | { role: 'tool'; toolCallId: string; name: string; content: string }
 
-export type ProviderKind = 'anthropic' | 'openrouter' | 'zai'
+export type ProviderKind = 'anthropic' | 'kimi'
 
 export interface ProviderConfig {
   kind: ProviderKind
@@ -32,17 +32,59 @@ export interface ProviderConfig {
   vision: boolean
 }
 
-export const PROVIDERS: Record<ProviderKind, { label: string; defaultModel: string; keyHint: string }> = {
-  anthropic: { label: 'Anthropic', defaultModel: 'claude-sonnet-5', keyHint: 'sk-ant-…' },
-  openrouter: { label: 'OpenRouter', defaultModel: 'z-ai/glm-4.6', keyHint: 'sk-or-…' },
-  zai: { label: 'z.ai', defaultModel: 'glm-5.2', keyHint: 'z.ai API key' },
+export interface ModelOption {
+  id: string
+  label: string
 }
 
-// vision-capable model id patterns per provider (z.ai only *V models; GLM-5.2 is text-only)
+export const PROVIDERS: Record<ProviderKind, { label: string; defaultModel: string; keyHint: string }> = {
+  anthropic: { label: 'Anthropic', defaultModel: 'claude-sonnet-5', keyHint: 'sk-ant-…' },
+  kimi: { label: 'Kimi', defaultModel: 'kimi-k3', keyHint: 'Moonshot API key' },
+}
+
+/** Return models usable with the selected provider and account. */
+export async function listProviderModels(
+  kind: ProviderKind,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ModelOption[]> {
+  if (!apiKey.trim()) return []
+
+  if (kind === 'anthropic') {
+    const res = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+      signal,
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+    })
+    if (!res.ok) throw new Error(`Unable to load Anthropic models (${res.status})`)
+    const body = (await res.json()) as { data?: { id?: string; display_name?: string }[] }
+    return (body.data ?? [])
+      .filter((model): model is { id: string; display_name?: string } => Boolean(model.id))
+      .map((model) => ({ id: model.id, label: model.display_name || model.id }))
+  }
+
+  // Kimi (Moonshot) is OpenAI-compatible, so /v1/models returns the live list
+  const res = await fetch('https://api.moonshot.ai/v1/models', {
+    signal,
+    headers: { authorization: `Bearer ${apiKey}` },
+  })
+  if (!res.ok) throw new Error(`Unable to load Kimi models (${res.status})`)
+  const body = (await res.json()) as { data?: { id?: string }[] }
+  return (body.data ?? [])
+    .filter((model): model is { id: string } => Boolean(model.id))
+    .map((model) => ({ id: model.id, label: model.id }))
+    .sort((a, b) => a.label.localeCompare(b.label))
+}
+
+// Vision-capable model id patterns per provider. Kept conservative: 'Auto' only
+// sends the screenshot when the id clearly advertises vision, because a
+// text-only model rejects image parts with a 400.
 const VISION_PATTERNS: Record<ProviderKind, RegExp> = {
   anthropic: /claude/i,
-  openrouter: /claude|gpt-4o|gpt-4\.1|gpt-5|gemini|pixtral|llava|vision|-vl|(\d)v\b|4\.5v|4\.6v|5v/i,
-  zai: /v-?turbo|vl|vision|\dv\b|4\.5v|4\.6v|5v/i,
+  kimi: /vision|-vl\b|latest/i,
 }
 
 /** Heuristic: does this model accept image input? Used by the Auto screenshot mode. */
@@ -59,6 +101,8 @@ interface TurnResult {
 export interface AgentEvents {
   onText?: (delta: string) => void
   onToolResult?: (name: string, result: string) => void
+  onTurn?: (turn: number, maxTurns: number) => void
+  onCheckpoint?: (messages: AgentMessage[]) => void
 }
 
 // ---------------------------------------------------------------------------
@@ -180,8 +224,7 @@ async function anthropicTurn(
 // ---------------------------------------------------------------------------
 
 const OPENAI_ENDPOINTS: Record<Exclude<ProviderKind, 'anthropic'>, string> = {
-  openrouter: 'https://openrouter.ai/api/v1/chat/completions',
-  zai: 'https://api.z.ai/api/paas/v4/chat/completions',
+  kimi: 'https://api.moonshot.ai/v1/chat/completions',
 }
 
 function toOpenAIMessages(system: string, messages: AgentMessage[], vision: boolean) {
@@ -229,11 +272,6 @@ async function openaiTurn(
     'content-type': 'application/json',
     authorization: `Bearer ${cfg.apiKey}`,
   }
-  if (cfg.kind === 'openrouter') {
-    headers['HTTP-Referer'] = location.origin
-    headers['X-Title'] = 'Rig'
-  }
-
   const res = await fetch(endpoint, {
     method: 'POST',
     signal,
@@ -327,12 +365,17 @@ export async function runAgent(opts: {
   signal?: AbortSignal
   events?: AgentEvents
   maxTurns?: number
-}): Promise<AgentMessage[]> {
+}): Promise<{
+  messages: AgentMessage[]
+  outcome: 'completed' | 'interrupted' | 'exhausted'
+  turns: number
+}> {
   const messages = [...opts.messages]
-  const maxTurns = opts.maxTurns ?? 8
+  const maxTurns = opts.maxTurns ?? 32
   const turn = opts.provider.kind === 'anthropic' ? anthropicTurn : openaiTurn
 
   for (let i = 0; i < maxTurns; i++) {
+    opts.events?.onTurn?.(i + 1, maxTurns)
     const { text, toolCalls, stopReason } = await turn(
       opts.provider,
       opts.system,
@@ -341,8 +384,18 @@ export async function runAgent(opts: {
       opts.signal,
       opts.events,
     )
+    if (stopReason !== 'tool_use' || toolCalls.length === 0) {
+      // A token/provider interruption may leave a partial tool call. Do not
+      // persist it without a matching tool result; the continuation will retry.
+      messages.push({ role: 'assistant', text, toolCalls: [] })
+      const completedNormally = stopReason === 'stop' || stopReason === 'end_turn'
+      return {
+        messages,
+        outcome: completedNormally ? 'completed' : 'interrupted',
+        turns: i + 1,
+      }
+    }
     messages.push({ role: 'assistant', text, toolCalls })
-    if (stopReason !== 'tool_use' || toolCalls.length === 0) break
 
     for (const tc of toolCalls) {
       let result: string
@@ -354,7 +407,8 @@ export async function runAgent(opts: {
       opts.events?.onToolResult?.(tc.name, result)
       messages.push({ role: 'tool', toolCallId: tc.id, name: tc.name, content: result })
     }
+    opts.events?.onCheckpoint?.([...messages])
   }
 
-  return messages
+  return { messages, outcome: 'exhausted', turns: maxTurns }
 }

@@ -3,7 +3,10 @@ import { useEditorStore, type SelectableId } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { evalProgress } from '../lib/keyframes'
+import { evalProgress, evalValue, evalVec3 } from '../lib/keyframes'
+import { applyCameraPreset, PRESETS } from '../lib/presets'
+import { CAMERA_CHANNELS } from './cameraChannels'
+import { GUTTER, useViewportInsets } from './viewportInsets'
 import { saveCurrentAsShot } from '../lib/projects'
 import { PlayIcon } from './icons'
 
@@ -145,15 +148,57 @@ export function Timeline() {
   const duration = useRigStore((s) => s.duration)
   const loop = useRigStore((s) => s.loop)
   const progressKeys = useRigStore((s) => s.progressKeys)
-  const smoothness = useRigStore((s) => s.smoothness)
+  const fovKeys = useRigStore((s) => s.fovKeys)
+  const rollKeys = useRigStore((s) => s.rollKeys)
+  const targetKeys = useRigStore((s) => s.targetKeys)
   const objects = useSceneStore((s) => s.objects)
   const paths = usePathStore((s) => s.paths)
   const playMode = useEditorStore((s) => s.playMode)
 
+  const insets = useViewportInsets()
   const scrubbing = useRef(false)
   const areaRef = useRef<HTMLDivElement>(null)
 
-  if (!hasPath || playMode) return null
+  if (playMode) return null
+
+  // Without a camera path there is nothing to scrub, but hiding the whole dock
+  // left the editor with no visible transport or keyframe controls at all — show
+  // the empty state with the one-click ways to create a path instead.
+  if (!hasPath) {
+    return (
+      <div
+        className="panel absolute z-20 flex items-center justify-between gap-4 px-3 py-3"
+        style={{ left: insets.left, width: insets.right - insets.left, bottom: GUTTER, height: TIMELINE_HEIGHT }}
+      >
+        <div className="min-w-0">
+          <p className="text-[11px] font-medium text-ink">No camera path yet</p>
+          <p className="mt-1 text-[10px] leading-4 text-ink-dim">
+            The timeline, keyframes and video export need a path. Pick a ready-made move or draw
+            your own with the pen tool (P).
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+          {PRESETS.map((preset) => (
+            <button
+              key={preset.kind}
+              onClick={() => applyCameraPreset(preset.kind)}
+              title={preset.hint}
+              className="rounded-md bg-panel-2 px-2.5 py-1 text-[11px] text-ink hover:bg-panel-3"
+            >
+              {preset.label}
+            </button>
+          ))}
+          <button
+            onClick={() => useEditorStore.getState().setTool('pen')}
+            title="Draw the camera path by clicking in the viewport"
+            className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent/85"
+          >
+            Draw path (P)
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   const rig = useRigStore.getState()
   const scene = useSceneStore.getState()
@@ -171,8 +216,8 @@ export function Timeline() {
 
   return (
     <div
-      className="panel absolute bottom-3 left-[244px] right-[252px] z-20 flex flex-col px-3 py-2"
-      style={{ height: TIMELINE_HEIGHT }}
+      className="panel absolute z-20 flex flex-col px-3 py-2"
+      style={{ left: insets.left, width: insets.right - insets.left, bottom: GUTTER, height: TIMELINE_HEIGHT }}
     >
       {/* transport */}
       <div className="flex items-center gap-2 pb-1.5">
@@ -197,16 +242,18 @@ export function Timeline() {
         >
           Loop
         </button>
-        <span className="ml-auto text-[10px] text-ink-dim">
-          Drag keyframes to retime · double-click to delete
-        </span>
-        <button
-          onClick={() => void saveCurrentAsShot()}
-          title="Snapshot this camera move as a shot on the Board"
-          className="rounded-md bg-panel-2 px-2.5 py-1 text-[11px] text-ink hover:bg-panel-3"
-        >
-          Save shot
-        </button>
+        <div className="ml-auto flex min-w-0 items-center gap-2">
+          <span className="hidden truncate text-[10px] text-ink-dim xl:block">
+            Drag keyframes to retime · double-click to delete
+          </span>
+          <button
+            onClick={() => void saveCurrentAsShot()}
+            title="Snapshot this camera move as a shot on the Board"
+            className="shrink-0 rounded-md bg-panel-2 px-2.5 py-1 text-[11px] text-ink hover:bg-panel-3"
+          >
+            Save shot
+          </button>
+        </div>
       </div>
 
       {/* ruler + tracks share one aligned area */}
@@ -271,11 +318,54 @@ export function Timeline() {
               const state = useRigStore.getState()
               state.upsertProgressKey(
                 state.t,
-                evalProgress(state.t, state.progressKeys, smoothness),
+                evalProgress(state.t, state.progressKeys, state.ease),
               )
             }}
             addTitle="Pin the camera's path position at the playhead"
           />
+          {/* Lens and framing channels appear once they are animated — the ◆ next
+              to FOV, Roll and Target in the right panel creates the first key,
+              the same way a property gets a track in After Effects. */}
+          {CAMERA_CHANNELS.map((channel) => {
+            const keys = channel.pick({ fovKeys, rollKeys, targetKeys })
+            if (keys.length === 0) return null
+            return (
+              <Track
+                key={channel.id}
+                label={channel.label}
+                selectId="cinema-camera"
+                color="#60a5fa"
+                note={channel.note}
+                keys={keys.map((k) => ({
+                  id: k.id,
+                  time: k.time,
+                  title: `${(k.time * duration).toFixed(1)}s — ${channel.label} ${channel.describe(k)}`,
+                }))}
+                onMove={(keyId, time) =>
+                  useRigStore.getState().updateChannelKeyTime(channel.id, keyId, time)
+                }
+                onDelete={(keyId) => useRigStore.getState().removeChannelKey(channel.id, keyId)}
+                onAdd={() => {
+                  const state = useRigStore.getState()
+                  if (channel.id === 'target') {
+                    state.upsertTargetKey(
+                      state.t,
+                      evalVec3(state.t, state.targetKeys, state.target, state.ease),
+                    )
+                  } else {
+                    const from = channel.id === 'fov' ? state.fovKeys : state.rollKeys
+                    const fallback = channel.id === 'fov' ? state.fov : state.roll
+                    state.upsertChannelKey(
+                      channel.id,
+                      state.t,
+                      evalValue(state.t, from, fallback, state.ease),
+                    )
+                  }
+                }}
+                addTitle={`Add a ${channel.label} keyframe at the playhead`}
+              />
+            )
+          })}
           {objects.map((object) => {
             const followName = object.follow
               ? object.follow.pathId === CAMERA_PATH_ID

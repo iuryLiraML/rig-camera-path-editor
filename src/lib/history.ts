@@ -10,13 +10,16 @@ function capture() {
   return {
     rig: {
       duration: r.duration,
-      smoothness: r.smoothness,
+      ease: r.ease,
       loop: r.loop,
       lookAtMode: r.lookAtMode,
       target: r.target,
       roll: r.roll,
       fov: r.fov,
       progressKeys: r.progressKeys,
+      fovKeys: r.fovKeys,
+      rollKeys: r.rollKeys,
+      targetKeys: r.targetKeys,
     },
     paths: {
       paths: p.paths,
@@ -49,6 +52,7 @@ let future: Snapshot[] = []
 let current: Snapshot
 let currentJson = ''
 let applying = false
+let suspended = false
 let commitTimer: ReturnType<typeof setTimeout> | undefined
 
 function apply(snapshot: Snapshot) {
@@ -64,7 +68,7 @@ function apply(snapshot: Snapshot) {
 }
 
 function onStoreChange() {
-  if (applying) return
+  if (applying || suspended) return
   // nothing user-driven changes while the animation is playing
   if (useRigStore.getState().playing) return
   clearTimeout(commitTimer)
@@ -87,6 +91,14 @@ export function resetHistory() {
   currentJson = JSON.stringify(current)
   past = []
   future = []
+}
+
+export function setHistorySuspended(value: boolean) {
+  suspended = value
+  if (!value) {
+    current = capture()
+    currentJson = JSON.stringify(current)
+  }
 }
 
 let subscribed = false

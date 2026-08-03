@@ -12,6 +12,11 @@ import { objectGroups } from '../../viewport/SceneObjects'
 import { renderBridge } from '../renderBridge'
 import type { ExportAspect, ExportRes } from '../../state/useEditorStore'
 import type { PrimitiveKind } from '../primitiveGeometry'
+import {
+  beginGeneratedCameraOption,
+  getCameraOptionsSnapshot,
+  useCameraOptionsStore,
+} from '../../state/useCameraOptionsStore'
 
 const vec3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
 
@@ -23,6 +28,32 @@ export const TOOL_DEFS: ToolDef[] = [
       type: 'object',
       properties: { name: { type: 'string', description: 'Skill name from the index in the system prompt' } },
       required: ['name'],
+    },
+  },
+  {
+    name: 'begin_camera_option',
+    description:
+      'Start a new named camera alternative without replacing existing cameras. Call this before building EACH option when the user requests alternatives.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Short descriptive camera name, e.g. "Low Chase", "Hero Orbit", or "Top Flyover"',
+        },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'switch_camera_option',
+    description: 'Select an existing named camera option so it can be viewed or edited.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        camera_id: { type: 'string', description: 'Camera option id from scene_state.camera_options' },
+      },
+      required: ['camera_id'],
     },
   },
   {
@@ -186,6 +217,11 @@ const asVec3 = (v: unknown): Vec3 => {
   return [Number(a[0]) || 0, Number(a[1]) || 0, Number(a[2]) || 0]
 }
 
+const commitActiveCamera = (result: string) => {
+  useCameraOptionsStore.getState().captureActive()
+  return result
+}
+
 const EXECUTORS: Record<string, Executor> = {
   load_skill: (input) => {
     const name = String(input.name)
@@ -203,11 +239,33 @@ const EXECUTORS: Record<string, Executor> = {
     return `Unknown skill "${name}". Available: ${names.join(', ')}.`
   },
 
+  begin_camera_option: (input) => {
+    const name = String(input.name ?? '').trim()
+    if (name.length < 3 || /^camera(?:\s+\d+)?$/i.test(name)) {
+      return 'Choose a descriptive camera name such as "Low Chase", "Hero Orbit", or "Top Flyover".'
+    }
+    const option = beginGeneratedCameraOption(name)
+    useEditorStore.getState().select('cinema-camera')
+    return `Started camera option "${option.name}" (id ${option.id}). Build its path, timing, look-at, and lens now.`
+  },
+
+  switch_camera_option: (input) => {
+    const cameras = useCameraOptionsStore.getState()
+    const id = String(input.camera_id)
+    const option = cameras.options.find((candidate) => candidate.id === id)
+    if (!option) return `No camera option with id "${id}".`
+    cameras.switchOption(id)
+    useEditorStore.getState().select('cinema-camera')
+    return `Selected camera option "${option.name}".`
+  },
+
   apply_camera_preset: (input) => {
     applyCameraPreset(input.kind as PresetKind)
     const rig = useRigStore.getState()
     const cam = usePathStore.getState().getPath(CAMERA_PATH_ID)
-    return `Applied "${input.kind}" preset: ${cam?.anchors.length ?? 0} anchors, closed=${cam?.closed ?? false}, target=${rig.target.map((n) => n.toFixed(1)).join(',')}.`
+    return commitActiveCamera(
+      `Applied "${input.kind}" preset: ${cam?.anchors.length ?? 0} anchors, closed=${cam?.closed ?? false}, target=${rig.target.map((n) => n.toFixed(1)).join(',')}.`,
+    )
   },
 
   set_camera_path: (input) => {
@@ -218,7 +276,7 @@ const EXECUTORS: Record<string, Executor> = {
     path.setActivePath(CAMERA_PATH_ID)
     path.setPath(anchors, Boolean(input.closed))
     usePathStore.getState().setActivePath(prevActive)
-    return `Camera path set: ${anchors.length} anchors, closed=${Boolean(input.closed)}.`
+    return commitActiveCamera(`Camera path set: ${anchors.length} anchors, closed=${Boolean(input.closed)}.`)
   },
 
   set_path_params: (input) => {
@@ -233,7 +291,7 @@ const EXECUTORS: Record<string, Executor> = {
     if (typeof input.smoothness === 'number') (rig.setSmoothness(input.smoothness), changed.push(`smoothness=${input.smoothness}`))
     if (typeof input.loop === 'boolean') (rig.setLoop(input.loop), changed.push(`loop=${input.loop}`))
     usePathStore.getState().setActivePath(prevActive)
-    return changed.length ? `Updated ${changed.join(', ')}.` : 'Nothing to change.'
+    return commitActiveCamera(changed.length ? `Updated ${changed.join(', ')}.` : 'Nothing to change.')
   },
 
   set_camera_keyframes: (input) => {
@@ -241,14 +299,16 @@ const EXECUTORS: Record<string, Executor> = {
     rig.clearProgressKeys()
     const keys = input.keys as { time: number; progress: number }[]
     keys.forEach((k) => rig.upsertProgressKey(k.time, k.progress))
-    return `Set ${keys.length} camera keyframes.`
+    return commitActiveCamera(`Set ${keys.length} camera keyframes.`)
   },
 
   set_look_at: (input) => {
     const rig = useRigStore.getState()
     rig.setLookAtMode(input.mode === 'motion' ? 'path-tangent' : 'target')
     if (input.mode === 'target' && input.target) rig.setTarget(asVec3(input.target))
-    return `Look-at: ${input.mode}${input.target ? ` @ ${asVec3(input.target).join(',')}` : ''}.`
+    return commitActiveCamera(
+      `Look-at: ${input.mode}${input.target ? ` @ ${asVec3(input.target).join(',')}` : ''}.`,
+    )
   },
 
   set_lens: (input) => {
@@ -256,7 +316,7 @@ const EXECUTORS: Record<string, Executor> = {
     const changed: string[] = []
     if (typeof input.fov === 'number') (rig.setFov(input.fov), changed.push(`fov=${input.fov}`))
     if (typeof input.roll === 'number') (rig.setRoll(input.roll), changed.push(`roll=${input.roll}`))
-    return changed.length ? `Lens: ${changed.join(', ')}.` : 'Nothing to change.'
+    return commitActiveCamera(changed.length ? `Lens: ${changed.join(', ')}.` : 'Nothing to change.')
   },
 
   pose_object: (input) => {
@@ -356,6 +416,8 @@ export function buildSceneContext(): string {
   const rig = useRigStore.getState()
   const camPath = usePathStore.getState().getPath(CAMERA_PATH_ID)
   const editor = useEditorStore.getState()
+  const cameraOptions = getCameraOptionsSnapshot()
+  const activeCameraOptionId = useCameraOptionsStore.getState().activeOptionId
 
   const box = new THREE.Box3()
   const size = new THREE.Vector3()
@@ -387,11 +449,18 @@ export function buildSceneContext(): string {
   return JSON.stringify(
     {
       objects,
+      camera_options: cameraOptions.map((option) => ({
+        id: option.id,
+        name: option.name,
+        active: option.id === activeCameraOptionId,
+        anchors: option.rig.anchors.length,
+        duration_s: option.rig.duration,
+      })),
       camera_rig: {
         anchors: (camPath?.anchors ?? []).map((a) => a.position.map((n) => +n.toFixed(2))),
         closed: camPath?.closed ?? false,
         duration_s: rig.duration,
-        smoothness: rig.smoothness,
+        default_curve: rig.ease,
         rounding: camPath?.rounding ?? 0.8,
         loop: rig.loop,
         camera_keyframes: rig.progressKeys.map((k) => ({ time: +k.time.toFixed(2), progress: +k.progress.toFixed(2) })),

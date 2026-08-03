@@ -6,6 +6,8 @@ import { createProject, deleteProject, switchProject } from '../lib/projects'
 import { useProjectStore } from '../state/useProjectStore'
 import { useRigStore } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
+import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
+import { generateRacingDroneCameras } from '../lib/cameraBatch/generateRacingDroneCameras'
 import {
   BookIcon,
   CameraIcon,
@@ -14,6 +16,7 @@ import {
   ImportIcon,
   MenuIcon,
   PenIcon,
+  PlusIcon,
   SearchIcon,
   SunIcon,
   TargetIcon,
@@ -68,6 +71,84 @@ function PathTreeItem({ id, name }: { id: string; name: string }) {
       </span>
       <span className="truncate">{name}</span>
     </button>
+  )
+}
+
+function CameraOptionItem({ id, name }: { id: string; name: string }) {
+  const activeOptionId = useCameraOptionsStore((s) => s.activeOptionId)
+  const canRemove = useCameraOptionsStore((s) => s.options.length > 1)
+  const selection = useEditorStore((s) => s.selection)
+  const active = id === activeOptionId
+  const selected = active && selection === 'cinema-camera'
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(name)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    setDraft(name)
+  }, [name])
+
+  useEffect(() => {
+    if (editing) inputRef.current?.select()
+  }, [editing])
+
+  return (
+    <div
+      className={`group flex w-full items-center gap-1 rounded-md px-1 py-0.5 ${
+        selected ? 'bg-accent text-white' : active ? 'bg-panel-2 text-ink' : 'text-ink hover:bg-panel-2'
+      }`}
+    >
+      <button
+        onClick={() => {
+          useCameraOptionsStore.getState().switchOption(id)
+          useEditorStore.getState().select('cinema-camera')
+        }}
+        onDoubleClick={() => setEditing(true)}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left text-xs"
+        title={name}
+      >
+        <span className={selected ? 'text-white' : 'text-ink-dim'}>
+          <CameraIcon />
+        </span>
+        {editing ? (
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onClick={(e) => e.stopPropagation()}
+            onBlur={() => {
+              setEditing(false)
+              useCameraOptionsStore.getState().renameOption(id, draft)
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.currentTarget.blur()
+              } else if (e.key === 'Escape') {
+                setDraft(name)
+                setEditing(false)
+              }
+            }}
+            className={`w-full bg-transparent outline-none ${selected ? 'text-white' : 'text-ink'}`}
+          />
+        ) : (
+          <span className="truncate">{name}</span>
+        )}
+      </button>
+      {canRemove && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            useCameraOptionsStore.getState().removeOption(id)
+          }}
+          className={`shrink-0 rounded px-1 text-[10px] opacity-0 group-hover:opacity-100 ${
+            selected ? 'text-white/80 hover:bg-white/15' : 'text-ink-dim hover:bg-panel hover:text-ink'
+          }`}
+          title="Remove camera"
+        >
+          ×
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -145,7 +226,9 @@ function ProjectMenu() {
                   key={p.id}
                   onClick={() => {
                     closeMenu()
-                    void switchProject(p.id)
+                    void switchProject(p.id).catch(() =>
+                      useSceneStore.getState().showNotice('Project could not be opened'),
+                    )
                   }}
                   className={`${item} ${p.id === projectId ? 'text-accent' : ''}`}
                 >
@@ -158,7 +241,9 @@ function ProjectMenu() {
           <button
             onClick={() => {
               closeMenu()
-              void createProject()
+              void createProject().catch(() =>
+                useSceneStore.getState().showNotice('Project could not be created'),
+              )
             }}
             className={item}
           >
@@ -186,7 +271,9 @@ function ProjectMenu() {
                 return
               }
               closeMenu()
-              void deleteProject(projectId)
+              void deleteProject(projectId).catch(() =>
+                useSceneStore.getState().showNotice('Project could not be deleted'),
+              )
             }}
             className={`w-full rounded-md px-2 py-1.5 text-left text-[11px] ${
               confirming === 'delete' ? 'bg-red-500/15 text-red-400' : 'text-ink hover:bg-panel-2'
@@ -227,6 +314,7 @@ export function LeftPanel() {
   const hasPath = usePathStore(selectCameraAnchorCount) > 0
   const paths = usePathStore((s) => s.paths)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
+  const cameraOptions = useCameraOptionsStore((s) => s.options)
   const [query, setQuery] = useState('')
 
   const items: { id: SelectableId; icon: React.ReactNode; name: string }[] = [
@@ -237,14 +325,12 @@ export function LeftPanel() {
     })),
     { id: 'light', icon: <SunIcon />, name: 'Directional Light' },
   ]
-  if (hasPath) {
-    items.push({ id: 'cinema-camera', icon: <CameraIcon />, name: 'Camera' })
-    if (lookAtMode === 'target') {
-      items.push({ id: 'target', icon: <TargetIcon />, name: 'Look-At Target' })
-    }
+  if (hasPath && lookAtMode === 'target') {
+    items.push({ id: 'target', icon: <TargetIcon />, name: 'Look-At Target' })
   }
   const q = query.toLowerCase()
   const visible = items.filter((i) => i.name.toLowerCase().includes(q))
+  const visibleCameras = cameraOptions.filter((c) => c.name.toLowerCase().includes(q))
   const pathItems = paths
     .map((p) => ({ id: p.id, name: p.id === CAMERA_PATH_ID ? 'Camera Path' : p.name }))
     .filter((p) => p.name.toLowerCase().includes(q))
@@ -274,6 +360,41 @@ export function LeftPanel() {
             <TreeItem key={item.id} {...item} />
           ))}
         </div>
+        {visibleCameras.length > 0 && (
+          <div className="mt-3">
+            <div className="flex items-center justify-between px-2 pb-1">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">
+                Cameras
+              </span>
+              <div className="flex items-center gap-0.5">
+                {import.meta.env.DEV && (
+                  <button
+                    onClick={() => generateRacingDroneCameras(10, 10)}
+                    className="rounded px-1 py-0.5 text-[9px] font-medium uppercase tracking-wide text-ink-dim hover:bg-panel-2 hover:text-ink"
+                    title="Generate 10 racing-drone cameras (10s, high speed)"
+                  >
+                    RD×10
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    useCameraOptionsStore.getState().createOption()
+                    useEditorStore.getState().select('cinema-camera')
+                  }}
+                  className="rounded p-0.5 text-ink-dim hover:bg-panel-2 hover:text-ink"
+                  title="Duplicate active camera"
+                >
+                  <PlusIcon size={12} />
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-col gap-0.5">
+              {visibleCameras.map((camera) => (
+                <CameraOptionItem key={camera.id} id={camera.id} name={camera.name} />
+              ))}
+            </div>
+          </div>
+        )}
         {pathItems.length > 0 && (
           <div className="mt-3">
             <div className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim">

@@ -1,6 +1,28 @@
 import { create } from 'zustand'
+import {
+  createProjectWorkflow,
+  isProjectEditorReady,
+  type ProjectWorkflow,
+} from '../lib/projectWorkflow'
 import type { RigSnapshot } from './useRigStore'
 import type { ExportAspect, ExportRes } from './useEditorStore'
+
+/**
+ * What the Projects screen needs to draw a card. The list used to carry only
+ * id/name/setupStatus, so every card was a title over dead space — no preview,
+ * nothing to tell two projects apart and nothing to sort by.
+ */
+export interface ProjectSummary {
+  id: string
+  name: string
+  setupStatus: 'draft' | 'ready'
+  /** number of saved shots */
+  shotCount: number
+  /** last save (falls back to creation time for projects saved before this) */
+  updatedAt: number
+  /** first shot's still, used as the card preview */
+  thumbnail?: Blob
+}
 
 export interface ShotFormat {
   aspect: ExportAspect
@@ -35,16 +57,22 @@ export interface CustomSkill {
 }
 
 interface ProjectState {
+  booted: boolean
+  projectBusy: boolean
   projectId: string
   name: string
+  workflow: ProjectWorkflow
   guidelines: string
   savedPrompts: SavedPrompt[]
   skills: CustomSkill[]
   shots: Shot[]
-  /** all known projects, for the switcher */
-  projectList: { id: string; name: string }[]
+  /** all known projects, for the switcher and the Projects screen cards */
+  projectList: ProjectSummary[]
 
+  setBooted: (booted: boolean) => void
+  setProjectBusy: (projectBusy: boolean) => void
   setName: (name: string) => void
+  setWorkflow: (workflow: ProjectWorkflow) => void
   setGuidelines: (text: string) => void
   addPrompt: (prompt: SavedPrompt) => void
   removePrompt: (id: string) => void
@@ -54,11 +82,12 @@ interface ProjectState {
   updateShot: (id: string, patch: Partial<Shot>) => void
   removeShot: (id: string) => void
   moveShot: (id: string, beforeId: string | null) => void
-  setProjectList: (list: { id: string; name: string }[]) => void
+  setProjectList: (list: ProjectSummary[]) => void
   /** wholesale load when switching projects (persistence lives in lib/projects) */
   loadProject: (data: {
     projectId: string
     name: string
+    workflow: ProjectWorkflow
     guidelines: string
     savedPrompts: SavedPrompt[]
     skills: CustomSkill[]
@@ -67,15 +96,38 @@ interface ProjectState {
 }
 
 export const useProjectStore = create<ProjectState>((set) => ({
+  booted: false,
+  projectBusy: false,
   projectId: '',
   name: 'Untitled',
+  workflow: createProjectWorkflow('Untitled'),
   guidelines: '',
   savedPrompts: [],
   skills: [],
   shots: [],
   projectList: [],
 
-  setName: (name) => set({ name }),
+  setBooted: (booted) => set({ booted }),
+  setProjectBusy: (projectBusy) => set({ projectBusy }),
+  setName: (name) =>
+    set((state) => ({
+      name,
+      projectList: state.projectList.map((project) =>
+        project.id === state.projectId ? { ...project, name } : project,
+      ),
+    })),
+  setWorkflow: (workflow) =>
+    set((state) => ({
+      workflow,
+      projectList: state.projectList.map((project) =>
+        project.id === state.projectId
+          ? {
+              ...project,
+              setupStatus: isProjectEditorReady(workflow) ? 'ready' : 'draft',
+            }
+          : project,
+      ),
+    })),
   setGuidelines: (guidelines) => set({ guidelines }),
 
   addPrompt: (prompt) =>

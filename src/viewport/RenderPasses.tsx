@@ -205,6 +205,29 @@ export function renderSceneRegion(
   gl.autoClear = prevAutoClear
 }
 
+/**
+ * Clear a region to the scene background. A pane whose camera does not exist
+ * (a 'camera' pane before a path is drawn) used to be skipped entirely, and
+ * since scissored renders only clear their own region, it kept showing whatever
+ * was in those pixels on an earlier frame.
+ */
+export function clearRegion(
+  gl: THREE.WebGLRenderer,
+  scene: THREE.Scene,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+) {
+  gl.setScissorTest(true)
+  gl.setViewport(x, y, width, height)
+  gl.setScissor(x, y, width, height)
+  const bg = scene.background
+  if (bg instanceof THREE.Color) gl.setClearColor(bg, 1)
+  gl.clear(true, true, false)
+  gl.setScissorTest(false)
+}
+
 const boundsCenter = new THREE.Vector3()
 const boundsSize = new THREE.Vector3()
 

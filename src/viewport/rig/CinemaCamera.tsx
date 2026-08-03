@@ -6,7 +6,7 @@ import { useEditorStore } from '../../state/useEditorStore'
 import { useRigStore } from '../../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../../state/usePathStore'
 import { buildCurve, clamp01 } from '../../lib/curve'
-import { evalProgress } from '../../lib/keyframes'
+import { evalProgress, evalValue, evalVec3 } from '../../lib/keyframes'
 import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
 import { isTechMode } from '../RenderPasses'
@@ -56,17 +56,25 @@ export function CinemaCamera() {
       rig.setT(t)
     }
 
-    const eased = clamp01(evalProgress(clamp01(t), rig.progressKeys, rig.smoothness))
+    const eased = clamp01(evalProgress(clamp01(t), rig.progressKeys, rig.ease))
     cam.position.copy(curve.getPointAt(eased))
 
+    // animated channels: a channel with no keyframes just yields its static value
+    const fovNow = evalValue(t, rig.fovKeys, rig.fov, rig.ease)
+    if (Math.abs(cam.fov - fovNow) > 1e-3) {
+      cam.fov = fovNow
+      cam.updateProjectionMatrix()
+    }
+    const rollNow = evalValue(t, rig.rollKeys, rig.roll, rig.ease)
+
     if (rig.lookAtMode === 'target') {
-      lookTarget.current.set(...rig.target)
+      lookTarget.current.set(...evalVec3(t, rig.targetKeys, rig.target, rig.ease))
     } else {
       lookTarget.current.copy(curve.getTangentAt(eased)).add(cam.position)
     }
     cam.up.set(0, 1, 0)
     cam.lookAt(lookTarget.current)
-    if (rig.roll !== 0) cam.rotateZ(rig.roll * DEG)
+    if (rollNow !== 0) cam.rotateZ(rollNow * DEG)
   })
 
   if (!curve) return null

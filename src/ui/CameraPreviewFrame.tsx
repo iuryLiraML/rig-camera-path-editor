@@ -3,21 +3,36 @@ import { useEditorStore } from '../state/useEditorStore'
 import { usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
 import { leafList, useLayoutStore } from '../state/useLayoutStore'
 import { exportDimensions } from '../lib/recorder'
+import { GUTTER, useViewportInsets, type ViewportInsets } from './viewportInsets'
 import { CameraIcon } from './icons'
+import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 
 const MIN_FRACTION = 0.12
 const MAX_FRACTION = 0.5
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
 
-/** keep the PiP inside the window (its drag handle must stay reachable) */
-function clampPipRect(r: { right: number; bottom: number; fraction: number }) {
-  const w = r.fraction * window.innerWidth
-  const h = r.fraction * window.innerHeight
+/**
+ * Keep the PiP inside the free viewport area: the canvas spans the whole window
+ * and the panels float on top, so clamping to the window alone let the PiP hide
+ * behind them (and its drag handle with it).
+ */
+function clampPipRect(
+  r: { right: number; bottom: number; fraction: number },
+  insets: ViewportInsets,
+) {
+  const vw = window.innerWidth
+  const vh = window.innerHeight
+  const w = r.fraction * vw
+  const h = r.fraction * vh
+  // `right`/`bottom` are distances from those window edges
+  const minRight = vw - insets.right
+  const maxRight = Math.max(minRight, vw - insets.left - w)
+  const maxBottom = Math.max(insets.contentBottom, vh - GUTTER - h)
   return {
     ...r,
-    right: clamp(r.right, 0, Math.max(0, window.innerWidth - w)),
-    bottom: clamp(r.bottom, 0, Math.max(0, window.innerHeight - h)),
+    right: clamp(r.right, minRight, maxRight),
+    bottom: clamp(r.bottom, insets.contentBottom, maxBottom),
   }
 }
 
@@ -38,6 +53,10 @@ export function CameraPreviewFrame() {
   const pipRect = useEditorStore((s) => s.pipRect)
   const hasPath = usePathStore(selectCameraAnchorCount) >= 2
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
+  const insets = useViewportInsets()
+  const activeCameraName = useCameraOptionsStore(
+    (s) => s.options.find((option) => option.id === s.activeOptionId)?.name ?? 'Camera',
+  )
 
   // drag state: the pointer origin and the pipRect at grab time
   const drag = useRef<{
@@ -49,18 +68,20 @@ export function CameraPreviewFrame() {
     fraction: number
   } | null>(null)
 
-  // shrinking the window must not strand the PiP (and its handle) off-screen
+  // correct the stored position on mount and on resize, so a default or a
+  // value saved under a different layout cannot sit under the panels/footer
   useEffect(() => {
     const onResize = () => {
       const r = useEditorStore.getState().pipRect
-      const c = clampPipRect(r)
+      const c = clampPipRect(r, insets)
       if (c.right !== r.right || c.bottom !== r.bottom) {
         useEditorStore.getState().setPipRect(c)
       }
     }
+    onResize()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [])
+  }, [insets.left, insets.right, insets.contentBottom])
 
   // in a split layout the panes replace the PiP's job
   if (!hasPath || playMode || !singlePane) return null
@@ -74,7 +95,7 @@ export function CameraPreviewFrame() {
         style={{ right: pipRect.right, bottom: pipRect.bottom }}
       >
         <CameraIcon />
-        Exit camera view
+        Exit {activeCameraName}
       </button>
     )
   }
@@ -88,7 +109,7 @@ export function CameraPreviewFrame() {
         style={{ right: pipRect.right, bottom: pipRect.bottom }}
       >
         <CameraIcon />
-        Camera view
+        {activeCameraName}
       </button>
     )
   }
@@ -104,7 +125,7 @@ export function CameraPreviewFrame() {
     if (d.mode === 'move') {
       useEditorStore
         .getState()
-        .setPipRect(clampPipRect({ ...pipRect, right: d.right - ddx, bottom: d.bottom - ddy }))
+        .setPipRect(clampPipRect({ ...pipRect, right: d.right - ddx, bottom: d.bottom - ddy }, insets))
     } else {
       // bottom-left grip: dragging left/up grows the square (anchored bottom-right)
       const fraction = clamp(d.fraction - ddx / vw, MIN_FRACTION, MAX_FRACTION)
@@ -181,7 +202,7 @@ export function CameraPreviewFrame() {
       >
         <span className="flex items-center gap-1.5 text-[10px] text-ink-dim">
           <CameraIcon size={11} />
-          Camera view
+          {activeCameraName}
         </span>
         <button
           onPointerDown={(e) => e.stopPropagation()}

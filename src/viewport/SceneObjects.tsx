@@ -143,7 +143,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
     // posing mode: the user is editing this object with the gizmo/panel
     if (selected && !rig.playing) return
 
-    const pose = evalModelTransform(rig.t, object.keys, rig.smoothness)
+    const pose = evalModelTransform(rig.t, object.keys, rig.ease)
     const g = groupRef.current
     if (!pose || !g) return
     g.position.set(...pose.position)

@@ -4,7 +4,6 @@ import { Canvas, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid } from '@react-three/drei'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
 import {
   activePaneRect,
   leafList,
@@ -89,7 +88,7 @@ export function Viewport() {
   const exportSize = useEditorStore((s) => s.exportSize)
   const viewMode = useEditorStore((s) => s.viewMode)
   const tech = isTechMode(viewMode)
-  const hasTimeline = usePathStore(selectCameraAnchorCount) >= 2
+  const hasTimeline = !playMode
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
 
   const background =

@@ -17,6 +17,7 @@ function ToolChip({ name }: { name: string }) {
 export function AssistantPanel() {
   const chat = useAgentStore((s) => s.chat)
   const status = useAgentStore((s) => s.status)
+  const taskProgress = useAgentStore((s) => s.taskProgress)
   const error = useAgentStore((s) => s.error)
   const hasKey = useAgentStore((s) => (s.keys[s.provider] ?? '').trim().length > 0)
   const forcedSkill = useAgentStore((s) => s.forcedSkill)
@@ -103,6 +104,13 @@ export function AssistantPanel() {
           </div>
         )}
       </div>
+
+      {status === 'thinking' && taskProgress && (
+        <div className="border-t border-line/60 px-3 py-1.5 text-[10px] text-ink-dim">
+          <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+          {taskProgress}
+        </div>
+      )}
 
       {/* skill chips */}
       <div className="flex flex-wrap items-center gap-1 border-t border-line/60 px-3 pt-2">
