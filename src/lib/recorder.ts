@@ -2,6 +2,14 @@ import { ArrayBufferTarget, Muxer } from 'mp4-muxer'
 import { useEditorStore, type ExportAspect, type ExportRes, type ViewMode } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
+import {
+  avcCodecString,
+  downloadBlob,
+  evenExportDim,
+  frameTimingUs,
+  isKeyframe,
+  sleepMs,
+} from './mp4Encode'
 import { renderBridge } from './renderBridge'
 
 const FPS = 30
@@ -13,8 +21,7 @@ export function exportDimensions(
   customSize: [number, number],
 ): [number, number] {
   if (res === 'custom') {
-    const even = (v: number) => Math.max(16, Math.min(4096, Math.floor(v / 2) * 2))
-    return [even(customSize[0]), even(customSize[1])]
+    return [evenExportDim(customSize[0]), evenExportDim(customSize[1])]
   }
   const long = res === 1080 ? 1920 : 1280
   const short = res === 1080 ? 1080 : 720
@@ -33,16 +40,7 @@ export function cancelRecording() {
   cancelled = true
 }
 
-function download(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+const sleep = sleepMs
 const notice = (m: string) => useSceneStore.getState().showNotice(m)
 
 /** selected passes, falling back to the active view mode */
@@ -92,25 +90,23 @@ async function setupOffline(preserveT: boolean) {
   return { canvas: document.querySelector('canvas'), width, height, restore }
 }
 
+export type EncodedPass = { pass: ViewMode; blob: Blob }
+
 /**
- * Exports the animation as MP4 (H.264) — one file per selected render pass
- * (clay/depth/outline/normals), all from the same deterministic 30 fps offline
- * render. Falls back to realtime WebM capture when WebCodecs is unavailable.
+ * Offline H.264 encode of the selected passes. Caller owns download / packing.
+ * Returns null when WebCodecs is missing, the canvas is gone, or encode fails.
  */
-export async function exportVideo() {
-  if (isRecording()) return
-  if (typeof VideoEncoder === 'undefined') {
-    recordWebmRealtime()
-    return
-  }
+export async function encodePassVideos(): Promise<EncodedPass[] | null> {
+  if (isRecording()) return null
+  if (typeof VideoEncoder === 'undefined') return null
   const { advance } = renderBridge
-  if (!advance || !renderBridge.setFrameloop) return
+  if (!advance || !renderBridge.setFrameloop) return null
 
   const passes = resolvePasses()
   const { canvas, width, height, restore } = await setupOffline(false)
   if (!canvas) {
     restore()
-    return
+    return null
   }
 
   const copy = document.createElement('canvas')
@@ -118,20 +114,18 @@ export async function exportVideo() {
   copy.height = height
   const ctx = copy.getContext('2d')!
 
-  // pick the AVC level from the coded area (macroblock-aligned)
-  const codedArea = Math.ceil(width / 16) * 16 * Math.ceil(height / 16) * 16
-  const level = codedArea > 2_228_224 ? '33' : codedArea > 921_600 ? '2a' : '1f'
+  const level = avcCodecString(width, height)
   const duration = useRigStore.getState().duration
   const totalFrames = Math.max(2, Math.round(duration * FPS))
 
   let encodeError: unknown = null
-  let exported = 0
+  const files: EncodedPass[] = []
 
   try {
     for (let p = 0; p < passes.length && !cancelled && !encodeError; p++) {
       const pass = passes[p]
       useEditorStore.getState().setViewMode(pass)
-      await sleep(80) // let React commit the mode (override material / outline)
+      await sleep(80)
 
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
@@ -145,7 +139,7 @@ export async function exportVideo() {
         },
       })
       encoder.configure({
-        codec: `avc1.4d00${level}`, // Main profile
+        codec: level,
         width,
         height,
         bitrate: 10_000_000,
@@ -158,16 +152,14 @@ export async function exportVideo() {
           useRigStore.getState().setT(i / (totalFrames - 1))
           advance(performance.now())
           ctx.drawImage(canvas, 0, 0, width, height)
-          const frame = new VideoFrame(copy, {
-            timestamp: Math.round((i * 1e6) / FPS),
-            duration: Math.round(1e6 / FPS),
-          })
-          encoder.encode(frame, { keyFrame: i % (FPS * 2) === 0 })
+          const timing = frameTimingUs(i, FPS)
+          const frame = new VideoFrame(copy, timing)
+          encoder.encode(frame, { keyFrame: isKeyframe(i, FPS) })
           frame.close()
 
           if (i % 3 === 0) {
             useEditorStore.getState().setRecordProgress((p + i / totalFrames) / passes.length)
-            await sleep(0) // keep the tab responsive, let Esc through
+            await sleep(0)
           }
           while (encoder.encodeQueueSize > 4) await sleep(4)
         }
@@ -175,8 +167,10 @@ export async function exportVideo() {
         if (!cancelled && !encodeError) {
           await encoder.flush()
           muxer.finalize()
-          download(new Blob([muxer.target.buffer], { type: 'video/mp4' }), `camera-animation_${pass}.mp4`)
-          exported++
+          files.push({
+            pass,
+            blob: new Blob([muxer.target.buffer], { type: 'video/mp4' }),
+          })
         }
       } finally {
         try {
@@ -190,20 +184,41 @@ export async function exportVideo() {
     encodeError = e
   } finally {
     restore()
-    if (encodeError) {
-      console.error('MP4 export failed', encodeError)
-      notice('MP4 export failed — trying WebM instead')
-      recordWebmRealtime()
-    } else {
-      notice(
-        cancelled
-          ? 'Export cancelled'
-          : exported > 1
-            ? `${exported} passes exported (.mp4)`
-            : 'Video exported (.mp4)',
-      )
-    }
   }
+
+  if (encodeError) {
+    console.error('MP4 export failed', encodeError)
+    return null
+  }
+  if (cancelled) return null
+  return files
+}
+
+/**
+ * Exports the animation as MP4 (H.264) — one file per selected render pass
+ * (clay/depth/outline/normals), all from the same deterministic 30 fps offline
+ * render. Falls back to realtime WebM capture when WebCodecs is unavailable.
+ */
+export async function exportVideo() {
+  if (isRecording()) return
+  if (typeof VideoEncoder === 'undefined') {
+    recordWebmRealtime()
+    return
+  }
+  const files = await encodePassVideos()
+  if (!files) {
+    if (cancelled) {
+      notice('Export cancelled')
+      return
+    }
+    notice('MP4 export failed — trying WebM instead')
+    recordWebmRealtime()
+    return
+  }
+  for (const file of files) {
+    downloadBlob(file.blob, `camera-animation_${file.pass}.mp4`)
+  }
+  notice(files.length > 1 ? `${files.length} passes exported (.mp4)` : 'Video exported (.mp4)')
 }
 
 /**
@@ -237,7 +252,7 @@ export async function exportFrame() {
       advance(performance.now())
       ctx.drawImage(canvas, 0, 0, width, height)
       const blob = await new Promise<Blob | null>((resolve) => copy.toBlob(resolve, 'image/png'))
-      if (blob) download(blob, `frame-${seconds}s_${pass}.png`)
+      if (blob) downloadBlob(blob, `frame-${seconds}s_${pass}.png`)
       useEditorStore.getState().setRecordProgress((p + 1) / passes.length)
       await sleep(30)
     }
@@ -319,7 +334,7 @@ function recordWebmRealtime() {
     recorder.onstop = () => {
       stream.getTracks().forEach((track) => track.stop())
       if (save && chunks.length > 0) {
-        download(new Blob(chunks, { type: 'video/webm' }), 'camera-animation.webm')
+        downloadBlob(new Blob(chunks, { type: 'video/webm' }), 'camera-animation.webm')
       }
       const r = useRigStore.getState()
       r.setPlaying(false)

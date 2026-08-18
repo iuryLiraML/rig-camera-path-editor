@@ -1,3 +1,5 @@
+import { FULL_TIME_VIEW, type TimeView } from '../lib/timeView'
+
 /**
  * The animation curve of a track, drawn inside its lane.
  *
@@ -7,11 +9,21 @@
  * the channel's actual value over time, the way a graph editor does, so the
  * shape of the easing is readable at a glance.
  *
- * Read-only on purpose: the curve is edited per keyframe in the right panel.
- * The viewBox is 0..100 in both axes with preserveAspectRatio="none", so the
- * plot stretches to whatever size the lane happens to be.
+ * The curve is editable on the lane: diamonds sit on it, vertical drag writes
+ * the keyed value, and pulling bezier handles (when a key is selected) writes
+ * a custom cubic-bezier for that segment.
  */
-export function TrackCurve({ samples, color }: { samples: number[]; color: string }) {
+export function TrackCurve({
+  samples,
+  color,
+  view = FULL_TIME_VIEW,
+  strokeWidth = 1.6,
+}: {
+  samples: number[]
+  color: string
+  view?: TimeView
+  strokeWidth?: number
+}) {
   if (samples.length < 2) return null
 
   // 6% padding top and bottom so a flat 0 or 1 is not drawn on the lane border
@@ -26,7 +38,7 @@ export function TrackCurve({ samples, color }: { samples: number[]; color: strin
   return (
     <svg
       className="pointer-events-none absolute inset-0 h-full w-full"
-      viewBox="0 0 100 100"
+      viewBox={`${view.start * 100} 0 ${view.span * 100} 100`}
       preserveAspectRatio="none"
       aria-hidden="true"
     >
@@ -34,7 +46,7 @@ export function TrackCurve({ samples, color }: { samples: number[]; color: strin
         points={points}
         fill="none"
         stroke={color}
-        strokeWidth={1.6}
+        strokeWidth={strokeWidth}
         strokeOpacity={0.75}
         vectorEffect="non-scaling-stroke"
         strokeLinejoin="round"

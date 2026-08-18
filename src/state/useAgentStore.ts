@@ -1,18 +1,24 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
-  runAgent,
   modelSupportsVision,
   PROVIDERS,
   type AgentMessage,
   type ProviderConfig,
   type ProviderKind,
 } from '../lib/agent/providers'
+import { runShotCompiler } from '../lib/agent/shotCompiler'
+import { buildSystemPrompt } from '../lib/agent/systemPrompt'
+import { encodeStillForAgent, userTurnImage, visionForTurn } from '../lib/agent/stillImage'
+import { buildSceneContext, captureViewport } from '../lib/agent/tools'
+import { getLiftAttachment, isVideoFile, setLiftAttachment } from '../lib/fal/attachment'
+import { NO_SERVER_KEYS, type ServerKeys } from '../lib/agent/serverKeys'
+import { setFalAbortSignal, syncFalSettings } from '../lib/fal/settings'
+import type { SamImageVersion } from '../lib/fal/models'
+import { useProjectStore } from './useProjectStore'
+import { CLOUD_ACCESS_TOKEN_KEY } from '../lib/cloud/client'
 
 export type VisionMode = 'auto' | 'on' | 'off'
-import { buildSceneContext, captureViewport, executeTool, TOOL_DEFS } from '../lib/agent/tools'
-import { buildSystemPrompt } from '../lib/agent/systemPrompt'
-import { useProjectStore } from './useProjectStore'
 
 export interface ChatEntry {
   id: string
@@ -20,6 +26,7 @@ export interface ChatEntry {
   text: string
   /** labels of tools the assistant executed while producing this entry */
   tools: string[]
+  attached?: string
 }
 
 interface AgentState {
@@ -31,12 +38,21 @@ interface AgentState {
   models: Record<ProviderKind, string>
   visionMode: VisionMode
   guidelines: string
+  /** Fal BYOK — not an LLM provider (D10). */
+  falKey: string
+  samImageVersion: SamImageVersion
+  /** Deployment site keys available via the /api proxy (session only, from /api/agent-config). */
+  serverKeys: ServerKeys
   // conversation (session only — API history kept in module scope)
   chat: ChatEntry[]
   status: 'idle' | 'thinking'
   taskProgress: string | null
   error: string | null
   forcedSkill: string | null
+  failChips: string[]
+  /** Filename of the still kept for SAM retries (session only). */
+  liftPhotoName: string | null
+  liftAttachmentKind: 'photo' | null
 
   setProvider: (kind: ProviderKind) => void
   setKey: (kind: ProviderKind, key: string) => void
@@ -44,17 +60,27 @@ interface AgentState {
   setVisionMode: (mode: VisionMode) => void
   setGuidelines: (text: string) => void
   setForcedSkill: (name: string | null) => void
+  setFalKey: (key: string) => void
+  setSamImageVersion: (version: SamImageVersion) => void
+  setServerKeys: (keys: ServerKeys) => void
   /** active provider has a usable key */
   hasKey: () => boolean
+  hasFalKey: () => boolean
   /** whether the screenshot is actually sent for the active provider/model */
   visionActive: () => boolean
-  sendMessage: (text: string) => Promise<void>
+  sendMessage: (text: string, image?: File) => Promise<void>
   stop: () => void
   clearChat: () => void
+  hydrateDirectorChat: () => void
 }
 
 let entryId = 1
 const makeEntryId = () => `chat-${entryId++}`
+
+function persistDirectorChat() {
+  const chat = useAgentStore.getState().chat
+  useProjectStore.getState().setDirectorChat(chat)
+}
 
 /** Turn raw API errors into an actionable hint. */
 function friendlyError(message: string, visionSent: boolean): string {
@@ -94,11 +120,17 @@ export const useAgentStore = create<AgentState>()(
       models: { ...defaultModels },
       visionMode: 'auto',
       guidelines: '',
+      falKey: '',
+      samImageVersion: '3.1',
+      serverKeys: NO_SERVER_KEYS,
       chat: [],
       status: 'idle',
       taskProgress: null,
       error: null,
       forcedSkill: null,
+      failChips: [],
+      liftPhotoName: null,
+      liftAttachmentKind: null,
 
       setProvider: (provider) => set({ provider }),
       setKey: (kind, key) => set((s) => ({ keys: { ...s.keys, [kind]: key } })),
@@ -106,10 +138,23 @@ export const useAgentStore = create<AgentState>()(
       setVisionMode: (visionMode) => set({ visionMode }),
       setGuidelines: (guidelines) => set({ guidelines }),
       setForcedSkill: (forcedSkill) => set({ forcedSkill }),
+      setFalKey: (falKey) => {
+        syncFalSettings(falKey, get().samImageVersion)
+        set({ falKey })
+      },
+      setSamImageVersion: (samImageVersion) => {
+        syncFalSettings(get().falKey, samImageVersion)
+        set({ samImageVersion })
+      },
+      setServerKeys: (serverKeys) => set({ serverKeys }),
 
       hasKey: () => {
         const s = get()
-        return (s.keys[s.provider] ?? '').trim().length > 0
+        return (s.keys[s.provider] ?? '').trim().length > 0 || s.serverKeys[s.provider]
+      },
+      hasFalKey: () => {
+        const s = get()
+        return s.falKey.trim().length > 0 || s.serverKeys.fal
       },
 
       visionActive: () => {
@@ -122,37 +167,79 @@ export const useAgentStore = create<AgentState>()(
         return capable
       },
 
-      sendMessage: async (text) => {
-        const { provider, keys, models, forcedSkill, status } = get()
-        const { guidelines, skills } = useProjectStore.getState()
-        if (status === 'thinking' || !text.trim()) return
+      sendMessage: async (text, image) => {
+        const { provider, keys, models, forcedSkill, status, falKey, samImageVersion } = get()
+        const { guidelines, skills, directorLessons } = useProjectStore.getState()
+        const trimmed = text.trim()
+        if (image && isVideoFile(image)) {
+          set({ error: 'Video is no longer supported. Attach a photo to lift a person.' })
+          return
+        }
+        const userText = trimmed || (image ? 'Lift the subject from the attached photo.' : '')
+        if (status === 'thinking' || !userText) return
+        if (image) {
+          setLiftAttachment(image)
+          set({ liftPhotoName: image.name, liftAttachmentKind: 'photo' })
+        }
+        const media = image ?? getLiftAttachment()
+        syncFalSettings(falKey, samImageVersion)
+        // empty key is fine when the deployment has a site key — providers.ts
+        // then routes the call through the same-origin /api proxy
         const apiKey = (keys[provider] ?? '').trim()
-        if (!apiKey) {
+        if (!apiKey && !get().serverKeys[provider]) {
           set({ error: `Add your ${PROVIDERS[provider].label} API key in Settings first.` })
           return
         }
-        const vision = get().visionActive()
+        const modelId = (models[provider] ?? '').trim() || PROVIDERS[provider].defaultModel
+        const capable = modelSupportsVision(provider, modelId)
+        const screenshot = get().visionActive()
+        const vision = visionForTurn({
+          screenshotActive: screenshot,
+          hasChatPhoto: Boolean(media),
+          modelSupportsVision: capable,
+        })
         const config: ProviderConfig = {
           kind: provider,
           apiKey,
-          model: (models[provider] ?? '').trim() || PROVIDERS[provider].defaultModel,
+          model: modelId,
           vision,
         }
 
-        const userText = forcedSkill ? `${text}\n\n(Use the "${forcedSkill}" skill for this request.)` : text
+        const directed = forcedSkill
+          ? `${userText}\n\n(Use the "${forcedSkill}" skill for this request.)`
+          : userText
+        const withMedia = media
+          ? `${directed}\n\n[Attached photo: ${media.name} is still in this chat. The image on this message is that still — not the 3D viewport. If the user wants people posed or retried from it, call block_people_from_image again (SAM 3.1 then 3D Body). Do not treat scene primitives as the photo.]`
+          : directed
         set((s) => ({
-          chat: [...s.chat, { id: makeEntryId(), role: 'user', text, tools: [] }],
+          chat: [
+            ...s.chat,
+            {
+              id: makeEntryId(),
+              role: 'user',
+              text: trimmed || userText,
+              tools: [],
+              attached: image?.name ?? (media && !image ? media.name : undefined),
+            },
+          ],
           status: 'thinking',
           taskProgress: 'Starting task…',
           error: null,
           forcedSkill: null,
+          failChips: [],
         }))
 
-        // fresh scene context + screenshot on every user turn
+        const chatPhoto = media && capable ? await encodeStillForAgent(media) : null
+        const still = userTurnImage({
+          chatPhoto,
+          screenshot: media ? false : screenshot,
+          viewport: media ? null : screenshot ? captureViewport() : null,
+        })
         apiHistory.push({
           role: 'user',
-          text: `<scene_state>\n${buildSceneContext()}\n</scene_state>\n\n${userText}`,
-          image: vision ? (captureViewport() ?? undefined) : undefined,
+          text: `<scene_state>\n${buildSceneContext()}\n</scene_state>\n\n${withMedia}`,
+          image: still?.data,
+          imageMediaType: still?.mediaType,
         })
 
         // live assistant entry that streams in place
@@ -164,57 +251,51 @@ export const useAgentStore = create<AgentState>()(
           }))
 
         abortController = new AbortController()
+        setFalAbortSignal(abortController.signal)
         try {
-          const turnsPerBatch = 32
-          const maxBatches = 3
-          let history = apiHistory
-          let exhausted = true
-
-          for (let batch = 0; batch < maxBatches; batch++) {
-            const result = await runAgent({
-              provider: config,
-              system: buildSystemPrompt(guidelines, skills),
-              messages: history,
-              tools: TOOL_DEFS,
-              execute: executeTool,
-              signal: abortController.signal,
-              maxTurns: turnsPerBatch,
-              events: {
-                onText: (delta) => patchAssistant((e) => ({ text: e.text + delta })),
-                onToolResult: (name) => patchAssistant((e) => ({ tools: [...e.tools, name] })),
-                onTurn: (turn) =>
-                  set({ taskProgress: `Working… step ${batch * turnsPerBatch + turn}` }),
-                onCheckpoint: (messages) => {
-                  apiHistory = messages
-                },
+          const result = await runShotCompiler({
+            provider: config,
+            system: buildSystemPrompt(guidelines, skills, directorLessons),
+            messages: apiHistory,
+            userText: withMedia,
+            hasImage: Boolean(media),
+            signal: abortController.signal,
+            events: {
+              onText: (delta) => patchAssistant((e) => ({ text: e.text + delta })),
+              onToolResult: (name) => patchAssistant((e) => ({ tools: [...e.tools, name] })),
+              onProgress: (label) => set({ taskProgress: label }),
+              onCheckpoint: (messages) => {
+                apiHistory = messages
               },
-            })
-            history = result.messages
-            apiHistory = history
-            if (result.outcome === 'completed') {
-              exhausted = false
-              break
+            },
+          })
+          apiHistory = result.messages
+          if (result.askUser) {
+            patchAssistant(() => ({ text: result.askUser ?? '' }))
+          } else if (result.passed) {
+            patchAssistant((e) => ({
+              text:
+                e.text.trim() ||
+                'Shot is blocked. Scrub the timeline or ask for a tighter/slower take.',
+            }))
+            if (result.retried) {
+              useProjectStore.getState().addDirectorLesson(
+                `${result.plan?.move_kind ?? 'shot'} on this subject: keep fill in the ${result.plan?.shot_scale ?? 'auto'} band.`,
+              )
             }
-            if (result.outcome === 'interrupted') {
-              history = [
-                ...history,
-                {
-                  role: 'user',
-                  text:
-                    'Continue the unfinished task from where you stopped. Do not repeat completed tool work; inspect camera_options and finish every remaining requested item.',
-                },
-              ]
-              apiHistory = history
-            }
+          } else {
+            patchAssistant((e) => ({
+              text:
+                e.text.trim() ||
+                'Could not lock framing. Try Closer, Slower, or pick the subject in the outliner.',
+            }))
           }
-
-          apiHistory = history
+          persistDirectorChat()
           set({
             status: 'idle',
             taskProgress: null,
-            error: exhausted
-              ? 'The assistant reached the 96-step safety limit. Your completed work was preserved; send “Continue” to resume.'
-              : null,
+            failChips: result.failChips,
+            error: null,
           })
         } catch (e) {
           const message = e instanceof Error ? e.message : String(e)
@@ -229,6 +310,7 @@ export const useAgentStore = create<AgentState>()(
           })
         } finally {
           abortController = null
+          setFalAbortSignal(undefined)
         }
       },
 
@@ -236,19 +318,34 @@ export const useAgentStore = create<AgentState>()(
 
       clearChat: () => {
         apiHistory = []
-        set({ chat: [], taskProgress: null, error: null })
+        setLiftAttachment(null)
+        set({ chat: [], taskProgress: null, error: null, failChips: [], liftPhotoName: null, liftAttachmentKind: null })
+      },
+      hydrateDirectorChat: () => {
+        const chat = useProjectStore.getState().directorChat
+        apiHistory = chat.map((entry): AgentMessage =>
+          entry.role === 'user'
+            ? { role: 'user', text: entry.text }
+            : { role: 'assistant', text: entry.text, toolCalls: [] },
+        )
+        set({ chat, failChips: [] })
       },
     }),
     {
       name: 'rig-agent-settings',
-      version: 4,
-      partialize: (s) => ({
-        provider: s.provider,
-        keys: s.keys,
-        models: s.models,
-        visionMode: s.visionMode,
-        guidelines: s.guidelines,
-      }),
+      version: 5,
+      partialize: (s) => {
+        const signedIn = Boolean(localStorage.getItem(CLOUD_ACCESS_TOKEN_KEY)?.trim())
+        return {
+          provider: s.provider,
+          keys: signedIn ? emptyKeys : s.keys,
+          models: s.models,
+          visionMode: s.visionMode,
+          guidelines: s.guidelines,
+          falKey: signedIn ? '' : s.falKey,
+          samImageVersion: s.samImageVersion,
+        }
+      },
       migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>
         if (version < 2) {
@@ -258,6 +355,8 @@ export const useAgentStore = create<AgentState>()(
             models: { ...defaultModels, anthropic: (p.model as string) ?? defaultModels.anthropic },
             visionMode: 'auto' as VisionMode,
             guidelines: (p.guidelines as string) ?? '',
+            falKey: '',
+            samImageVersion: '3.1' as SamImageVersion,
           }
         }
         if ('vision' in p && !('visionMode' in p)) {
@@ -268,6 +367,7 @@ export const useAgentStore = create<AgentState>()(
         // map to a supported provider, so stale ones cannot be selected.
         const persistedKeys = (p.keys ?? {}) as Record<string, string>
         const persistedModels = (p.models ?? {}) as Record<string, string>
+        const samVersion = p.samImageVersion === '3.0' ? '3.0' : '3.1'
         return {
           provider: normaliseProvider(p.provider),
           keys: {
@@ -280,7 +380,12 @@ export const useAgentStore = create<AgentState>()(
           },
           visionMode: (p.visionMode as VisionMode) ?? 'auto',
           guidelines: (p.guidelines as string) ?? '',
+          falKey: typeof p.falKey === 'string' ? p.falKey : '',
+          samImageVersion: samVersion as SamImageVersion,
         }
+      },
+      onRehydrateStorage: () => (state) => {
+        if (state) syncFalSettings(state.falKey, state.samImageVersion)
       },
     },
   ),

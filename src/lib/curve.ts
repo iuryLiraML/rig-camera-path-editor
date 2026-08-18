@@ -4,6 +4,19 @@ import type { Vec3 } from '../state/useSceneStore'
 
 export const clamp01 = (t: number) => Math.min(1, Math.max(0, t))
 
+/** Per-point handle behavior, exposed in the pen tool. */
+export type TangentMode = 'auto' | 'smooth' | 'corner' | 'broken'
+
+const handleLenSq = (h: Vec3) => h[0] * h[0] + h[1] * h[1] + h[2] * h[2]
+
+/** Classify an anchor's current handle setup into one of the named modes. */
+export function anchorTangentMode(anchor: PathAnchor): TangentMode {
+  if (!anchor.manual) return 'auto'
+  const flat = handleLenSq(anchor.handleIn) < 1e-8 && handleLenSq(anchor.handleOut) < 1e-8
+  if (flat) return 'corner'
+  return anchor.mirrored ? 'smooth' : 'broken'
+}
+
 /**
  * Single-slider easing for lay users: blends linear (constant speed) into
  * smootherstep (gentle start/stop). s = 0 → linear, s = 1 → fully smooth.

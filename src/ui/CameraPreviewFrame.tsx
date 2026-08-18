@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
+import { useCameraReady } from '../state/cameraPathLink'
 import { useEditorStore } from '../state/useEditorStore'
-import { usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
 import { leafList, useLayoutStore } from '../state/useLayoutStore'
 import { exportDimensions } from '../lib/recorder'
 import { GUTTER, useViewportInsets, type ViewportInsets } from './viewportInsets'
@@ -51,7 +51,7 @@ export function CameraPreviewFrame() {
   const exportRes = useEditorStore((s) => s.exportRes)
   const customSize = useEditorStore((s) => s.customSize)
   const pipRect = useEditorStore((s) => s.pipRect)
-  const hasPath = usePathStore(selectCameraAnchorCount) >= 2
+  const hasPath = useCameraReady()
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
   const insets = useViewportInsets()
   const activeCameraName = useCameraOptionsStore(
@@ -87,17 +87,21 @@ export function CameraPreviewFrame() {
   if (!hasPath || playMode || !singlePane) return null
 
   if (cameraView) {
-    return (
-      <button
-        onClick={() => useEditorStore.getState().setCameraView(false)}
-        title="Back to the editor camera (Esc)"
-        className="panel absolute z-20 flex items-center gap-2 px-3 py-2 text-[11px] text-ink hover:text-white"
-        style={{ right: pipRect.right, bottom: pipRect.bottom }}
-      >
-        <CameraIcon />
-        Exit {activeCameraName}
-      </button>
-    )
+    if (!showPreview) {
+      return (
+        <button
+          onClick={() => useEditorStore.getState().setCameraView(false)}
+          title="Back to the editor camera (Esc)"
+          className="panel absolute z-20 flex items-center gap-2 px-3 py-2 text-[11px] text-ink hover:text-white"
+          style={{ right: pipRect.right, bottom: pipRect.bottom }}
+        >
+          <CameraIcon />
+          Exit {activeCameraName}
+        </button>
+      )
+    }
+    // fall through to the PiP chrome — pixels are the editor view while
+    // looking through (see CameraPreview)
   }
 
   if (!showPreview) {
@@ -169,29 +173,33 @@ export function CameraPreviewFrame() {
         height: `${pipRect.fraction * 100}%`,
       }}
     >
-      {/* framing guide for the chosen export aspect; outside area is dimmed */}
-      <div className="absolute inset-0 flex items-center justify-center">
-        {(() => {
-          const [tw, th] = exportDimensions(exportAspect, exportRes, customSize)
-          const target = tw / th
-          const box = vw / vh // PiP shares the canvas aspect
-          const style =
-            target < box
-              ? { height: '100%', width: `${(target / box) * 100}%` }
-              : { width: '100%', height: `${(box / target) * 100}%` }
-          return (
-            <div
-              className="border border-white/40"
-              style={{ ...style, boxShadow: '0 0 0 9999px rgb(0 0 0 / 0.45)' }}
-            />
-          )
-        })()}
-      </div>
-      {/* click the preview to look through the camera in the main viewport */}
+      {!cameraView && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          {(() => {
+            const [tw, th] = exportDimensions(exportAspect, exportRes, customSize)
+            const target = tw / th
+            const box = vw / vh // PiP shares the canvas aspect
+            const style =
+              target < box
+                ? { height: '100%', width: `${(target / box) * 100}%` }
+                : { width: '100%', height: `${(box / target) * 100}%` }
+            return (
+              <div
+                className="border border-white/40"
+                style={{ ...style, boxShadow: '0 0 0 9999px rgb(0 0 0 / 0.45)' }}
+              />
+            )
+          })()}
+        </div>
+      )}
       <button
-        onClick={() => useEditorStore.getState().setCameraView(true)}
-        title="Look through this camera (click again on the chip or press Esc to leave)"
-        className="pointer-events-auto absolute inset-0 cursor-zoom-in"
+        onClick={() => useEditorStore.getState().setCameraView(!cameraView)}
+        title={
+          cameraView
+            ? 'Back to the editor camera (Esc)'
+            : 'Look through this camera (Esc to leave)'
+        }
+        className={`pointer-events-auto absolute inset-0 ${cameraView ? 'cursor-zoom-out' : 'cursor-zoom-in'}`}
       />
       {/* title bar = drag handle */}
       <div
@@ -202,7 +210,7 @@ export function CameraPreviewFrame() {
       >
         <span className="flex items-center gap-1.5 text-[10px] text-ink-dim">
           <CameraIcon size={11} />
-          {activeCameraName}
+          {cameraView ? 'Editor' : activeCameraName}
         </span>
         <button
           onPointerDown={(e) => e.stopPropagation()}

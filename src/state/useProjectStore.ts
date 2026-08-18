@@ -1,9 +1,10 @@
 import { create } from 'zustand'
 import {
-  createProjectWorkflow,
+  createLegacyProjectWorkflow,
   isProjectEditorReady,
   type ProjectWorkflow,
 } from '../lib/projectWorkflow'
+import type { FolderRecord } from '../lib/folders'
 import type { RigSnapshot } from './useRigStore'
 import type { ExportAspect, ExportRes } from './useEditorStore'
 
@@ -12,16 +13,23 @@ import type { ExportAspect, ExportRes } from './useEditorStore'
  * id/name/setupStatus, so every card was a title over dead space — no preview,
  * nothing to tell two projects apart and nothing to sort by.
  */
+export interface ProjectSceneSummary {
+  id: string
+  name: string
+}
+
 export interface ProjectSummary {
   id: string
   name: string
   setupStatus: 'draft' | 'ready'
+  folderId: string | null
   /** number of saved shots */
   shotCount: number
   /** last save (falls back to creation time for projects saved before this) */
   updatedAt: number
   /** first shot's still, used as the card preview */
   thumbnail?: Blob
+  scenes: ProjectSceneSummary[]
 }
 
 export interface ShotFormat {
@@ -48,6 +56,14 @@ export interface SavedPrompt {
   body: string
 }
 
+export interface DirectorChatEntry {
+  id: string
+  role: 'user' | 'assistant'
+  text: string
+  tools: string[]
+  attached?: string
+}
+
 /** A user-authored camera-animation skill the agent can load and follow. */
 export interface CustomSkill {
   id: string
@@ -66,8 +82,12 @@ interface ProjectState {
   savedPrompts: SavedPrompt[]
   skills: CustomSkill[]
   shots: Shot[]
+  directorChat: DirectorChatEntry[]
+  directorLessons: string[]
+  folderId: string | null
   /** all known projects, for the switcher and the Projects screen cards */
   projectList: ProjectSummary[]
+  folderList: FolderRecord[]
 
   setBooted: (booted: boolean) => void
   setProjectBusy: (projectBusy: boolean) => void
@@ -83,6 +103,10 @@ interface ProjectState {
   removeShot: (id: string) => void
   moveShot: (id: string, beforeId: string | null) => void
   setProjectList: (list: ProjectSummary[]) => void
+  setFolderList: (list: FolderRecord[]) => void
+  setFolderId: (folderId: string | null) => void
+  setDirectorChat: (chat: DirectorChatEntry[]) => void
+  addDirectorLesson: (line: string) => void
   /** wholesale load when switching projects (persistence lives in lib/projects) */
   loadProject: (data: {
     projectId: string
@@ -92,6 +116,9 @@ interface ProjectState {
     savedPrompts: SavedPrompt[]
     skills: CustomSkill[]
     shots: Shot[]
+    directorChat?: DirectorChatEntry[]
+    directorLessons?: string[]
+    folderId?: string | null
   }) => void
 }
 
@@ -100,12 +127,16 @@ export const useProjectStore = create<ProjectState>((set) => ({
   projectBusy: false,
   projectId: '',
   name: 'Untitled',
-  workflow: createProjectWorkflow('Untitled'),
+  workflow: createLegacyProjectWorkflow('Untitled'),
   guidelines: '',
   savedPrompts: [],
   skills: [],
   shots: [],
+  directorChat: [],
+  directorLessons: [],
+  folderId: null,
   projectList: [],
+  folderList: [],
 
   setBooted: (booted) => set({ booted }),
   setProjectBusy: (projectBusy) => set({ projectBusy }),
@@ -165,6 +196,22 @@ export const useProjectStore = create<ProjectState>((set) => ({
     }),
 
   setProjectList: (projectList) => set({ projectList }),
+  setFolderList: (folderList) => set({ folderList }),
+  setFolderId: (folderId) => set({ folderId }),
+  setDirectorChat: (directorChat) => set({ directorChat }),
+  addDirectorLesson: (line) =>
+    set((s) => {
+      const text = line.trim()
+      if (!text) return s
+      const directorLessons = [...s.directorLessons.filter((l) => l !== text), text].slice(-12)
+      return { directorLessons }
+    }),
 
-  loadProject: (data) => set({ ...data }),
+  loadProject: (data) =>
+    set({
+      ...data,
+      folderId: data.folderId ?? null,
+      directorChat: data.directorChat ?? [],
+      directorLessons: data.directorLessons ?? [],
+    }),
 }))

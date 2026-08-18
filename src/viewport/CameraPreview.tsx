@@ -1,10 +1,11 @@
 import { useFrame } from '@react-three/fiber'
 import type * as THREE from 'three'
 import { useEditorStore } from '../state/useEditorStore'
-import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
+import { cameraReady } from '../state/cameraPathLink'
 import { useLayoutStore } from '../state/useLayoutStore'
 import { editorOnlySet } from '../lib/editorOnly'
 import { cinemaCameraRef } from './rig/CinemaCamera'
+import { editorCameraRef } from './EditorCamera'
 import { renderOutline, renderSceneRegion } from './RenderPasses'
 
 /**
@@ -36,9 +37,31 @@ export function CameraPreview() {
     }
 
     const cam = cinemaCameraRef.current
-    if (editor.cameraView) return // main view already shows the cinema camera
-    const camAnchors = usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors.length ?? 0
-    if (!editor.showPreview || !cam || camAnchors < 2) return
+    if (editor.cameraView) {
+      // the corner gizmo (whose Hud pass draws the main frame in edit mode) is
+      // unmounted while looking through, so own the full-frame render here
+      if (!outline) gl.render(scene, camera)
+      // keep the PiP, but show the editor so the user still has a scene view
+      // (the cinema body would be hidden in the main viewport)
+      const editorCam = editorCameraRef.current
+      if (!editor.showPreview || !editorCam) return
+      const pip = editor.pipRect
+      const pw = Math.round(size.width * pip.fraction)
+      const ph = Math.round(size.height * pip.fraction)
+      const x = size.width - pw - pip.right
+      const y = pip.bottom
+      if (pw < 40 || ph < 40 || x < 0 || y + ph > size.height) return
+      const aspect = pw / ph
+      const persp = editorCam as THREE.PerspectiveCamera
+      if ('aspect' in persp && Math.abs(persp.aspect - aspect) > 1e-4) {
+        persp.aspect = aspect
+        persp.updateProjectionMatrix()
+      }
+      renderSceneRegion(gl, scene as THREE.Scene, editorCam, x, y, pw, ph, outline)
+      gl.setViewport(0, 0, size.width, size.height)
+      return
+    }
+    if (!editor.showPreview || !cam || !cameraReady()) return
 
     const pip = editor.pipRect
     const pw = Math.round(size.width * pip.fraction)

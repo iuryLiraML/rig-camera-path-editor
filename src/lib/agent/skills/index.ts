@@ -1,8 +1,10 @@
 /**
  * Built-in cinematography skills. Listed (name + description) in the system
- * prompt like an MCP tool index; the agent pulls a full body on demand via
- * the load_skill tool. Project guidelines are injected separately.
+ * prompt like an MCP tool index. The compiler also injects the matching body
+ * from ShotPlan so load_skill is optional. Project guidelines are separate.
  */
+
+import type { ShotPlan } from '../shotTypes'
 
 export interface AgentSkill {
   name: string
@@ -26,7 +28,8 @@ Recipes (world units: scene objects are ~2 units tall, floor at y=0):
   subject height). Add camera keyframes so the last 20% of time covers the last 40% of path
   (accelerating feel): keys like (0.6t -> 0.5p), (1.0t -> 1.0p) with smoothness 30-50%.
 - **Chase / orbit-strafe**: open orbit arc (half circle preset then raise rounding), height low
-  (0.5-1x subject height), duration 5-8s, look_at 'target'. Slight roll (3-8 deg) sells the bank.
+  (0.5-1x subject height), duration 5-8s, look_at 'target' on the subject. Head offset ~[0, 0.8, 0]
+  after the default AABB center, or omit offset to keep the object center. Slight roll (3-8 deg) sells the bank.
 - FOV 60-85 for wide FPV distortion. Higher speed = shorter duration, NOT more anchors.
 
 Avoid: perfectly level paths (vary Y between anchors by 20-50%), constant speed on dives
@@ -43,17 +46,99 @@ Feel: calm, deliberate, premium. The product is the hero; the camera serves it.
 Recipes (product normalized to ~2 units, floor y=0, center ~y=1):
 - **Slow orbit 360**: orbit preset, then duration 12-20s, smoothness 0-20% (constant speed reads
   as "turntable"), height just above product center (1.1-1.4), radius 2-2.5x product size,
-  look_at 'target' at product center. FOV 35-50 (compressed, flattering).
+  look_at 'target' at product center (AABB default). For a label, pass offset ~[0, 0, 0.3]
+  (local, in front of center). FOV 35-50 (compressed, flattering).
 - **Hero 3/4 push-in**: 2 anchors on the 3/4 diagonal (45 deg from front), far->near
   (2.5x -> 1.3x radius), height slightly above center looking ~10 deg down (camera Y ≈ center
   Y + 0.3-0.6, target at center). Duration 6-10s, smoothness 70-100% (soft start/stop).
 - **Reveal hold**: any move + two camera keyframes with the SAME progress at the end
   (e.g. 0.8t->1.0p and 1.0t->1.0p) = the camera arrives and HOLDS the final frame for the
   last 20% - ideal for logo/pack readability.
-- **Top-down detail**: flyover preset flattened (all anchors high, small radius), slow.
+- **Top-down / flat-lay**: crane or custom path with all anchors high, small radius, look_at
+  target at center. Duration 6-10s. shot_scale ls/ms.
+- **Macro detail**: CU/ECU, FOV 28-40, radius ~1.2x size, slow (10-16s), hold the last 15%.
+- **Seamless loop**: closed orbit, constant speed (smoothness 0), duration 8-16s, no hold.
 
 Avoid: wide FOV (>55 distorts the pack), fast moves, paths that cross in front of the label
 at close distance, camera below product center (unheroic) unless brutalist look is requested.`,
+}
+
+const shotGrammar: AgentSkill = {
+  name: 'shot-grammar',
+  description:
+    'Shot scale, camera angle, and move atoms: ECU/CU/MCU/MS/LS/ELS, eye/low/high/top/dutch, orbit/dolly/crane/pan/tilt/zoom.',
+  body: `# Shot grammar
+
+Map names to tools. Fill % is enforced by the code judge at t=0.5.
+
+## Scale (shot_scale → fill of subject in frame)
+- ECU 70-95% — pores, logo type. Tight FOV 25-35, close radius.
+- CU 45-70% — pack face, head. FOV 30-45.
+- MCU 30-50% — product hero. FOV 35-50. Packshot default.
+- MS 18-35% — product + a little set.
+- LS 8-20% — establishing the set.
+- ELS 3-12% — world / flyover context.
+- auto 15-70% — when the user did not name a scale.
+
+## Angle
+- eye: camera Y near subject center.
+- low: camera below center, looking up.
+- high: camera above center, looking down ~10-25°.
+- top: above the AABB, looking at center (flat-lay).
+- dutch: roll ≥ 8°. Rare in packshots.
+
+## Atoms (instantiate_atom)
+orbit, arc, flyover, dolly, crane, pan, tilt, zoom.
+Pass subject_id + scale + angle. The tool picks radius from the fill band.
+set_camera_path is only for move_kind=custom.
+
+## Compounds
+- orbit-reveal, dolly-push, handheld (noise clip), drone dive: load those skills.
+`,
+}
+
+const commercialBeauty: AgentSkill = {
+  name: 'commercial-beauty',
+  description: 'Soft beauty advertising: slow orbits, gentle push-ins, seamless loops, flattering MCU/CU.',
+  body: `# Commercial beauty
+
+Feel: expensive, slow, no drama spikes.
+
+- Default MCU or CU, angle eye or slight high, FOV 35-45.
+- Soft orbit: orbit preset, duration 10-16s, smoothness 20-40%, height center+0.2.
+- Beauty push: dolly, 8-12s, smoothness 80-100%, end hold 15%.
+- Seamless loop: closed path, smoothness 0, no hold, duration 8-12s.
+- Avoid handheld noise, dutch, wide FPV FOV, fast dives.
+`,
+}
+
+const cinemaBasics: AgentSkill = {
+  name: 'cinema-basics',
+  description: 'Narrative camera language: establishing, dramatic push/pull, tracking follow, crane reveal.',
+  body: `# Cinema basics
+
+- Establishing: ELS/LS flyover or slow arc, duration 6-10s, look_at target.
+- Dramatic push: dolly-push skill, MS → CU.
+- Pull-back reveal: dolly reversed with camera keyframes.
+- Tracking / follow: set_look_at object_id + path_space=object, or set_follow_path on the subject then orbit the parent.
+- Head / face: set_look_at object_id with offset near the top of the AABB (typical [0, 0.7, 0] to [0, 1.0, 0] on a ~2-unit figure). Omit offset to keep the object center.
+- Crane reveal: crane preset, start low, end high, look_at target, duration 6-10s.
+- OTS: two subjects — track the nearer one with offset behind-and-aside (e.g. [0.35, 0.5, -0.4]) and path_space=object. One subject: refuse and do a 3/4 MCU instead.
+`,
+}
+
+const handheld: AgentSkill = {
+  name: 'handheld',
+  description: 'Documentary / handheld feel via the camera noise clip, not pose keyframes.',
+  body: `# Handheld
+
+Do NOT fake shake with XYZ keys. Use set_camera_noise:
+- style handheld, intensity 0.35-0.6, start 0 end 1, fade_in 0.2 fade_out 0.2.
+- Keep a simple path (arc or gentle dolly). Slight Y variation 10-20%.
+- FOV 45-60. Duration 5-10s.
+- For rumble (vehicle): style rumble, intensity 0.4-0.7.
+- For hit/impact: style shake, short window (start 0.4 end 0.7) with fades.
+`,
 }
 
 const orbitReveal: AgentSkill = {
@@ -89,8 +174,78 @@ const dollyPush: AgentSkill = {
 - Never curve a dolly: rounding 0% or only 2 anchors, otherwise it reads as a failed orbit.`,
 }
 
-export const AGENT_SKILLS: AgentSkill[] = [drone, packshot, orbitReveal, dollyPush]
+const photoLift: AgentSkill = {
+  name: 'photo-lift',
+  description:
+    'Turn an attached still into clay people or a single prop. Import sits on the floor — do not invent placement.',
+  body: `# Photo lift
+
+The user attached a still in chat. Two tools, never one shared endpoint:
+
+- **People** → \`block_people_from_image\`. No extra arguments. Internal SAM 3.1 mask uses "person" and returns every instance; each instance is lifted with SAM 3D Body as **its own scene object** (Person 1, Person 2, …). One tool call — do not call it once per person.
+- The still stays attached. If the user says pose/retry/again, call \`block_people_from_image\` **again** (re-runs SAM 3.1). The new imports replace the last people lift.
+- **Prop** → \`generate_prop\` with a noun prompt (helmet, bottle, chair). Required.
+
+After the tool returns object ids:
+- Each figure is already normalized (~2 units, y=0) and spaced on X. Do **not** invent XYZ unless the user asks to arrange them.
+- Call pose_object on **each returned id separately** if the user asks to move, rotate, or pose someone. Never pose leftover primitives.
+- Body articulation is from the photo; pose_object cannot sit/stand/gesture a figure.
+- The 3D viewport / torus knot is the stage, not the still. Never refuse a lift because the stage already has a primitive.
+- Then build the camera move as usual (preset or path) and play_preview.
+
+Fail closed: if the tool says to add a Fal key or attach a photo, tell the user that
+in one sentence. Never claim a Generate tab or a visible segment tool exists.`,
+}
+
+export const AGENT_SKILLS: AgentSkill[] = [
+  shotGrammar,
+  packshot,
+  commercialBeauty,
+  cinemaBasics,
+  drone,
+  handheld,
+  orbitReveal,
+  dollyPush,
+  photoLift,
+]
 
 export function getSkill(name: string): AgentSkill | undefined {
   return AGENT_SKILLS.find((s) => s.name === name)
+}
+
+/** Skill-3D import: auto-load the recipe that matches the parsed plan. */
+export function skillNameForPlan(plan: ShotPlan): string | null {
+  const intent = plan.intent.toLowerCase()
+  if (/\b(handheld|doc(?:umentary)?|camera na mao|camera na mão)\b/.test(intent)) return 'handheld'
+  if (plan.move_kind === 'dolly' || plan.move_kind === 'zoom') return 'dolly-push'
+  if (plan.move_kind === 'flyover') return 'drone'
+  if (plan.move_kind === 'orbit' && /\breveal|revela/.test(intent)) return 'orbit-reveal'
+  if (
+    plan.move_kind === 'orbit' &&
+    (plan.shot_scale === 'cu' ||
+      plan.shot_scale === 'mcu' ||
+      plan.shot_scale === 'ecu' ||
+      /\b(packshot|product|produto|pack)\b/.test(intent))
+  ) {
+    return 'packshot'
+  }
+  if (plan.move_kind === 'crane' || plan.move_kind === 'pan' || plan.move_kind === 'tilt') {
+    return 'cinema-basics'
+  }
+  return null
+}
+
+export function skillBodiesForPlan(plan: ShotPlan, phase: 'object' | 'camera'): string {
+  const names: string[] = []
+  if (phase === 'object') {
+    names.push('photo-lift')
+  } else {
+    names.push('shot-grammar')
+    const match = skillNameForPlan(plan)
+    if (match) names.push(match)
+  }
+  return names
+    .map((name) => getSkill(name)?.body)
+    .filter((body): body is string => Boolean(body))
+    .join('\n\n')
 }

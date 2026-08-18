@@ -24,7 +24,7 @@ function seedInterview() {
   useAgentStore.setState({
     provider: 'anthropic',
     keys: { anthropic: 'sk-ant-test', kimi: '' },
-    models: { anthropic: 'claude-sonnet-5', kimi: 'kimi-k3' },
+    models: { anthropic: 'claude-opus-4-6', kimi: 'kimi-k3' },
   })
 }
 

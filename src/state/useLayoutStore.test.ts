@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { detectPreset, leafList, useLayoutStore } from './useLayoutStore'
+import { detectPreset, leafList, paneAt, useLayoutStore } from './useLayoutStore'
 
 const views = () => leafList(useLayoutStore.getState().root).map((l) => l.view)
 const ids = () => leafList(useLayoutStore.getState().root).map((l) => l.id)
@@ -68,5 +68,13 @@ describe('useLayoutStore', () => {
     s().applyPreset('director')
     s().joinPane(s().activePaneId)
     expect(s().paneCount()).toBe(2)
+  })
+
+  it('hits the front and top panes of a quad, not only the editor', () => {
+    useLayoutStore.getState().applyPreset('quad')
+    expect(paneAt(100, 100, 1000, 1000)?.view).toBe('editor')
+    expect(paneAt(100, 600, 1000, 1000)?.view).toBe('front')
+    expect(paneAt(600, 100, 1000, 1000)?.view).toBe('camera')
+    expect(paneAt(600, 600, 1000, 1000)?.view).toBe('top')
   })
 })

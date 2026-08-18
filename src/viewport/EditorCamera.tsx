@@ -3,8 +3,20 @@ import * as THREE from 'three'
 import { OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import { lockOrbit, unlockOrbit } from '../lib/orbitLock'
+import { useShiftHeld } from '../lib/useShiftHeld'
+import { beginPickClick, hasInteractivePick } from '../lib/viewportPick'
 import { useEditorStore } from '../state/useEditorStore'
+import { computeRects, paneAt, useLayoutStore } from '../state/useLayoutStore'
+import { cinemaCameraRef } from './rig/CinemaCamera'
 import { sceneBounds } from './SceneObjects'
+import {
+  bindOrbitToPane,
+  frameSpatialCamera,
+  isSpatialView,
+  spatialCameras,
+  spatialTargets,
+} from './spatialViews'
 
 /** distance of the initial framing — the zoom readout's 100% reference */
 const DEFAULT_DIST = 7.9
@@ -16,6 +28,9 @@ const VIEW_DIRS = {
   right: new THREE.Vector3(1, 0.12, 0),
 }
 
+/** Live handle to the editor viewport camera, so "pose from view" can read it. */
+export const editorCameraRef: { current: THREE.Camera | null } = { current: null }
+
 export function EditorCamera() {
   const projection = useEditorStore((s) => s.projection)
   const tool = useEditorStore((s) => s.tool)
@@ -24,13 +39,31 @@ export function EditorCamera() {
   const frameRequest = useEditorStore((s) => s.frameRequest)
   const viewRequest = useEditorStore((s) => s.viewRequest)
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null
-  const camera = useThree((s) => s.camera)
+  const fallbackCam = useThree((s) => s.camera)
+  const gl = useThree((s) => s.gl)
   const editorCamActive = !playMode && !cameraView
   const lastZoom = useRef(100)
+  const perspRef = useRef<THREE.PerspectiveCamera>(null)
+  const orthoRef = useRef<THREE.OrthographicCamera>(null)
+  const shiftHeld = useShiftHeld()
+  const pointerView = useRef<'editor' | 'camera' | 'front' | 'top' | 'right'>('editor')
 
-  // F — frame everything in the scene
+  const editorCam = (): THREE.Camera => {
+    const owned = projection === 'perspective' ? perspRef.current : orthoRef.current
+    return owned ?? fallbackCam
+  }
+
+  // F — frame the pane under the cursor (or the editor camera in single view)
   useEffect(() => {
     if (frameRequest === 0 || !controls) return
+    const view = pointerView.current
+    if (isSpatialView(view)) {
+      frameSpatialCamera(view, spatialCameras[view].aspect || 1)
+      controls.target.copy(spatialTargets[view])
+      if (controls.object === spatialCameras[view]) controls.update()
+      return
+    }
+    const camera = editorCam()
     const box = sceneBounds()
     if (!box) return
     const center = box.getCenter(new THREE.Vector3())
@@ -39,11 +72,12 @@ export function EditorCamera() {
     controls.target.copy(center)
     camera.position.copy(center.clone().add(direction.multiplyScalar(radius * 2.4)))
     controls.update()
-  }, [frameRequest, controls, camera])
+  }, [frameRequest, controls, fallbackCam, projection])
 
   // quick views — snap the camera to an axis, keeping the current distance
   useEffect(() => {
     if (!viewRequest || !controls) return
+    const camera = editorCam()
     const box = sceneBounds()
     const center = box ? box.getCenter(new THREE.Vector3()) : new THREE.Vector3(0, 0.8, 0)
     const dist = Math.max(2, camera.position.distanceTo(controls.target))
@@ -51,11 +85,99 @@ export function EditorCamera() {
     camera.position.copy(center.clone().add(dir.multiplyScalar(dist)))
     controls.target.copy(center)
     controls.update()
-  }, [viewRequest, controls, camera])
+  }, [viewRequest, controls, fallbackCam, projection])
 
-  // live zoom readout for the toolbar (only writes when the integer changes)
+  const controlsRef = useRef(controls)
+  controlsRef.current = controls
+  const scene = useThree((s) => s.scene)
+
+  // Bind orbit to whichever pane the pointer is in, before OrbitControls sees
+  // the event — otherwise a drag in Front would spin the Editor camera.
+  // A hit on a mesh/gizmo/anchor locks orbit for the whole gesture so a
+  // select click cannot start an orbit on the same down.
+  useEffect(() => {
+    const el = gl.domElement
+    const raycaster = new THREE.Raycaster()
+    const ndc = new THREE.Vector2()
+    let held = false
+
+    const sync = (e: PointerEvent | WheelEvent) => {
+      const rect = el.getBoundingClientRect()
+      const leaf = paneAt(e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height)
+      const view = leaf?.view ?? 'editor'
+      pointerView.current = view
+      const current = controlsRef.current
+      if (!current) return
+      bindOrbitToPane(current, view, editorCam(), editorCamActive)
+    }
+
+    const release = () => {
+      if (!held) return
+      held = false
+      unlockOrbit()
+      const current = controlsRef.current
+      if (current) bindOrbitToPane(current, pointerView.current, editorCam(), editorCamActive)
+    }
+
+    const onDown = (e: PointerEvent) => {
+      sync(e)
+      // Middle button is pan (same as RMB). Stop the browser autoscroll glyph.
+      if (e.button === 1) e.preventDefault()
+      if (e.button !== 0 || !editorCamActive) return
+      const rect = el.getBoundingClientRect()
+      const w = rect.width
+      const h = rect.height
+      const leaf = paneAt(e.clientX - rect.left, e.clientY - rect.top, w, h)
+      const leaves = computeRects(useLayoutStore.getState().root, { x: 0, y: 0, w, h }).leaves
+      const pane = (leaf && leaves.get(leaf.id)) ?? { x: 0, y: 0, w, h }
+      ndc.set(
+        ((e.clientX - rect.left - pane.x) / Math.max(1, pane.w)) * 2 - 1,
+        -((e.clientY - rect.top - pane.y) / Math.max(1, pane.h)) * 2 + 1,
+      )
+      let cam = editorCam()
+      if (leaf && isSpatialView(leaf.view)) cam = spatialCameras[leaf.view]
+      else if (leaf?.view === 'camera' && cinemaCameraRef.current) cam = cinemaCameraRef.current
+      raycaster.params.Line = { threshold: 0.03 }
+      raycaster.setFromCamera(ndc, cam)
+      const hits = raycaster.intersectObjects(scene.children, true)
+      beginPickClick(e.clientX, e.clientY)
+      if (!hasInteractivePick(hits)) return
+      lockOrbit()
+      held = true
+      const current = controlsRef.current
+      if (current) bindOrbitToPane(current, pointerView.current, editorCam(), editorCamActive)
+    }
+
+    el.addEventListener('pointerdown', onDown, true)
+    el.addEventListener('pointermove', sync, true)
+    el.addEventListener('wheel', sync, { capture: true, passive: true })
+    window.addEventListener('pointerup', release)
+    window.addEventListener('pointercancel', release)
+    return () => {
+      el.removeEventListener('pointerdown', onDown, true)
+      el.removeEventListener('pointermove', sync, true)
+      el.removeEventListener('wheel', sync, true)
+      window.removeEventListener('pointerup', release)
+      window.removeEventListener('pointercancel', release)
+      release()
+    }
+  }, [gl, editorCamActive, projection, playMode, cameraView, scene])
+
   useFrame(() => {
+    const camera = editorCam()
+    editorCameraRef.current = camera
+    // In look-through, OrbitControls defaults to R3F's cinema camera — pin it
+    // back. In quad view the pointer may be on Front/Top, so do not steal the
+    // binding back to the editor camera every frame.
+    if (cameraView && controls && controls.object !== camera) {
+      controls.object = camera as THREE.PerspectiveCamera
+    }
+    if (controls && !cameraView) {
+      bindOrbitToPane(controls, pointerView.current, camera, editorCamActive)
+    }
+
     if (!editorCamActive) return
+    if (pointerView.current !== 'editor') return
     let pct: number
     if ((camera as THREE.OrthographicCamera).isOrthographicCamera) {
       pct = Math.round(((camera as THREE.OrthographicCamera).zoom / ORTHO_DEFAULT_ZOOM) * 100)
@@ -72,9 +194,15 @@ export function EditorCamera() {
   return (
     <>
       {projection === 'perspective' ? (
-        <PerspectiveCamera makeDefault={editorCamActive} position={[5, 3.5, 5.5]} fov={45} />
+        <PerspectiveCamera
+          ref={perspRef}
+          makeDefault={editorCamActive}
+          position={[5, 3.5, 5.5]}
+          fov={45}
+        />
       ) : (
         <OrthographicCamera
+          ref={orthoRef}
           makeDefault={editorCamActive}
           position={[5, 3.5, 5.5]}
           zoom={110}
@@ -85,11 +213,18 @@ export function EditorCamera() {
       <OrbitControls
         makeDefault
         enabled={editorCamActive}
+        enableDamping={editorCamActive}
         enableRotate={tool !== 'pen'}
-        enableDamping
+        enableZoom={tool !== 'pen'}
+        enablePan={editorCamActive && !shiftHeld}
         dampingFactor={0.08}
-        target={[0, 0.8, 0]}
-        maxPolarAngle={Math.PI * 0.55}
+        minPolarAngle={0.02}
+        maxPolarAngle={Math.PI - 0.02}
+        mouseButtons={{
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.PAN,
+          RIGHT: THREE.MOUSE.PAN,
+        }}
       />
     </>
   )

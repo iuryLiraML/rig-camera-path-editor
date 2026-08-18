@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 
-/** what a pane shows. 'editor' = the interactive orbit camera (only the active pane). */
+/** what a pane shows. 'editor' holds gizmos; front/top/right orbit on their own cameras. */
 export type PaneView = 'editor' | 'camera' | 'front' | 'top' | 'right'
 
 /** Binary area tree, à la Blender. dir 'v' = side-by-side, 'h' = stacked. */
@@ -235,4 +235,20 @@ export function activePaneRect(width: number, height: number): Rect {
 
 export function rectContains(r: Rect, px: number, py: number) {
   return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h
+}
+
+/** Leaf under a canvas-local pointer, or null if the point is outside every pane. */
+export function paneAt(
+  px: number,
+  py: number,
+  width: number,
+  height: number,
+): Extract<AreaNode, { kind: 'leaf' }> | null {
+  const { root } = useLayoutStore.getState()
+  const { leaves } = computeRects(root, { x: 0, y: 0, w: width, h: height })
+  for (const leaf of leafList(root)) {
+    const rect = leaves.get(leaf.id)
+    if (rect && rectContains(rect, px, py)) return leaf
+  }
+  return null
 }

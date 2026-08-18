@@ -2,21 +2,27 @@
   "name": "rig-camera-path-editor",
   "description": "Spline-inspired web 3D camera-path editor: draw camera paths, keyframe the lens with professional animation curves, attach objects to motion paths, split the viewport Blender-style, and export MP4 reference animations for generative AI.",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.7.0",
   "type": "module",
+  "engines": {
+    "node": ">=22.12.0"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
+    "build:web": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.10.1",
     "@fontsource-variable/inter": "^5.2.5",
     "@react-three/drei": "^10.4.0",
     "@react-three/fiber": "^9.2.0",
     "mammoth": "^1.12.0",
     "mp4-muxer": "^5.2.2",
     "pdfjs-dist": "^6.1.200",
+    "playcanvas": "^2.21.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "three": "^0.178.0",
@@ -27,6 +33,7 @@
     "@tailwindcss/vite": "^4.1.11",
     "@testing-library/dom": "^10.4.1",
     "@testing-library/react": "^16.3.2",
+    "@types/node": "^26.1.1",
     "@types/react": "^19.1.8",
     "@types/react-dom": "^19.1.6",
     "@types/three": "^0.178.0",

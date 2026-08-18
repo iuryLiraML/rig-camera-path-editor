@@ -1,5 +1,13 @@
 import { create } from 'zustand'
 import type { Vec3 } from './useSceneStore'
+import { computeAutoHandles, type TangentMode } from '../lib/curve'
+import {
+  clickAnchorSelection,
+  primaryAnchorId,
+  transformAnchorsAroundPivot,
+  translateAnchors,
+  type AnchorPoseSnapshot,
+} from '../lib/anchorSelection'
 
 export interface PathAnchor {
   id: string
@@ -45,6 +53,8 @@ export interface PathState {
   paths: MotionPath[]
   activePathId: string
   selectedAnchorId: string | null
+  /** Shift+click accumulates; last id is the primary (inspector / handles). */
+  selectedAnchorIds: string[]
   selectedHandle: 'none' | 'in' | 'out'
   drawPlaneY: number
 
@@ -63,16 +73,30 @@ export interface PathState {
   insertAnchor: (index: number, position: Vec3) => void
   setPath: (positions: Vec3[], closed: boolean) => void
   updateAnchorPosition: (id: string, position: Vec3) => void
+  /** Move every selected point by the same world/local delta. */
+  translateSelectedAnchors: (delta: Vec3) => void
+  /** Apply a TransformControls pose to the selected points as a group. */
+  applyAnchorGroupTransform: (args: {
+    snapshot: AnchorPoseSnapshot[]
+    startPivot: Vec3
+    currentPivot: Vec3
+    quat: readonly [number, number, number, number]
+    scale: Vec3
+  }) => void
   setHandleOut: (id: string, handleOut: Vec3, mirror: boolean) => void
   setHandle: (id: string, which: 'in' | 'out', value: Vec3, breakMirror: boolean) => void
+  setAnchorTangent: (id: string, mode: TangentMode) => void
+  setAnchorsTangent: (ids: string[], mode: TangentMode) => void
   removeAnchor: (id: string) => void
+  removeAnchors: (ids: string[]) => void
   clearPath: () => void
   setClosed: (closed: boolean) => void
   setRounding: (r: number) => void
   setPathHeight: (y: number) => void
   setAnchorHeight: (id: string, y: number) => void
+  setAnchorsHeight: (ids: string[], y: number) => void
   autoSmoothAll: () => void
-  selectAnchor: (id: string | null) => void
+  selectAnchor: (id: string | null, additive?: boolean) => void
   selectHandle: (which: 'none' | 'in' | 'out') => void
   setDrawPlaneY: (y: number) => void
 }
@@ -88,10 +112,23 @@ export const usePathStore = create<PathState>((set, get) => {
       paths: s.paths.map((p) => (p.id === s.activePathId ? { ...p, ...fn(p) } : p)),
     }))
 
+  const clearSelection = {
+    selectedAnchorId: null as string | null,
+    selectedAnchorIds: [] as string[],
+    selectedHandle: 'none' as const,
+  }
+
+  const soleSelection = (id: string) => ({
+    selectedAnchorId: id,
+    selectedAnchorIds: [id],
+    selectedHandle: 'none' as const,
+  })
+
   return {
     paths: [makeCameraPath()],
     activePathId: CAMERA_PATH_ID,
     selectedAnchorId: null,
+    selectedAnchorIds: [],
     selectedHandle: 'none',
     drawPlaneY: 1.2,
 
@@ -103,8 +140,7 @@ export const usePathStore = create<PathState>((set, get) => {
           { id, name: name ?? `Path ${s.paths.filter((p) => p.id !== CAMERA_PATH_ID).length + 1}`, anchors: [], closed: false, rounding: 0.8 },
         ],
         activePathId: id,
-        selectedAnchorId: null,
-        selectedHandle: 'none',
+        ...clearSelection,
       }))
       return id
     },
@@ -116,8 +152,7 @@ export const usePathStore = create<PathState>((set, get) => {
         return {
           paths,
           activePathId: s.activePathId === id ? CAMERA_PATH_ID : s.activePathId,
-          selectedAnchorId: null,
-          selectedHandle: 'none',
+          ...clearSelection,
         }
       }),
 
@@ -139,7 +174,7 @@ export const usePathStore = create<PathState>((set, get) => {
       return newId
     },
 
-    setActivePath: (activePathId) => set({ activePathId, selectedAnchorId: null, selectedHandle: 'none' }),
+    setActivePath: (activePathId) => set({ activePathId, ...clearSelection }),
 
     getPath: (id) => get().paths.find((p) => p.id === id),
 
@@ -158,7 +193,7 @@ export const usePathStore = create<PathState>((set, get) => {
     addAnchor: (position) => {
       const anchor = makeAnchor(position)
       editActive((p) => ({ anchors: [...p.anchors, anchor] }))
-      set({ selectedAnchorId: anchor.id, selectedHandle: 'none' })
+      set(soleSelection(anchor.id))
       return anchor.id
     },
 
@@ -169,16 +204,26 @@ export const usePathStore = create<PathState>((set, get) => {
         anchors.splice(Math.min(anchors.length, Math.max(0, index)), 0, anchor)
         return { anchors }
       })
-      set({ selectedAnchorId: anchor.id, selectedHandle: 'none' })
+      set(soleSelection(anchor.id))
     },
 
     setPath: (positions, closed) => {
       editActive(() => ({ anchors: positions.map(makeAnchor), closed }))
-      set({ selectedAnchorId: null, selectedHandle: 'none' })
+      set(clearSelection)
     },
 
     updateAnchorPosition: (id, position) =>
       editActive((p) => ({ anchors: p.anchors.map((a) => (a.id === id ? { ...a, position } : a)) })),
+
+    translateSelectedAnchors: (delta) =>
+      editActive((p) => ({
+        anchors: translateAnchors(p.anchors, get().selectedAnchorIds, delta),
+      })),
+
+    applyAnchorGroupTransform: ({ snapshot, startPivot, currentPivot, quat, scale }) =>
+      editActive((p) => ({
+        anchors: transformAnchorsAroundPivot(p.anchors, snapshot, startPivot, currentPivot, quat, scale),
+      })),
 
     setHandleOut: (id, handleOut, mirror) =>
       editActive((p) => ({
@@ -201,17 +246,65 @@ export const usePathStore = create<PathState>((set, get) => {
         }),
       })),
 
+    setAnchorTangent: (id, mode) => {
+      get().setAnchorsTangent([id], mode)
+    },
+
+    setAnchorsTangent: (ids, mode) =>
+      editActive((p) => {
+        const wanted = new Set(ids)
+        let anchors = p.anchors.map((a) => ({ ...a }))
+        for (let idx = 0; idx < anchors.length; idx++) {
+          if (!wanted.has(anchors[idx].id)) continue
+          const target = anchors[idx]
+          if (mode === 'auto') {
+            target.manual = false
+          } else if (mode === 'corner') {
+            target.manual = true
+            target.mirrored = true
+            target.handleIn = [0, 0, 0]
+            target.handleOut = [0, 0, 0]
+          } else {
+            const seeded = computeAutoHandles(
+              anchors.map((a, i) => (i === idx ? { ...a, manual: false } : a)),
+              p.closed,
+              p.rounding,
+            )[idx]
+            target.manual = true
+            if (mode === 'smooth') {
+              target.mirrored = true
+              target.handleOut = seeded.handleOut
+              target.handleIn = negate(seeded.handleOut)
+            } else {
+              target.mirrored = false
+              target.handleOut = seeded.handleOut
+              target.handleIn = seeded.handleIn
+            }
+          }
+        }
+        return { anchors }
+      }),
+
     removeAnchor: (id) => {
-      editActive((p) => ({ anchors: p.anchors.filter((a) => a.id !== id) }))
-      set((s) => ({
-        selectedAnchorId: s.selectedAnchorId === id ? null : s.selectedAnchorId,
-        selectedHandle: s.selectedAnchorId === id ? 'none' : s.selectedHandle,
-      }))
+      get().removeAnchors([id])
+    },
+
+    removeAnchors: (ids) => {
+      const drop = new Set(ids)
+      editActive((p) => ({ anchors: p.anchors.filter((a) => !drop.has(a.id)) }))
+      set((s) => {
+        const selectedAnchorIds = s.selectedAnchorIds.filter((id) => !drop.has(id))
+        return {
+          selectedAnchorIds,
+          selectedAnchorId: primaryAnchorId(selectedAnchorIds),
+          selectedHandle: selectedAnchorIds.length === 0 ? 'none' : s.selectedHandle,
+        }
+      })
     },
 
     clearPath: () => {
       editActive(() => ({ anchors: [], closed: false }))
-      set({ selectedAnchorId: null, selectedHandle: 'none' })
+      set(clearSelection)
     },
 
     setClosed: (closed) => editActive(() => ({ closed })),
@@ -222,14 +315,33 @@ export const usePathStore = create<PathState>((set, get) => {
       set({ drawPlaneY: y })
     },
 
-    setAnchorHeight: (id, y) =>
+    setAnchorHeight: (id, y) => {
+      get().setAnchorsHeight([id], y)
+    },
+
+    setAnchorsHeight: (ids, y) => {
+      const wanted = new Set(ids)
       editActive((p) => ({
-        anchors: p.anchors.map((a) => (a.id === id ? { ...a, position: [a.position[0], y, a.position[2]] as Vec3 } : a)),
-      })),
+        anchors: p.anchors.map((a) =>
+          wanted.has(a.id) ? { ...a, position: [a.position[0], y, a.position[2]] as Vec3 } : a,
+        ),
+      }))
+    },
 
     autoSmoothAll: () => editActive((p) => ({ anchors: p.anchors.map((a) => ({ ...a, manual: false })) })),
 
-    selectAnchor: (selectedAnchorId) => set({ selectedAnchorId, selectedHandle: 'none' }),
+    selectAnchor: (id, additive = false) => {
+      if (id === null) {
+        set(clearSelection)
+        return
+      }
+      const selectedAnchorIds = clickAnchorSelection(get().selectedAnchorIds, id, additive)
+      set({
+        selectedAnchorIds,
+        selectedAnchorId: primaryAnchorId(selectedAnchorIds),
+        selectedHandle: 'none',
+      })
+    },
     selectHandle: (selectedHandle) => set({ selectedHandle }),
     setDrawPlaneY: (drawPlaneY) => set({ drawPlaneY }),
   }

@@ -133,9 +133,9 @@ export function BoardView() {
             </div>
             <h2 className="text-sm font-medium text-ink">No shots yet</h2>
             <p className="max-w-sm text-[12px] leading-5 text-ink-dim">
-              A shot is a camera move you saved. Build one in the editor, then press
-              <span className="text-ink"> Save shot</span> on the timeline — they line up here as an
-              animatic.
+              A shot is a camera move you saved. Ask the Director to build one, or draw it yourself,
+              then press <span className="text-ink">Save shot</span> on the timeline — they line up
+              here as an animatic.
             </p>
             <button
               onClick={() => useEditorStore.getState().setAppView('editor')}

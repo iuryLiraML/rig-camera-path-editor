@@ -43,6 +43,20 @@ export const ImportIcon = (p: IconProps) => (
   </svg>
 )
 
+export const ExportIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 9.5V2.5M5.2 5.3L8 2.5l2.8 2.8" />
+    <path d="M3 11v1.5A1.5 1.5 0 004.5 14h7a1.5 1.5 0 001.5-1.5V11" />
+  </svg>
+)
+
+export const SettingsIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="8" r="2.1" />
+    <path d="M8 2.4v1.5M8 12.1v1.5M2.4 8h1.5M12.1 8h1.5M4.1 4.1l1.1 1.1M10.8 10.8l1.1 1.1M11.9 4.1l-1.1 1.1M5.2 10.8l-1.1 1.1" />
+  </svg>
+)
+
 export const PlayIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M5.5 3.5l7 4.5-7 4.5v-9z" />

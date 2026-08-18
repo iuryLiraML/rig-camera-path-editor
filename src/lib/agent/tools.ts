@@ -1,12 +1,25 @@
 import * as THREE from 'three'
 import type { ToolDef } from './providers'
-import { getSkill } from './skills'
+import { AGENT_SKILLS, getSkill } from './skills'
 import { useRigStore } from '../../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../../state/usePathStore'
-import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
+import { cameraPath, cameraReady } from '../../state/cameraPathLink'
+import { defaultFollow, useSceneStore, type Vec3 } from '../../state/useSceneStore'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useProjectStore } from '../../state/useProjectStore'
-import { applyCameraPreset, type PresetKind } from '../presets'
+import { applyCameraPreset } from '../presets'
+import {
+  applyAtomPath,
+  atomFromSubject,
+  followedPathId,
+  formatAtomResult,
+  mutateFollowedPath,
+  parseAngleInput,
+  parseAtomKind,
+  parseScaleInput,
+} from '../applyAtom'
+import { subjectAabb, selectedObjectId, objectCandidates } from './sceneSnapshot'
+import { applyBeginPlayback } from '../playback'
 import { saveCurrentAsShot } from '../projects'
 import { objectGroups } from '../../viewport/SceneObjects'
 import { renderBridge } from '../renderBridge'
@@ -17,6 +30,11 @@ import {
   getCameraOptionsSnapshot,
   useCameraOptionsStore,
 } from '../../state/useCameraOptionsStore'
+import { setCameraPathSpace, setTrackObjectId } from '../pathSpaceBind'
+import { getLiftAttachment } from '../fal/attachment'
+import { liftAttachedStill } from '../fal/pipeline'
+import { readFalSettings } from '../fal/settings'
+import { importModelBuffer } from '../sceneIO'
 
 const vec3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
 
@@ -57,25 +75,59 @@ export const TOOL_DEFS: ToolDef[] = [
     },
   },
   {
-    name: 'apply_camera_preset',
-    description: 'Replace the camera path with a preset generated around the scene bounding box.',
+    name: 'measure_subject',
+    description:
+      'Read the subject AABB (center, size, diagonal) and suggested camera radius per shot scale. Call before inventing any metres.',
     input_schema: {
       type: 'object',
-      properties: { kind: { type: 'string', enum: ['orbit', 'arc', 'flyover', 'dolly'] } },
+      properties: { object_id: { type: 'string', description: 'Scene object id from scene_state' } },
+      required: ['object_id'],
+    },
+  },
+  {
+    name: 'instantiate_atom',
+    description:
+      'Build a cinematic camera atom (orbit, dolly, …) sized from the subject bounds so framing hits the shot_scale fill band. Prefer this over set_camera_path.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['orbit', 'arc', 'flyover', 'dolly', 'crane', 'pan', 'tilt', 'zoom'] },
+        subject_id: { type: 'string', description: 'Subject object id from the ShotPlan' },
+        scale: { type: 'string', enum: ['ecu', 'cu', 'mcu', 'ms', 'ls', 'els', 'auto'] },
+        angle: { type: 'string', enum: ['eye', 'low', 'high', 'top', 'dutch'] },
+        duration: { type: 'number', description: 'Clip length in seconds (1..30)' },
+      },
+      required: ['kind', 'subject_id'],
+    },
+  },
+  {
+    name: 'apply_camera_preset',
+    description:
+      'Same as instantiate_atom. Pass subject_id and scale so the path is sized from the subject, not the whole scene.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        kind: { type: 'string', enum: ['orbit', 'arc', 'flyover', 'dolly', 'crane', 'pan', 'tilt', 'zoom'] },
+        subject_id: { type: 'string' },
+        scale: { type: 'string', enum: ['ecu', 'cu', 'mcu', 'ms', 'ls', 'els', 'auto'] },
+        angle: { type: 'string', enum: ['eye', 'low', 'high', 'top', 'dutch'] },
+        duration: { type: 'number' },
+      },
       required: ['kind'],
     },
   },
   {
     name: 'set_camera_path',
     description:
-      'Replace the camera path with explicit anchor positions (world units, Y up, floor at y=0). Curves between anchors are auto-smoothed by the rounding parameter.',
+      'Custom paths only (ShotPlan.move_kind=custom). Pass custom=true. For named moves use instantiate_atom — do not invent XYZ.',
     input_schema: {
       type: 'object',
       properties: {
         anchors: { type: 'array', items: vec3, minItems: 2, description: 'Anchor positions [x,y,z]' },
         closed: { type: 'boolean', description: 'Close the path into a loop' },
+        custom: { type: 'boolean', description: 'Must be true. Confirms this is a custom move, not an atom.' },
       },
-      required: ['anchors', 'closed'],
+      required: ['anchors', 'closed', 'custom'],
     },
   },
   {
@@ -113,14 +165,73 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'set_look_at',
-    description: 'Where the camera looks: a fixed world-space target or the direction of motion.',
+    description:
+      'Where the camera looks, and whether the path is world-space or rides with a tracked object (relative camera: chase, over-shoulder, hood-mount). Optional offset is local to the tracked object.',
     input_schema: {
       type: 'object',
       properties: {
         mode: { type: 'string', enum: ['target', 'motion'] },
-        target: { ...vec3, description: 'World position (only for mode=target)' },
+        target: { ...vec3, description: 'World position (mode=target, when not tracking an object)' },
+        object_id: {
+          type: 'string',
+          description: 'Scene object to track / parent the path to. Empty to use a fixed point.',
+        },
+        offset: {
+          ...vec3,
+          description:
+            'Local XYZ offset from the tracked object origin (head, label, over-shoulder). Omit on the same object to keep the current offset; a new object without offset uses the object center.',
+        },
+        path_space: {
+          type: 'string',
+          enum: ['world', 'object'],
+          description:
+            'object = path is in the tracked object\'s local space (requires object_id or an existing track).',
+        },
       },
       required: ['mode'],
+    },
+  },
+  {
+    name: 'set_camera_noise',
+    description:
+      'Enable or tune the camera shake clip. Prefer style + intensity + start/end + fades — do NOT write pose or path keyframes to fake handheld. Same seed always produces the same motion.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean' },
+        style: {
+          type: 'string',
+          enum: ['shake', 'handheld', 'rumble'],
+          description: 'shake = mid jitter; handheld = slower, rotation-heavy; rumble = low, position-heavy',
+        },
+        intensity: { type: 'number', description: 'Master gain 0..1' },
+        start: { type: 'number', description: 'Window start as 0..1 of the shot' },
+        end: { type: 'number', description: 'Window end as 0..1 of the shot' },
+        fade_in: { type: 'number', description: 'Fade-in length in seconds' },
+        fade_out: { type: 'number', description: 'Fade-out length in seconds' },
+        amp_pos: { type: 'number', description: 'Override position jitter in world units (0..0.2)' },
+        amp_rot: { type: 'number', description: 'Override rotation jitter in degrees (0..8)' },
+        freq: { type: 'number', description: 'Override frequency (0.5..12)' },
+        seed: { type: 'number' },
+      },
+    },
+  },
+  {
+    name: 'set_follow_path',
+    description:
+      'Attach an object to a motion path, or detach it (path_id empty). Uses the existing follow settings: align, offset, height, bank, loops.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        object_id: { type: 'string' },
+        path_id: { type: 'string', description: 'Path id from scene_state, or empty to detach' },
+        align: { type: 'boolean' },
+        offset: { type: 'number', description: 'Start along the path 0..1' },
+        height: { type: 'number' },
+        bank: { type: 'number', description: 'Roll in degrees when align is true' },
+        loops: { type: 'number' },
+      },
+      required: ['object_id'],
     },
   },
   {
@@ -136,7 +247,8 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'pose_object',
-    description: 'Set the current pose of a scene object. Only include the parts you want to change.',
+    description:
+      "Move, rotate, or scale a scene object. After a group photo lift, each Person N is its own id — pose them separately. Never pose a leftover primitive. Only include the parts you want to change. Cannot change a figure's body articulation; that pose comes from the photo.",
     input_schema: {
       type: 'object',
       properties: {
@@ -208,9 +320,90 @@ export const TOOL_DEFS: ToolDef[] = [
       required: ['kind'],
     },
   },
+  {
+    name: 'block_people_from_image',
+    description:
+      'Lift every person in the attached photo into the scene as separate clay figures (SAM 3.1 masks, then one SAM 3D Body GLB per person). A group photo becomes Person 1, Person 2, … — pose_object each id on its own. Import sits them on the floor side by side. Do not invent extra XYZ.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'generate_prop',
+    description:
+      'Lift a single prop from the attached photo into the scene as a GLB. prompt is the object noun, e.g. helmet. Import sits it on the floor — do not invent XYZ.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        prompt: { type: 'string', description: 'Object noun, e.g. helmet' },
+      },
+      required: ['prompt'],
+    },
+  },
+  {
+    name: 'create_object_path',
+    description: 'Create a new motion path for objects (not the camera). Returns the path id for set_follow_path.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        anchors: { type: 'array', items: vec3, minItems: 2 },
+        closed: { type: 'boolean' },
+      },
+      required: ['anchors'],
+    },
+  },
+  {
+    name: 'set_object_path',
+    description: 'Replace anchors on an existing object path (never the camera path).',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path_id: { type: 'string' },
+        anchors: { type: 'array', items: vec3, minItems: 2 },
+        closed: { type: 'boolean' },
+      },
+      required: ['path_id', 'anchors'],
+    },
+  },
+  {
+    name: 'update_pose_keyframe',
+    description: "Move an object's pose key in time (0..1).",
+    input_schema: {
+      type: 'object',
+      properties: {
+        object_id: { type: 'string' },
+        key_id: { type: 'string' },
+        time: { type: 'number' },
+      },
+      required: ['object_id', 'key_id', 'time'],
+    },
+  },
+  {
+    name: 'remove_pose_keyframe',
+    description: 'Delete one pose key from an object.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        object_id: { type: 'string' },
+        key_id: { type: 'string' },
+      },
+      required: ['object_id', 'key_id'],
+    },
+  },
+  {
+    name: 'set_object_clips',
+    description: 'Play or pause embedded GLB animation clips on an object.',
+    input_schema: {
+      type: 'object',
+      properties: {
+        object_id: { type: 'string' },
+        play: { type: 'boolean' },
+      },
+      required: ['object_id', 'play'],
+    },
+  },
 ]
 
-type Executor = (input: Record<string, unknown>) => string
+type Executor = (input: Record<string, unknown>) => string | Promise<string>
 
 const asVec3 = (v: unknown): Vec3 => {
   const a = v as number[]
@@ -220,6 +413,46 @@ const asVec3 = (v: unknown): Vec3 => {
 const commitActiveCamera = (result: string) => {
   useCameraOptionsStore.getState().captureActive()
   return result
+}
+
+function resolveSubjectBox(subjectId: string) {
+  if (subjectId) {
+    const box = subjectAabb(subjectId)
+    if (box) return { id: subjectId, box }
+  }
+  const selected = selectedObjectId()
+  if (selected) {
+    const box = subjectAabb(selected)
+    if (box) return { id: selected, box }
+  }
+  const ranked = objectCandidates()
+    .filter((o) => !o.isFloorish)
+    .sort((a, b) => b.area - a.area)
+  const top = ranked[0]
+  if (!top) return null
+  const box = subjectAabb(top.id)
+  return box ? { id: top.id, box } : null
+}
+
+function runInstantiateAtom(input: Record<string, unknown>, requireSubject: boolean): string {
+  const kind = parseAtomKind(input.kind)
+  if (!kind) return `Unknown atom kind "${String(input.kind)}".`
+  const subjectId = typeof input.subject_id === 'string' ? input.subject_id.trim() : ''
+  const resolved = resolveSubjectBox(subjectId)
+  if (!resolved) {
+    if (requireSubject) return 'instantiate_atom needs a subject_id from scene_state.'
+    applyCameraPreset(kind)
+    return commitActiveCamera(`Applied "${kind}" preset from the scene bounds (no subject).`)
+  }
+  const atom = atomFromSubject({
+    kind,
+    subject: resolved.box,
+    scale: parseScaleInput(input.scale),
+    angle: parseAngleInput(input.angle),
+  })
+  const duration = typeof input.duration === 'number' ? input.duration : undefined
+  applyAtomPath(atom, duration)
+  return commitActiveCamera(`${formatAtomResult(atom)} subject=${resolved.id}`)
 }
 
 const EXECUTORS: Record<string, Executor> = {
@@ -233,7 +466,7 @@ const EXECUTORS: Record<string, Executor> = {
       .skills.find((s) => s.name.toLowerCase() === name.toLowerCase())
     if (custom) return custom.body || `(The "${custom.name}" skill has no instructions yet.)`
     const names = [
-      ...['drone', 'packshot', 'orbit-reveal', 'dolly-push'],
+      ...AGENT_SKILLS.map((s) => s.name),
       ...useProjectStore.getState().skills.map((s) => s.name),
     ]
     return `Unknown skill "${name}". Available: ${names.join(', ')}.`
@@ -259,38 +492,46 @@ const EXECUTORS: Record<string, Executor> = {
     return `Selected camera option "${option.name}".`
   },
 
-  apply_camera_preset: (input) => {
-    applyCameraPreset(input.kind as PresetKind)
-    const rig = useRigStore.getState()
-    const cam = usePathStore.getState().getPath(CAMERA_PATH_ID)
-    return commitActiveCamera(
-      `Applied "${input.kind}" preset: ${cam?.anchors.length ?? 0} anchors, closed=${cam?.closed ?? false}, target=${rig.target.map((n) => n.toFixed(1)).join(',')}.`,
-    )
+  measure_subject: (input) => {
+    const id = String(input.object_id ?? '')
+    const box = subjectAabb(id)
+    const object = useSceneStore.getState().objects.find((item) => item.id === id)
+    if (!box || !object) return `No object with id "${id}".`
+    return JSON.stringify({
+      id,
+      name: object.name,
+      center: box.center.map((n) => +n.toFixed(3)),
+      size: box.size.map((n) => +n.toFixed(3)),
+      diagonal: +box.diagonal.toFixed(3),
+    })
   },
 
+  instantiate_atom: (input) => runInstantiateAtom(input, true),
+
+  apply_camera_preset: (input) => runInstantiateAtom(input, false),
+
   set_camera_path: (input) => {
+    if (input.custom !== true) {
+      return 'set_camera_path is only for move_kind=custom. Call instantiate_atom for orbit/arc/dolly/crane/pan/tilt/zoom/flyover.'
+    }
     const anchors = (input.anchors as unknown[]).map(asVec3)
-    const path = usePathStore.getState()
-    // edit the camera path without stealing the user's active-path focus
-    const prevActive = path.activePathId
-    path.setActivePath(CAMERA_PATH_ID)
-    path.setPath(anchors, Boolean(input.closed))
-    usePathStore.getState().setActivePath(prevActive)
+    mutateFollowedPath(() => {
+      usePathStore.getState().setPath(anchors, Boolean(input.closed))
+    })
     return commitActiveCamera(`Camera path set: ${anchors.length} anchors, closed=${Boolean(input.closed)}.`)
   },
 
   set_path_params: (input) => {
     const rig = useRigStore.getState()
-    const path = usePathStore.getState()
-    const prevActive = path.activePathId
-    path.setActivePath(CAMERA_PATH_ID)
     const changed: string[] = []
-    if (typeof input.rounding === 'number') (path.setRounding(input.rounding), changed.push(`rounding=${input.rounding}`))
-    if (typeof input.height === 'number') (path.setPathHeight(input.height), changed.push(`height=${input.height}`))
+    mutateFollowedPath(() => {
+      const path = usePathStore.getState()
+      if (typeof input.rounding === 'number') (path.setRounding(input.rounding), changed.push(`rounding=${input.rounding}`))
+      if (typeof input.height === 'number') (path.setPathHeight(input.height), changed.push(`height=${input.height}`))
+    })
     if (typeof input.duration === 'number') (rig.setDuration(input.duration), changed.push(`duration=${input.duration}s`))
     if (typeof input.smoothness === 'number') (rig.setSmoothness(input.smoothness), changed.push(`smoothness=${input.smoothness}`))
     if (typeof input.loop === 'boolean') (rig.setLoop(input.loop), changed.push(`loop=${input.loop}`))
-    usePathStore.getState().setActivePath(prevActive)
     return commitActiveCamera(changed.length ? `Updated ${changed.join(', ')}.` : 'Nothing to change.')
   },
 
@@ -304,11 +545,110 @@ const EXECUTORS: Record<string, Executor> = {
 
   set_look_at: (input) => {
     const rig = useRigStore.getState()
-    rig.setLookAtMode(input.mode === 'motion' ? 'path-tangent' : 'target')
-    if (input.mode === 'target' && input.target) rig.setTarget(asVec3(input.target))
+    const scene = { objects: useSceneStore.getState().objects, paths: usePathStore.getState().paths }
+    const hasOffset = Array.isArray(input.offset) && input.offset.length >= 3
+    const objectId = typeof input.object_id === 'string' ? input.object_id.trim() : ''
+    if (hasOffset && !objectId && !rig.targetObjectId) {
+      return 'offset needs a tracked object. Pass object_id, or track an object first.'
+    }
+    if (input.mode === 'motion') {
+      rig.setLookAtMode('path-tangent')
+    } else {
+      rig.setLookAtMode('target')
+    }
+    if (objectId) {
+      const object = scene.objects.find((item) => item.id === objectId)
+      if (!object) return `No object with id "${objectId}".`
+      if (input.mode !== 'motion') rig.clearChannel('target')
+      setTrackObjectId(object.id, scene)
+    } else if (input.object_id === '' || (input.mode === 'target' && input.target && input.path_space !== 'object')) {
+      setTrackObjectId(null, scene)
+    }
+    if (input.mode === 'target' && input.target) {
+      useRigStore.getState().setTarget(asVec3(input.target))
+    }
+    if (hasOffset) {
+      const offset = asVec3(input.offset)
+      const live = useRigStore.getState()
+      if (live.lookOffsetKeys.length > 0) live.upsertLookOffsetKey(live.t, offset)
+      else live.setLookOffset(offset)
+    }
+    if (input.path_space === 'object') {
+      const parentId = objectId || useRigStore.getState().targetObjectId
+      if (!parentId) return 'path_space=object needs object_id (or an existing tracked object).'
+      setCameraPathSpace('object', scene)
+    } else if (input.path_space === 'world') {
+      setCameraPathSpace('world', scene)
+    }
+    const next = useRigStore.getState()
+    const tracked = next.targetObjectId
+      ? scene.objects.find((item) => item.id === next.targetObjectId)?.name
+      : null
+    const bits = [
+      next.lookAtMode === 'path-tangent' ? 'motion' : tracked ? `tracking "${tracked}"` : 'target',
+      next.pathSpace === 'object' ? 'path rides object' : 'path in world',
+    ]
+    if (tracked && next.lookAtMode === 'target') {
+      bits.push(
+        `offset [${next.lookOffset.map((n) => n.toFixed(2)).join(', ')}]`,
+      )
+    }
+    return commitActiveCamera(`Look-at: ${bits.join(', ')}.`)
+  },
+
+  set_camera_noise: (input) => {
+    const rig = useRigStore.getState()
+    const patch: Parameters<typeof rig.setCameraNoise>[0] = {}
+    if (typeof input.enabled === 'boolean') patch.enabled = input.enabled
+    if (input.style === 'shake' || input.style === 'handheld' || input.style === 'rumble') {
+      patch.style = input.style
+    }
+    if (typeof input.intensity === 'number') patch.intensity = Math.min(1, Math.max(0, input.intensity))
+    if (typeof input.start === 'number') patch.start = Math.min(1, Math.max(0, input.start))
+    if (typeof input.end === 'number') patch.end = Math.min(1, Math.max(0, input.end))
+    if (typeof input.fade_in === 'number') patch.fadeIn = Math.min(8, Math.max(0, input.fade_in))
+    if (typeof input.fade_out === 'number') patch.fadeOut = Math.min(8, Math.max(0, input.fade_out))
+    if (typeof input.amp_pos === 'number') patch.ampPos = Math.min(0.2, Math.max(0, input.amp_pos))
+    if (typeof input.amp_rot === 'number') patch.ampRot = Math.min(8, Math.max(0, input.amp_rot))
+    if (typeof input.freq === 'number') patch.freq = Math.min(12, Math.max(0.5, input.freq))
+    if (typeof input.seed === 'number') patch.seed = input.seed
+    if (Object.keys(patch).length === 0) return 'Nothing to change on camera noise.'
+    if (patch.start !== undefined && patch.end !== undefined && patch.start > patch.end) {
+      const swap = patch.start
+      patch.start = patch.end
+      patch.end = swap
+    }
+    rig.setCameraNoise(patch)
+    const n = useRigStore.getState().cameraNoise
+    const startS = (n.start * rig.duration).toFixed(1)
+    const endS = (n.end * rig.duration).toFixed(1)
     return commitActiveCamera(
-      `Look-at: ${input.mode}${input.target ? ` @ ${asVec3(input.target).join(',')}` : ''}.`,
+      `Camera noise ${n.enabled ? 'on' : 'off'} ${n.style} ×${n.intensity.toFixed(2)} ${startS}s–${endS}s fade ${n.fadeIn.toFixed(1)}/${n.fadeOut.toFixed(1)}s.`,
     )
+  },
+
+  set_follow_path: (input) => {
+    const scene = useSceneStore.getState()
+    const object = scene.objects.find((o) => o.id === input.object_id)
+    if (!object) return `No object with id "${input.object_id}".`
+    const pathId = typeof input.path_id === 'string' ? input.path_id.trim() : ''
+    if (!pathId) {
+      scene.setFollow(object.id, null)
+      return `Detached "${object.name}" from its path.`
+    }
+    const path = usePathStore.getState().paths.find((p) => p.id === pathId)
+    if (!path) return `No path with id "${pathId}".`
+    const current = object.follow ?? defaultFollow(pathId)
+    scene.setFollow(object.id, {
+      ...current,
+      pathId,
+      align: typeof input.align === 'boolean' ? input.align : current.align,
+      offset: typeof input.offset === 'number' ? input.offset : current.offset,
+      height: typeof input.height === 'number' ? input.height : current.height,
+      bank: typeof input.bank === 'number' ? input.bank : current.bank,
+      loops: typeof input.loops === 'number' ? input.loops : current.loops,
+    })
+    return `"${object.name}" follows "${path.name}".`
   },
 
   set_lens: (input) => {
@@ -364,10 +704,9 @@ const EXECUTORS: Record<string, Executor> = {
 
   play_preview: () => {
     const rig = useRigStore.getState()
-    if ((usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors.length ?? 0) < 2)
-      return 'No camera path yet — create one first.'
+    if (!cameraReady()) return 'No camera path yet — create one first.'
     rig.setT(0)
-    rig.setPlaying(true)
+    applyBeginPlayback()
     return 'Playing.'
   },
 
@@ -386,8 +725,7 @@ const EXECUTORS: Record<string, Executor> = {
   },
 
   save_shot: () => {
-    if ((usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors.length ?? 0) < 2)
-      return 'No camera path to save yet.'
+    if (!cameraReady()) return 'No camera path to save yet.'
     void saveCurrentAsShot()
     return 'Saved this move as a shot on the Board.'
   },
@@ -402,9 +740,99 @@ const EXECUTORS: Record<string, Executor> = {
     }
     return `Added a ${kind}${input.position ? ` at ${asVec3(input.position).join(',')}` : ''} (id ${object?.id}).`
   },
+
+  block_people_from_image: () => {
+    const { falKey, samImageVersion } = readFalSettings()
+    const scene = useSceneStore.getState()
+    return liftAttachedStill({
+      kind: 'person',
+      prompt: 'person',
+      falKey,
+      version: samImageVersion,
+      importBuffer: importModelBuffer,
+      beginLift: scene.beginLift,
+      endLift: scene.endLift,
+      replacePrevious: (objectId) => scene.removeObject(objectId),
+      placeObject: (objectId, position) => {
+        const live = useSceneStore.getState()
+        const object = live.objects.find((item) => item.id === objectId)
+        if (!object) return
+        live.setTransformAll(objectId, { ...object.transform, position })
+      },
+    })
+  },
+
+  generate_prop: (input) => {
+    const { falKey, samImageVersion } = readFalSettings()
+    const scene = useSceneStore.getState()
+    return liftAttachedStill({
+      kind: 'prop',
+      prompt: String(input.prompt ?? ''),
+      falKey,
+      version: samImageVersion,
+      importBuffer: importModelBuffer,
+      beginLift: scene.beginLift,
+      endLift: scene.endLift,
+      replacePrevious: (objectId) => scene.removeObject(objectId),
+    })
+  },
+
+  create_object_path: (input) => {
+    const anchors = (input.anchors as unknown[]).map(asVec3)
+    const path = usePathStore.getState()
+    const prev = path.activePathId
+    const name = typeof input.name === 'string' && input.name.trim() ? input.name.trim() : undefined
+    const id = path.createPath(name)
+    path.setPath(anchors, Boolean(input.closed))
+    usePathStore.getState().setActivePath(prev)
+    const created = usePathStore.getState().getPath(id)
+    return `Created object path "${created?.name ?? id}" (id ${id}) with ${anchors.length} anchors.`
+  },
+
+  set_object_path: (input) => {
+    const pathId = String(input.path_id)
+    if (pathId === CAMERA_PATH_ID || pathId === followedPathId()) {
+      return 'Use instantiate_atom or set_camera_path for the camera path.'
+    }
+    const path = usePathStore.getState()
+    const existing = path.getPath(pathId)
+    if (!existing) return `No path with id "${pathId}".`
+    const prev = path.activePathId
+    path.setActivePath(pathId)
+    path.setPath((input.anchors as unknown[]).map(asVec3), Boolean(input.closed))
+    usePathStore.getState().setActivePath(prev)
+    return `Updated path "${existing.name}".`
+  },
+
+  update_pose_keyframe: (input) => {
+    const scene = useSceneStore.getState()
+    const object = scene.objects.find((o) => o.id === input.object_id)
+    if (!object) return `No object with id "${input.object_id}".`
+    const keyId = String(input.key_id)
+    if (!object.keys.some((k) => k.id === keyId)) return `No key "${keyId}" on "${object.name}".`
+    scene.updateObjectKeyTime(object.id, keyId, Number(input.time) || 0)
+    return `Moved key ${keyId} on "${object.name}".`
+  },
+
+  remove_pose_keyframe: (input) => {
+    const scene = useSceneStore.getState()
+    const object = scene.objects.find((o) => o.id === input.object_id)
+    if (!object) return `No object with id "${input.object_id}".`
+    scene.removeObjectKey(object.id, String(input.key_id))
+    return `Removed key ${input.key_id} from "${object.name}".`
+  },
+
+  set_object_clips: (input) => {
+    const scene = useSceneStore.getState()
+    const object = scene.objects.find((o) => o.id === input.object_id)
+    if (!object) return `No object with id "${input.object_id}".`
+    if (object.clips.length === 0) return `"${object.name}" has no embedded clips.`
+    scene.setPlayClips(object.id, Boolean(input.play))
+    return `${Boolean(input.play) ? 'Playing' : 'Paused'} clips on "${object.name}".`
+  },
 }
 
-export function executeTool(name: string, input: unknown): string {
+export async function executeTool(name: string, input: unknown): Promise<string> {
   const executor = EXECUTORS[name]
   if (!executor) return `Unknown tool "${name}".`
   return executor((input ?? {}) as Record<string, unknown>)
@@ -414,7 +842,7 @@ export function executeTool(name: string, input: unknown): string {
 export function buildSceneContext(): string {
   const scene = useSceneStore.getState()
   const rig = useRigStore.getState()
-  const camPath = usePathStore.getState().getPath(CAMERA_PATH_ID)
+  const camPath = cameraPath()
   const editor = useEditorStore.getState()
   const cameraOptions = getCameraOptionsSnapshot()
   const activeCameraOptionId = useCameraOptionsStore.getState().activeOptionId
@@ -442,9 +870,12 @@ export function buildSceneContext(): string {
       bounds,
       transform: o.transform,
       pose_keyframes: o.keys.length,
+      follow: o.follow ?? null,
       embedded_clips: o.clips.length,
     }
   })
+
+  const attach = getLiftAttachment()
 
   return JSON.stringify(
     {
@@ -464,12 +895,26 @@ export function buildSceneContext(): string {
         rounding: camPath?.rounding ?? 0.8,
         loop: rig.loop,
         camera_keyframes: rig.progressKeys.map((k) => ({ time: +k.time.toFixed(2), progress: +k.progress.toFixed(2) })),
-        look_at: rig.lookAtMode === 'target' ? { mode: 'target', target: rig.target } : { mode: 'motion' },
+        look_at:
+          rig.lookAtMode === 'target'
+            ? rig.targetObjectId
+              ? {
+                  mode: 'target',
+                  track_object_id: rig.targetObjectId,
+                  offset: rig.lookOffset.map((n) => +n.toFixed(2)),
+                }
+              : { mode: 'target', target: rig.target }
+            : { mode: 'motion' },
+        path_space: rig.pathSpace,
+        path_parent_id: rig.pathSpace === 'object' ? rig.targetObjectId : null,
         fov: rig.fov,
         roll: rig.roll,
+        noise: rig.cameraNoise,
       },
+      paths: usePathStore.getState().paths.map((p) => ({ id: p.id, name: p.name, anchors: p.anchors.length })),
       output_format: { aspect: editor.exportAspect, resolution: editor.exportRes },
       playhead_t: +rig.t.toFixed(2),
+      attached_photo: attach ? attach.name : null,
     },
     null,
     1,

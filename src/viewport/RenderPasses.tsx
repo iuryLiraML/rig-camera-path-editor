@@ -223,7 +223,12 @@ export function clearRegion(
   gl.setViewport(x, y, width, height)
   gl.setScissor(x, y, width, height)
   const bg = scene.background
-  if (bg instanceof THREE.Color) gl.setClearColor(bg, 1)
+  if (bg instanceof THREE.Color) {
+    gl.setClearColor(bg, 1)
+  } else if (bg instanceof THREE.Texture) {
+    const bottom = bg.userData.bottomHex
+    if (typeof bottom === 'string') gl.setClearColor(bottom, 1)
+  }
   gl.clear(true, true, false)
   gl.setScissorTest(false)
 }

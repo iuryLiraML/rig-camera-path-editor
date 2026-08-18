@@ -19,6 +19,8 @@ import { makeEmptyRigSnapshot, useCameraOptionsStore } from '../state/useCameraO
 import { idbDelete, idbGet, idbKeys, idbPut, STORES } from './idb'
 import { resetHistory } from './history'
 import type { ModelKey } from './keyframes'
+import { prepareImportedRoot } from './prepareImport'
+import { VIEWPORT_BG_DEFAULT_TOP } from '../viewport/viewportBackground'
 
 /** legacy (pre-projects) localStorage key — still read for migration */
 export const LEGACY_META_KEY = 'rig-scene-objects'
@@ -41,6 +43,10 @@ function parseGLB(buffer: ArrayBuffer) {
   )
 }
 
+export function parseGlbBuffer(buffer: ArrayBuffer) {
+  return parseGLB(buffer)
+}
+
 function countTriangles(root: THREE.Object3D): number {
   let total = 0
   root.traverse((child) => {
@@ -52,22 +58,25 @@ function countTriangles(root: THREE.Object3D): number {
   return Math.round(total)
 }
 
-/** Imports a .glb/.gltf file as a new scene object and persists its buffer. */
-export async function importModelFile(file: File): Promise<{
+/** Imports GLB bytes as a new scene object and persists the buffer. */
+export async function importModelBuffer(
+  buffer: ArrayBuffer,
+  name: string,
+): Promise<{
   objectId: string
   objectName: string
   byteSize: number
 } | null> {
   const scene = useSceneStore.getState()
-  const name = file.name.replace(/\.(glb|gltf)$/i, '')
   scene.setImporting(1)
   try {
-    const buffer = await file.arrayBuffer()
     const { scene: root, clips } = await parseGLB(buffer)
+    prepareImportedRoot(root)
     normalizeModel(root)
     const object = makeObject(name, root, { bufferKey: null, clips })
     object.bufferKey = object.id
     useSceneStore.getState().addObject(object)
+    useEditorStore.getState().select(`obj:${object.id}`)
 
     const triangles = countTriangles(root)
     if (triangles > HEAVY_TRIANGLES) {
@@ -90,6 +99,16 @@ export async function importModelFile(file: File): Promise<{
   } finally {
     useSceneStore.getState().setImporting(-1)
   }
+}
+
+/** Imports a .glb/.gltf file as a new scene object and persists its buffer. */
+export async function importModelFile(file: File): Promise<{
+  objectId: string
+  objectName: string
+  byteSize: number
+} | null> {
+  const name = file.name.replace(/\.(glb|gltf)$/i, '')
+  return importModelBuffer(await file.arrayBuffer(), name)
 }
 
 export function openImportDialog() {
@@ -155,6 +174,7 @@ export async function loadSceneFromMetas(metas: ObjectMeta[], seedIfEmpty = true
         const buffer = await idbGet<ArrayBuffer>(STORES.buffers, meta.bufferKey)
         if (!buffer) continue // buffer lost (cleared storage) — skip quietly
         const { scene: root, clips } = await parseGLB(buffer)
+        prepareImportedRoot(root)
         normalizeModel(root)
         object = makeObject(meta.name, root, { ...meta, clips })
       }
@@ -196,13 +216,14 @@ export async function resetScene() {
     paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
     activePathId: CAMERA_PATH_ID,
     selectedAnchorId: null,
+    selectedAnchorIds: [],
     selectedHandle: 'none',
     drawPlaneY: 1.2,
   })
   useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
   useSceneStore.setState({
     objects: [makeDefaultKnotObject()],
-    bgColor: '#efc8c4',
+    bgColor: VIEWPORT_BG_DEFAULT_TOP,
     showGrid: true,
     lightIntensity: 1.4,
   })

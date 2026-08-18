@@ -1,19 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { useFrame } from '@react-three/fiber'
 import { TransformControls, useCursor } from '@react-three/drei'
-import { useEditorStore } from '../state/useEditorStore'
-import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneStore'
-import { useRigStore } from '../state/useRigStore'
-import { usePathStore } from '../state/usePathStore'
-import { evalModelTransform } from '../lib/keyframes'
+import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { aimObject } from '../lib/cameraOrientation'
 import { buildCurve, clamp01 } from '../lib/curve'
 import { useEditorOnly } from '../lib/editorOnly'
+import { evalModelTransform } from '../lib/keyframes'
+import {
+  applyObjectDrag,
+  hitOnPlane,
+  objectDragMode,
+  objectDragPlane,
+  snapObjectDrag,
+  subtract3,
+  type ObjectDragMode,
+} from '../lib/planeDrag'
+import { repairImportedShading } from '../lib/prepareImport'
+import { usePathStore } from '../state/usePathStore'
+import { useEditorStore } from '../state/useEditorStore'
+import { useRigStore } from '../state/useRigStore'
+import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneStore'
 import { isTechMode } from './RenderPasses'
+import { capturePointer, releasePointer } from './path/PenTool'
 
 const DEG = Math.PI / 180
 const RAD = 180 / Math.PI
+const MESH_DRAG_PX = 3
 
 /** reusable temporaries for the follow-path frame math (avoid per-frame allocs) */
 
@@ -40,6 +52,8 @@ function ObjectGizmo({
   onChange: () => void
 }) {
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
+  const snapEnabled = useEditorStore((s) => s.snapEnabled)
+  const gridSize = useEditorStore((s) => s.gridSize)
   const ref = useRef<THREE.Object3D>(null)
   useEditorOnly(ref)
   return (
@@ -47,7 +61,8 @@ function ObjectGizmo({
       ref={ref as never}
       object={groupRef as React.RefObject<THREE.Group>}
       mode={gizmoMode}
-      size={0.8}
+      size={0.65}
+      translationSnap={snapEnabled ? gridSize : undefined}
       onObjectChange={onChange}
     />
   )
@@ -73,6 +88,12 @@ function ObjectNode({ object }: { object: SceneObject }) {
   )
 
   useCursor(hovered && tool === 'select' && !playMode)
+
+  useEffect(() => {
+    repairImportedShading(object.root)
+    object.material.side = THREE.DoubleSide
+    object.material.needsUpdate = true
+  }, [object.root, object.material])
 
   // hover/selection feedback: a subtle grayscale lift, no color involved
   useEffect(() => {
@@ -160,15 +181,98 @@ function ObjectNode({ object }: { object: SceneObject }) {
     })
   }
 
+  const meshDrag = useRef<{
+    mode: ObjectDragMode
+    keep: Vec3
+    planePoint: Vec3
+    planeNormal: Vec3
+    grab: Vec3
+    startClient: [number, number]
+    moved: boolean
+  } | null>(null)
+
+  const cameraDirOf = (e: ThreeEvent<PointerEvent>): Vec3 => {
+    const n = new THREE.Vector3()
+    e.camera.getWorldDirection(n)
+    return [n.x, n.y, n.z]
+  }
+
+  const rayOf = (e: ThreeEvent<PointerEvent>) => ({
+    origin: e.ray.origin.toArray() as Vec3,
+    dir: e.ray.direction.toArray() as Vec3,
+  })
+
+  const beginMeshDrag = (e: ThreeEvent<PointerEvent>, pos: Vec3, mode: ObjectDragMode) => {
+    const plane = objectDragPlane(pos, cameraDirOf(e), mode)
+    const { origin, dir } = rayOf(e)
+    const hit = hitOnPlane(origin, dir, plane.point, plane.normal)
+    if (!hit) return false
+    meshDrag.current = {
+      mode,
+      keep: pos,
+      planePoint: plane.point,
+      planeNormal: plane.normal,
+      grab: subtract3(pos, hit),
+      startClient: [e.clientX, e.clientY],
+      moved: false,
+    }
+    return true
+  }
+
+  const applyMeshDrag = (e: ThreeEvent<PointerEvent>) => {
+    const drag = meshDrag.current
+    const g = groupRef.current
+    if (!drag || !g) return
+    if (!drag.moved) {
+      if (Math.hypot(e.clientX - drag.startClient[0], e.clientY - drag.startClient[1]) < MESH_DRAG_PX) {
+        return
+      }
+      drag.moved = true
+    }
+    const mode = objectDragMode(e.shiftKey)
+    const pos: Vec3 = [g.position.x, g.position.y, g.position.z]
+    if (mode !== drag.mode) {
+      if (!beginMeshDrag(e, pos, mode)) return
+      meshDrag.current!.moved = true
+    }
+    const live = meshDrag.current
+    if (!live) return
+    const { origin, dir } = rayOf(e)
+    const hit = hitOnPlane(origin, dir, live.planePoint, live.planeNormal)
+    if (!hit) return
+    let next = applyObjectDrag(hit, live.grab, live.keep, live.mode)
+    const editor = useEditorStore.getState()
+    if (editor.snapEnabled) next = snapObjectDrag(next, editor.gridSize, live.mode)
+    g.position.set(...next)
+    syncTransform()
+  }
+
   return (
     <>
       <group
         ref={groupRef}
+        userData={{ pickKind: 'object', pickId: `obj:${object.id}` }}
         onPointerDown={(e) => {
           const editor = useEditorStore.getState()
           if (editor.tool !== 'select' || editor.playMode || e.button !== 0) return
           e.stopPropagation()
           editor.select(`obj:${object.id}`)
+          if (follow) return
+          const g = groupRef.current
+          if (!g) return
+          const pos: Vec3 = [g.position.x, g.position.y, g.position.z]
+          if (!beginMeshDrag(e, pos, objectDragMode(e.shiftKey))) return
+          capturePointer(e)
+        }}
+        onPointerMove={(e) => {
+          if (!meshDrag.current) return
+          e.stopPropagation()
+          applyMeshDrag(e)
+        }}
+        onPointerUp={(e) => {
+          if (!meshDrag.current) return
+          meshDrag.current = null
+          releasePointer(e)
         }}
         onPointerOver={(e) => {
           e.stopPropagation()

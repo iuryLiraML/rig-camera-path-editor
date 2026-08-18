@@ -1,17 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useEditorStore } from '../state/useEditorStore'
-import { TIMELINE_HEIGHT } from './Timeline'
 
 /**
  * Single source of truth for the free area of the viewport — the region not
  * covered by the docked panels.
  *
- * Every floating control used to hard-code its own pixel offsets (left-[244px],
- * right-[252px], right-[332px], pipRect.right: 264…). Those guesses disagreed
- * with each other and with the right panel, which changes width with its tab:
- * the timeline ended up 80 px short of the panel in the Design tab, sat flush
- * against the left panel with no gutter, and the footer centred on the window
- * instead of on the free area, so it overhung the timeline.
+ * Chrome widths used to be hardcoded (232 / 320 / 168). On a small window or
+ * browser zoom those panels ate the canvas. Sizes now scale down so a minimum
+ * free area always remains.
  */
 
 /** gutter used between every docked panel and the window edges */
@@ -21,10 +17,69 @@ export const GUTTER = 12
 const FOOTER_ROW_HEIGHT = 32
 /** height of the top row (Toolbar / ViewSwitcher), both at top-3 */
 const TOP_ROW_HEIGHT = 38
-/** LeftPanel: w-[232px] at left-3 */
-const LEFT_PANEL_WIDTH = 232
-/** RightPanel: w-60 (design) / w-80 (assistant), both at right-3 */
-const RIGHT_PANEL_WIDTH = { design: 240, assistant: 320 } as const
+
+export const LEFT_PANEL_MAX = 280
+export const LEFT_PANEL_MIN = 196
+export const RIGHT_PANEL_MAX = 320
+export const RIGHT_PANEL_MIN = 220
+export const TIMELINE_HEIGHT_DEFAULT = 240
+/** user-drag cap; chromeSizes still shrinks further to keep MIN_FREE_HEIGHT */
+export const TIMELINE_HEIGHT_MAX = 480
+export const TIMELINE_MIN = 108
+export const MIN_FREE_WIDTH = 260
+export const MIN_FREE_HEIGHT = 140
+
+/**
+ * Projects / Editor / Board pill sits at the left of the free area. The tool
+ * bar used to centre itself in that same strip; after W/E/R it grew wide enough
+ * to paint over "Board". Reserve this many px so the two never share x.
+ */
+export const VIEW_SWITCHER_RESERVE = 212
+
+export function toolbarSlot(insets: ViewportInsets): { left: number; width: number } {
+  const left = insets.left + VIEW_SWITCHER_RESERVE + GUTTER
+  return { left, width: Math.max(120, insets.right - left) }
+}
+
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
+
+export function chromeSizes(
+  windowWidth: number,
+  windowHeight: number,
+  timelineVisible: boolean,
+  requestedHeight = TIMELINE_HEIGHT_DEFAULT,
+): { leftWidth: number; rightWidth: number; timelineHeight: number } {
+  const sideGutters = GUTTER * 4
+  const widthBudget = Math.max(0, windowWidth - sideGutters)
+
+  let leftWidth = LEFT_PANEL_MAX
+  let rightWidth = RIGHT_PANEL_MAX
+  if (widthBudget - (leftWidth + rightWidth) < MIN_FREE_WIDTH) {
+    const panelBudget = Math.max(LEFT_PANEL_MIN + RIGHT_PANEL_MIN, widthBudget - MIN_FREE_WIDTH)
+    const scale = panelBudget / (LEFT_PANEL_MAX + RIGHT_PANEL_MAX)
+    leftWidth = Math.round(clamp(LEFT_PANEL_MAX * scale, LEFT_PANEL_MIN, LEFT_PANEL_MAX))
+    rightWidth = Math.round(clamp(RIGHT_PANEL_MAX * scale, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX))
+    if (leftWidth + rightWidth > widthBudget) {
+      const overflow = leftWidth + rightWidth - widthBudget
+      const fromRight = Math.min(overflow, Math.max(0, rightWidth - 196))
+      rightWidth -= fromRight
+      leftWidth = Math.max(148, leftWidth - (overflow - fromRight))
+    }
+  }
+
+  let timelineHeight = timelineVisible
+    ? clamp(requestedHeight, TIMELINE_MIN, TIMELINE_HEIGHT_MAX)
+    : 0
+  if (timelineVisible) {
+    const verticalChrome = GUTTER + TOP_ROW_HEIGHT + GUTTER + GUTTER + timelineHeight + GUTTER
+    const freeH = windowHeight - verticalChrome
+    if (freeH < MIN_FREE_HEIGHT) {
+      timelineHeight = Math.max(TIMELINE_MIN, timelineHeight - (MIN_FREE_HEIGHT - freeH))
+    }
+  }
+
+  return { leftWidth, rightWidth, timelineHeight }
+}
 
 export interface ViewportInsets {
   /** first free x, i.e. right edge of the left panel + gutter */
@@ -48,24 +103,39 @@ export interface ViewportInsets {
    * be parked on top of the footer.
    */
   contentBottom: number
+  leftWidth: number
+  rightWidth: number
+  timelineHeight: number
 }
 
 export function viewportInsets(
-  panelTab: 'design' | 'assistant',
+  _panelTab: 'design' | 'assistant',
   windowWidth: number,
   timelineVisible: boolean,
+  windowHeight = 900,
+  requestedHeight = TIMELINE_HEIGHT_DEFAULT,
 ): ViewportInsets {
-  const left = GUTTER + LEFT_PANEL_WIDTH + GUTTER
-  const right = windowWidth - (GUTTER + RIGHT_PANEL_WIDTH[panelTab] + GUTTER)
-  const bottom = timelineVisible ? GUTTER + TIMELINE_HEIGHT + GUTTER : GUTTER
-  return {
+  const { leftWidth, rightWidth, timelineHeight } = chromeSizes(
+    windowWidth,
+    windowHeight,
+    timelineVisible,
+    requestedHeight,
+  )
+  const left = GUTTER + leftWidth + GUTTER
+  const right = windowWidth - (GUTTER + rightWidth + GUTTER)
+  const bottom = timelineVisible ? GUTTER + timelineHeight + GUTTER : GUTTER
+  const insets = {
     left,
     top: GUTTER + TOP_ROW_HEIGHT + GUTTER,
     right,
     bottom,
     centre: left + (right - left) / 2,
     contentBottom: bottom + GUTTER + FOOTER_ROW_HEIGHT + GUTTER,
+    leftWidth,
+    rightWidth,
+    timelineHeight,
   }
+  return insets
 }
 
 /**
@@ -111,14 +181,20 @@ export function useWindowSize() {
   useEffect(() => {
     const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight })
     window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    window.visualViewport?.addEventListener('resize', onResize)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      window.visualViewport?.removeEventListener('resize', onResize)
+    }
   }, [])
   return size
 }
 
-/** Reactive variant: re-derives when the right panel's tab changes. */
-export function useViewportInsets(windowWidth = window.innerWidth): ViewportInsets {
+/** Reactive variant: re-derives when play mode hides the timeline. */
+export function useViewportInsets(windowWidth?: number, windowHeight?: number): ViewportInsets {
   const panelTab = useEditorStore((s) => s.panelTab)
   const playMode = useEditorStore((s) => s.playMode)
-  return viewportInsets(panelTab, windowWidth, !playMode)
+  const timelineHeight = useEditorStore((s) => s.timelineHeight)
+  const win = useWindowSize()
+  return viewportInsets(panelTab, windowWidth ?? win.w, !playMode, windowHeight ?? win.h, timelineHeight)
 }

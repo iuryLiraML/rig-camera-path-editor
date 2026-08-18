@@ -3,6 +3,8 @@ import { persist } from 'zustand/middleware'
 import * as THREE from 'three'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { KEY_MERGE_EPS, type ModelKey } from '../lib/keyframes'
+import type { EaseKind } from '../lib/easing'
+import { clamp01 } from '../lib/intervalSpacing'
 import {
   buildPrimitiveGeometry,
   defaultParams,
@@ -11,7 +13,16 @@ import {
   type PrimitiveKind,
   type PrimitiveSpec,
 } from '../lib/primitiveGeometry'
+import { releasePathParent } from '../lib/pathSpaceBind'
 import { useEditorStore } from './useEditorStore'
+import { usePathStore } from './usePathStore'
+import { useRigStore } from './useRigStore'
+import {
+  VIEWPORT_BG_DEFAULT_TOP,
+  VIEWPORT_BG_LEGACY_DEFAULT,
+  VIEWPORT_BG_SLATE_DEFAULT,
+} from '../viewport/viewportBackground'
+import { boundsAreUsable, meshWorldBounds } from '../lib/prepareImport'
 
 export type Vec3 = [number, number, number]
 
@@ -28,17 +39,23 @@ export function makeClayMaterial(shade: number) {
     color: new THREE.Color().setScalar(shade),
     roughness: 0.9,
     metalness: 0,
+    side: THREE.DoubleSide,
   })
 }
 
 /** Center on origin, rest on the floor and normalize to ~2 world units. */
 export function normalizeModel(root: THREE.Object3D): THREE.Object3D {
-  const box = new THREE.Box3().setFromObject(root)
+  root.updateMatrixWorld(true)
+  const box = meshWorldBounds(root)
+  if (!boundsAreUsable(box)) return root
+
   const size = box.getSize(new THREE.Vector3())
-  const maxDim = Math.max(size.x, size.y, size.z) || 1
+  const maxDim = Math.max(size.x, size.y, size.z)
   root.scale.multiplyScalar(2 / maxDim)
 
-  const scaled = new THREE.Box3().setFromObject(root)
+  root.updateMatrixWorld(true)
+  const scaled = meshWorldBounds(root)
+  if (!boundsAreUsable(scaled)) return root
   const center = scaled.getCenter(new THREE.Vector3())
   root.position.x -= center.x
   root.position.z -= center.z
@@ -184,8 +201,13 @@ export function makeDefaultKnotObject(
   return makeObject('Torus Knot', group, { bufferKey: null, ...options })
 }
 
+export type LiftKind = 'person' | 'prop'
+
+export type PendingLift = { id: string; name: string; kind: LiftKind }
+
 interface SceneState {
   objects: SceneObject[]
+  pendingLifts: PendingLift[]
   /** number of model imports currently in flight */
   importing: number
   bgColor: string
@@ -193,6 +215,9 @@ interface SceneState {
   lightIntensity: number
   onboardingDismissed: boolean
   notice: string | null
+  beginLift: (name: string, kind: LiftKind) => string
+  renameLift: (id: string, name: string) => void
+  endLift: (id: string) => void
   addObject: (object: SceneObject) => void
   addPrimitive: (kind: PrimitiveKind) => void
   updatePrimitiveParams: (id: string, params: Record<string, number>) => void
@@ -205,6 +230,20 @@ interface SceneState {
   setTransformAll: (id: string, transform: Transform) => void
   addObjectKey: (id: string, time: number) => void
   updateObjectKeyTime: (id: string, keyId: string, time: number) => void
+  setObjectKeyEase: (id: string, keyId: string, ease: EaseKind) => void
+  setObjectKeyBezier: (
+    id: string,
+    keyId: string,
+    bezier: [number, number, number, number] | null,
+  ) => void
+  setObjectKeySpacing: (
+    id: string,
+    keyId: string,
+    patch: { easeIn?: number; easeOut?: number },
+    linked?: boolean,
+  ) => void
+  clearObjectKeySpacing: (id: string, keyId: string) => void
+  clearAllObjectSpacing: () => void
   removeObjectKey: (id: string, keyId: string) => void
   clearObjectKeys: (id: string) => void
   applySpinPreset: (id: string) => void
@@ -245,12 +284,24 @@ export const useSceneStore = create<SceneState>()(
 
       return {
         objects: [],
+        pendingLifts: [],
         importing: 0,
-        bgColor: '#efc8c4',
+        bgColor: VIEWPORT_BG_DEFAULT_TOP,
         showGrid: true,
         lightIntensity: 1.4,
         onboardingDismissed: false,
         notice: null,
+
+        beginLift: (name, kind) => {
+          const id = `lift-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+          set((s) => ({ pendingLifts: [...s.pendingLifts, { id, name, kind }] }))
+          return id
+        },
+        renameLift: (id, name) =>
+          set((s) => ({
+            pendingLifts: s.pendingLifts.map((lift) => (lift.id === id ? { ...lift, name } : lift)),
+          })),
+        endLift: (id) => set((s) => ({ pendingLifts: s.pendingLifts.filter((lift) => lift.id !== id) })),
 
         addObject: (object) => set((s) => ({ objects: [...s.objects, object] })),
 
@@ -277,6 +328,10 @@ export const useSceneStore = create<SceneState>()(
           set((s) => {
             const removed = s.objects.find((o) => o.id === id)
             if (removed) bury(removed)
+            if (useRigStore.getState().targetObjectId === id) {
+              releasePathParent(id, { objects: s.objects, paths: usePathStore.getState().paths })
+              useRigStore.getState().setTargetObjectId(null)
+            }
             return { objects: s.objects.filter((o) => o.id !== id) }
           }),
 
@@ -342,6 +397,68 @@ export const useSceneStore = create<SceneState>()(
             keys: o.keys.map((k) =>
               k.id === keyId ? { ...k, time: Math.min(1, Math.max(0, time)) } : k,
             ),
+          })),
+
+        setObjectKeyEase: (id, keyId, ease) =>
+          updateObject(id, (o) => ({
+            keys: o.keys.map((k) => {
+              if (k.id !== keyId) return k
+              const next = { ...k, ease }
+              delete next.easeBezier
+              return next
+            }),
+          })),
+
+        setObjectKeyBezier: (id, keyId, bezier) =>
+          updateObject(id, (o) => ({
+            keys: o.keys.map((k) => {
+              if (k.id !== keyId) return k
+              const next = { ...k }
+              if (bezier) next.easeBezier = bezier
+              else delete next.easeBezier
+              return next
+            }),
+          })),
+
+        setObjectKeySpacing: (id, keyId, patch, linked = false) =>
+          updateObject(id, (o) => ({
+            keys: o.keys.map((k) => {
+              if (k.id !== keyId) return k
+              const next = { ...k }
+              if (patch.easeOut !== undefined) {
+                next.easeOut = clamp01(patch.easeOut)
+                if (linked) next.easeIn = next.easeOut
+              }
+              if (patch.easeIn !== undefined) {
+                next.easeIn = clamp01(patch.easeIn)
+                if (linked) next.easeOut = next.easeIn
+              }
+              return next
+            }),
+          })),
+
+        clearObjectKeySpacing: (id, keyId) =>
+          updateObject(id, (o) => ({
+            keys: o.keys.map((k) => {
+              if (k.id !== keyId) return k
+              const next = { ...k }
+              delete next.easeIn
+              delete next.easeOut
+              return next
+            }),
+          })),
+
+        clearAllObjectSpacing: () =>
+          set((s) => ({
+            objects: s.objects.map((o) => ({
+              ...o,
+              keys: o.keys.map((k) => {
+                const next = { ...k }
+                delete next.easeIn
+                delete next.easeOut
+                return next
+              }),
+            })),
           })),
 
         removeObjectKey: (id, keyId) =>
@@ -420,12 +537,20 @@ export const useSceneStore = create<SceneState>()(
     },
     {
       name: 'rig-scene-settings',
+      version: 1,
       partialize: (s) => ({
         bgColor: s.bgColor,
         showGrid: s.showGrid,
         lightIntensity: s.lightIntensity,
         onboardingDismissed: s.onboardingDismissed,
       }),
+      migrate: (persisted) => {
+        const p = (persisted ?? {}) as Record<string, unknown>
+        if (p.bgColor === VIEWPORT_BG_LEGACY_DEFAULT || p.bgColor === VIEWPORT_BG_SLATE_DEFAULT) {
+          p.bgColor = VIEWPORT_BG_DEFAULT_TOP
+        }
+        return p
+      },
     },
   ),
 )

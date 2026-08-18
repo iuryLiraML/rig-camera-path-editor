@@ -1,8 +1,9 @@
-import { useEffect, useState, type DragEvent } from 'react'
+import { useEffect, useState, type DragEvent, type ReactNode } from 'react'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { useRigStore } from '../state/useRigStore'
-import { usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
+import { usePathStore } from '../state/usePathStore'
+import { cameraReady } from '../state/cameraPathLink'
 import { Viewport } from '../viewport/Viewport'
 import { Toolbar } from '../ui/Toolbar'
 import { LeftPanel } from '../ui/LeftPanel'
@@ -11,27 +12,34 @@ import { ViewportFooter } from '../ui/ViewportFooter'
 import { Timeline } from '../ui/Timeline'
 import { OnboardingCard } from '../ui/OnboardingCard'
 import { CameraPreviewFrame } from '../ui/CameraPreviewFrame'
+import { CameraRigHud } from '../ui/CameraRigHud'
 import { AreaLayer } from '../ui/AreaLayer'
-import { viewportInsets } from '../ui/viewportInsets'
+import { useViewportInsets } from '../ui/viewportInsets'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { BoardView } from '../ui/BoardView'
-import { BatchGeneratePanel } from '../ui/BatchGeneratePanel'
-import { ProjectIntakeWorkspace } from '../ui/ProjectIntakeWorkspace'
 import { ProjectsWorkspace } from '../ui/ProjectsWorkspace'
+import { useCloudAuthStore } from '../state/useCloudAuthStore'
+import { isTeamCloudApp } from '../lib/cloud/client'
+import { reloadActiveProjectFromCloud } from '../lib/projects'
+import { syncActiveProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
 import { redo, undo } from '../lib/history'
+import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
+import { deleteSelectedTimelineKey } from '../lib/timelineKey'
+import { applyTogglePlayback } from '../lib/playback'
 import { importModelFile } from '../lib/sceneIO'
-import { nextRequiredProjectAction } from '../lib/projectWorkflow'
 import { useProjectStore } from '../state/useProjectStore'
+import { resolveWorkspace } from './resolveWorkspace'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 
 function ViewSwitcher() {
   const appView = useEditorStore((s) => s.appView)
   const setAppView = useEditorStore((s) => s.setAppView)
+  const insets = useViewportInsets()
   return (
     <div
-      className="panel absolute top-3 z-40 flex items-center gap-0.5 px-1 py-1"
-      style={{ left: viewportInsets('design', 0, true).left }}
+      className="panel absolute top-3 z-40 flex shrink-0 items-center gap-0.5 whitespace-nowrap px-1 py-1"
+      style={{ left: insets.left }}
     >
       {(
         [
@@ -59,13 +67,29 @@ function isTyping() {
   return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
 }
 
+function isKeyableField() {
+  const el = document.activeElement
+  return el instanceof HTMLInputElement && (el.type === 'number' || el.type === 'range')
+}
+
 function useShortcuts() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTyping()) return
+      if (isTyping() && !((e.key === 'i' || e.key === 'I') && isKeyableField())) return
       const editor = useEditorStore.getState()
       const rig = useRigStore.getState()
       const path = usePathStore.getState()
+
+      // looking through a free camera: WASD/QE fly — don't steal them for gizmos
+      if (
+        editor.cameraView &&
+        rig.cameraKind === 'static' &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        ['w', 'a', 's', 'd', 'q', 'e'].includes(e.key.toLowerCase())
+      ) {
+        return
+      }
 
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault()
@@ -111,9 +135,23 @@ function useShortcuts() {
         case 'F':
           editor.requestFrame()
           break
+        case 'i':
+        case 'I':
+          e.preventDefault()
+          insertKeyframeAtPlayhead()
+          break
         case ' ':
           e.preventDefault()
-          if (selectCameraAnchorCount(path) >= 2) rig.setPlaying(!rig.playing)
+          if (cameraReady()) applyTogglePlayback()
+          break
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+          if (path.selectedAnchorIds.length > 0) {
+            const modes = ['auto', 'smooth', 'corner', 'broken'] as const
+            path.setAnchorsTangent(path.selectedAnchorIds, modes[Number(e.key) - 1])
+          }
           break
         case 'Enter':
           if (editor.tool === 'pen') {
@@ -131,9 +169,11 @@ function useShortcuts() {
             editor.setCameraView(false)
           } else if (editor.tool === 'pen') {
             editor.setTool('select')
+          } else if (editor.selectedKeyframe) {
+            editor.selectKeyframe(null)
           } else if (path.selectedHandle !== 'none') {
             path.selectHandle('none')
-          } else if (path.selectedAnchorId) {
+          } else if (path.selectedAnchorIds.length > 0) {
             path.selectAnchor(null)
           } else {
             editor.select(null)
@@ -141,8 +181,10 @@ function useShortcuts() {
           break
         case 'Delete':
         case 'Backspace':
-          if (path.selectedAnchorId) {
-            path.removeAnchor(path.selectedAnchorId)
+          if (deleteSelectedTimelineKey()) {
+            e.preventDefault()
+          } else if (path.selectedAnchorIds.length > 0) {
+            path.removeAnchors(path.selectedAnchorIds)
           } else if (editor.selection === 'cinema-camera' && !editor.playMode) {
             // Delete removed objects and anchors but silently did nothing on a
             // camera, which reinforced that cameras were undeletable
@@ -217,8 +259,8 @@ function EditorWorkspace() {
           <ViewportFooter />
           <OnboardingCard />
           <CameraPreviewFrame />
+          <CameraRigHud />
           <ViewSwitcher />
-          <BatchGeneratePanel />
         </>
       )}
 
@@ -272,10 +314,50 @@ function EditorWorkspace() {
   )
 }
 
+function SaveConflictDialog() {
+  const conflict = useCloudAuthStore((state) => state.saveConflict)
+  if (!conflict) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+      <div className="panel w-[min(92vw,420px)] p-5">
+        <h2 className="text-sm font-semibold text-ink">This project was saved on another device</h2>
+        <p className="mt-2 text-xs leading-5 text-ink-dim">
+          Reload to take the cloud version, or overwrite to keep this machine’s edits.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              void reloadActiveProjectFromCloud().catch((error) => {
+                console.error(error)
+              })
+            }}
+            className="rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-ink hover:bg-panel-3"
+          >
+            Reload
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              void syncActiveProjectToCloud({ ifMatch: conflict.updatedAt }).catch((error) => {
+                console.error(error)
+              })
+            }}
+            className="rounded-lg bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-500"
+          >
+            Overwrite
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function App() {
   const booted = useProjectStore((state) => state.booted)
-  const workflow = useProjectStore((state) => state.workflow)
   const appView = useEditorStore((state) => state.appView)
+  const cloudStatus = useCloudAuthStore((state) => state.status)
+  const teamGate = isTeamCloudApp() && cloudStatus !== 'signed-in'
 
   if (!booted) {
     return (
@@ -288,18 +370,27 @@ export function App() {
     )
   }
 
-  // Settings lives at the root so "Open Settings" works from every view
-  // (the intake steps need it to configure the AI provider key).
+  // Settings lives at the root so "Open Settings" works from every view.
+  const workspace = teamGate ? 'projects' : resolveWorkspace(appView)
+  let body: ReactNode
+  switch (workspace) {
+    case 'projects':
+      body = <ProjectsWorkspace />
+      break
+    case 'editor':
+      body = <EditorWorkspace />
+      break
+    default: {
+      const _never: never = workspace
+      body = _never
+    }
+  }
+
   return (
     <>
-      {appView === 'projects' ? (
-        <ProjectsWorkspace />
-      ) : nextRequiredProjectAction(workflow) !== 'editor' ? (
-        <ProjectIntakeWorkspace />
-      ) : (
-        <EditorWorkspace />
-      )}
+      {body}
       <SettingsDialog />
+      <SaveConflictDialog />
     </>
   )
 }

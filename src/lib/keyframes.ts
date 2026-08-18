@@ -1,5 +1,6 @@
 import * as THREE from 'three'
-import { applyEase, type EaseKind } from './easing'
+import { applyCubicBezier, applyEase, easeDef, type EaseKind } from './easing'
+import { applySpacing, DEFAULT_SPACING } from './intervalSpacing'
 import type { Transform, Vec3 } from '../state/useSceneStore'
 
 /** Every keyframe can carry the curve used to leave it. */
@@ -9,6 +10,36 @@ interface KeyBase {
   time: number
   /** curve for the segment that STARTS at this key; falls back to the rig default */
   ease?: EaseKind
+  /**
+   * Manual cubic-bezier for the outgoing segment. When set, this wins over
+   * `ease` so the graph editor can pull handles without renaming the curve.
+   */
+  easeBezier?: [number, number, number, number]
+  /**
+   * Incoming interval weight (0..1, default 0.5). Linger at this key when
+   * below 0.5, rush into it when above. Does not change the keyed value.
+   */
+  easeIn?: number
+  /**
+   * Outgoing interval weight (0..1, default 0.5). Linger at this key when
+   * below 0.5, rush away when above.
+   */
+  easeOut?: number
+}
+
+/** Linear time inside a segment, then Cascadeur-style spacing, then the named curve. */
+function easedU(u: number, a: KeyBase, b: KeyBase, defaultEase: EaseKind): number {
+  const spaced = applySpacing(u, a.easeOut ?? DEFAULT_SPACING, b.easeIn ?? DEFAULT_SPACING)
+  if (a.easeBezier) return applyCubicBezier(a.easeBezier, spaced)
+  return applyEase(a.ease ?? defaultEase, spaced)
+}
+
+/** Bezier used to leave this key — custom handles, else the named curve. */
+export function keyOutgoingBezier(
+  key: { ease?: EaseKind; easeBezier?: [number, number, number, number] },
+  defaultEase: EaseKind,
+): [number, number, number, number] {
+  return key.easeBezier ?? easeDef(key.ease ?? defaultEase).bezier
 }
 
 export interface ProgressKey extends KeyBase {
@@ -58,7 +89,7 @@ export function evalProgress(t: number, keys: ProgressKey[], defaultEase: EaseKi
 
   if (t <= pts[0].time) return pts[0].progress
   const { a, b, u } = segment(t, pts)
-  return a.progress + (b.progress - a.progress) * applyEase(a.ease ?? defaultEase, u)
+  return a.progress + (b.progress - a.progress) * easedU(u, a, b, defaultEase)
 }
 
 /**
@@ -77,7 +108,7 @@ export function evalValue(
   const last = sorted[sorted.length - 1]
   if (t >= last.time) return last.value
   const { a, b, u } = segment(t, sorted)
-  return a.value + (b.value - a.value) * applyEase(a.ease ?? defaultEase, u)
+  return a.value + (b.value - a.value) * easedU(u, a, b, defaultEase)
 }
 
 /** The look-at target at time t; component-wise, same rules as evalValue. */
@@ -93,7 +124,7 @@ export function evalVec3(
   const last = sorted[sorted.length - 1]
   if (t >= last.time) return last.value
   const { a, b, u } = segment(t, sorted)
-  const e = applyEase(a.ease ?? defaultEase, u)
+  const e = easedU(u, a, b, defaultEase)
   return [
     a.value[0] + (b.value[0] - a.value[0]) * e,
     a.value[1] + (b.value[1] - a.value[1]) * e,
@@ -124,7 +155,8 @@ export function evalModelTransform(
     const b = sorted[i + 1]
     if (t <= b.time) {
       const span = b.time - a.time
-      const u = applyEase(a.ease ?? defaultEase, span < 1e-6 ? 1 : (t - a.time) / span)
+      const raw = span < 1e-6 ? 1 : (t - a.time) / span
+      const u = easedU(raw, a, b, defaultEase)
       const lerp = (x: number, y: number) => x + (y - x) * u
       const ta = a.transform
       const tb = b.transform

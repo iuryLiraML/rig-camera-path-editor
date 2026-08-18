@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { FolderRecord } from '../lib/folders'
 import type { ProjectSummary } from '../state/useProjectStore'
 
 /** "2 hours ago" — a card needs recency at a glance, not a timestamp to parse */
@@ -23,24 +24,27 @@ export function relativeTime(from: number, now = Date.now()) {
 }
 
 /**
- * A project card. The previous one was a title, a subtitle and an "Open
- * project" button over 8 units of dead space: nothing to recognise a project by
- * and nothing to sort it on. This leads with the first shot's still — the one
- * image that says what the project is — and makes the whole card the target.
+ * A project card. Leads with the first saved scene still, then lists scenes
+ * so a folder of projects can open a specific version without the setup wizard.
  */
 export function ProjectCard({
   project,
   active,
   busy,
+  folders,
   onOpen,
+  onOpenScene,
+  onMove,
 }: {
   project: ProjectSummary
   active: boolean
   busy: boolean
+  folders: FolderRecord[]
   onOpen: () => void
+  onOpenScene: (sceneId: string) => void
+  onMove: (folderId: string | null) => void
 }) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null)
-  const draft = project.setupStatus === 'draft'
 
   useEffect(() => {
     if (!project.thumbnail) {
@@ -53,56 +57,87 @@ export function ProjectCard({
   }, [project.thumbnail])
 
   return (
-    <button
-      type="button"
-      disabled={busy}
-      onClick={onOpen}
-      title={draft ? 'Resume the guided setup' : 'Open this project in the editor'}
-      className={`group flex flex-col overflow-hidden rounded-xl border bg-panel text-left transition-colors disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent ${
+    <div
+      className={`group flex flex-col overflow-hidden rounded-xl border bg-panel text-left transition-colors ${
         active ? 'border-accent/60' : 'border-line hover:border-ink-dim/60'
       }`}
     >
-      <div className="relative aspect-video w-full overflow-hidden bg-panel-2">
-        {thumbUrl ? (
-          <img
-            src={thumbUrl}
-            alt=""
-            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-          />
-        ) : (
-          // no shot saved yet: a neutral plate with the initial, so the grid
-          // still reads as a grid of projects rather than a stack of text
-          <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-panel-2 to-panel-3">
-            <span className="text-2xl font-semibold text-ink-dim/50">
-              {(project.name || 'U').trim().charAt(0).toUpperCase()}
+      <button
+        type="button"
+        disabled={busy}
+        onClick={onOpen}
+        title="Open this project in the editor"
+        className="flex flex-col text-left disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+      >
+        <div className="relative aspect-video w-full overflow-hidden bg-panel-2">
+          {thumbUrl ? (
+            <img
+              src={thumbUrl}
+              alt=""
+              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-panel-2 to-panel-3">
+              <span className="text-2xl font-semibold text-ink-dim/50">
+                {(project.name || 'U').trim().charAt(0).toUpperCase()}
+              </span>
+            </div>
+          )}
+          {active && (
+            <span className="absolute left-2 top-2 rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-white">
+              Active
             </span>
-          </div>
-        )}
-        {active && (
-          <span className="absolute left-2 top-2 rounded-full bg-accent px-2 py-0.5 text-[10px] font-medium text-white">
-            Active
-          </span>
-        )}
-        {draft && (
-          <span className="absolute right-2 top-2 rounded-full bg-black/60 px-2 py-0.5 text-[10px] text-white backdrop-blur-sm">
-            Setup draft
-          </span>
-        )}
-      </div>
-      <div className="flex items-baseline justify-between gap-3 px-3.5 py-3">
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-medium text-ink">
-            {project.name || 'Untitled project'}
-          </h3>
-          <p className="mt-0.5 text-xs text-ink-dim">
-            {project.shotCount} {project.shotCount === 1 ? 'shot' : 'shots'} ·{' '}
-            {relativeTime(project.updatedAt)}
-          </p>
+          )}
         </div>
-        <span className="shrink-0 text-xs text-ink-dim opacity-0 transition-opacity group-hover:opacity-100">
-          {draft ? 'Resume' : 'Open'} →
-        </span>
-      </div>
-    </button>
+        <div className="flex items-baseline justify-between gap-3 px-3.5 pt-3">
+          <div className="min-w-0">
+            <h3 className="truncate text-sm font-medium text-ink">
+              {project.name || 'Untitled project'}
+            </h3>
+            <p className="mt-0.5 text-xs text-ink-dim">
+              {project.shotCount} {project.shotCount === 1 ? 'scene' : 'scenes'} ·{' '}
+              {relativeTime(project.updatedAt)}
+            </p>
+          </div>
+          <span className="shrink-0 text-xs text-ink-dim opacity-0 transition-opacity group-hover:opacity-100">
+            Open →
+          </span>
+        </div>
+      </button>
+      {project.scenes.length > 0 && (
+        <ul className="mt-2 space-y-0.5 px-2 pb-1">
+          {project.scenes.map((scene) => (
+            <li key={scene.id}>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => onOpenScene(scene.id)}
+                className="w-full truncate rounded-md px-1.5 py-1 text-left text-[11px] text-ink-dim hover:bg-panel-2 hover:text-ink disabled:opacity-50"
+              >
+                {scene.name}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {folders.length > 0 && (
+        <label className="block px-3 pb-3 pt-1 text-[10px] text-ink-dim">
+          Folder
+          <select
+            disabled={busy}
+            value={project.folderId ?? ''}
+            onChange={(event) => onMove(event.target.value || null)}
+            className="mt-1 w-full rounded-md border border-line bg-panel-2 px-1.5 py-1 text-[11px] text-ink outline-none"
+          >
+            <option value="">Unfiled</option>
+            {folders.map((folder) => (
+              <option key={folder.id} value={folder.id}>
+                {folder.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+    </div>
   )
 }

@@ -2,29 +2,36 @@ import { useEffect, useRef, useState } from 'react'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
-import { AGENT_SKILLS } from '../lib/agent/skills'
+import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
 
 function ToolChip({ name }: { name: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded bg-panel-2 px-1.5 py-0.5 text-[10px] text-ink-dim">
-      <span className="text-accent">⚙</span>
+    <span className="inline-flex items-center gap-1 rounded-md bg-panel-2 px-1.5 py-0.5 text-[10px] text-ink-dim">
       {name.replace(/_/g, ' ')}
     </span>
   )
 }
+
+const EMPTY_PROMPTS = ['slow orbit around the product, 12s', 'drone dive from above, fast']
 
 export function AssistantPanel() {
   const chat = useAgentStore((s) => s.chat)
   const status = useAgentStore((s) => s.status)
   const taskProgress = useAgentStore((s) => s.taskProgress)
   const error = useAgentStore((s) => s.error)
-  const hasKey = useAgentStore((s) => (s.keys[s.provider] ?? '').trim().length > 0)
+  const failChips = useAgentStore((s) => s.failChips)
+  const hasKey = useAgentStore(
+    (s) => (s.keys[s.provider] ?? '').trim().length > 0 || s.serverKeys[s.provider],
+  )
+  const provider = useAgentStore((s) => s.provider)
   const forcedSkill = useAgentStore((s) => s.forcedSkill)
-  const customSkills = useProjectStore((s) => s.skills)
+  const liftPhotoName = useAgentStore((s) => s.liftPhotoName)
   const [input, setInput] = useState('')
   const [showSkills, setShowSkills] = useState(false)
+  const [pendingImage, setPendingImage] = useState<File | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const composerBarRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -32,161 +39,213 @@ export function AssistantPanel() {
 
   const send = () => {
     const text = input.trim()
-    if (!text) return
+    if (!text && !pendingImage) return
+    const image = pendingImage
+    setPendingImage(null)
     setInput('')
-    void useAgentStore.getState().sendMessage(text)
-  }
-
-  if (!hasKey) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
-        <p className="text-[12px] leading-relaxed text-ink-dim">
-          The assistant builds camera moves and object animation from a prompt — it needs
-          your Anthropic API key to run.
-        </p>
-        <button
-          onClick={() => useEditorStore.getState().setShowSettings(true)}
-          className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent/85"
-        >
-          Open Settings
-        </button>
-        <button
-          onClick={() => setShowSkills(true)}
-          className="text-[11px] text-ink-dim hover:text-ink"
-        >
-          Manage camera skills
-        </button>
-        {showSkills && <SkillsManager onClose={() => setShowSkills(false)} />}
-      </div>
-    )
+    void useAgentStore.getState().sendMessage(text, image ?? undefined)
   }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* messages */}
-      <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
-        {chat.length === 0 && (
-          <div className="pt-6 text-center text-[11px] leading-relaxed text-ink-dim">
-            Describe the shot you want.
-            <br />
-            <span className="text-ink">"slow orbit around the product, 12s"</span>
-            <br />
-            <span className="text-ink">"drone dive from above, fast"</span>
-          </div>
-        )}
-        {chat.map((entry) => (
-          <div key={entry.id} className={entry.role === 'user' ? 'flex justify-end' : ''}>
-            <div
-              className={
-                entry.role === 'user'
-                  ? 'max-w-[85%] rounded-lg rounded-br-sm bg-accent px-2.5 py-1.5 text-[12px] leading-relaxed text-white'
-                  : 'text-[12px] leading-relaxed text-ink'
-              }
-            >
-              {entry.text ? (
-                <span className="whitespace-pre-wrap">{entry.text}</span>
-              ) : entry.role === 'assistant' && status === 'thinking' ? (
-                <span className="text-ink-dim">Thinking…</span>
-              ) : null}
-              {entry.tools.length > 0 && (
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {entry.tools.map((tool, i) => (
-                    <ToolChip key={i} name={tool} />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        ))}
-        {error && (
-          <div className="rounded-md bg-red-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-red-400">
-            {error}
-          </div>
-        )}
-      </div>
-
-      {status === 'thinking' && taskProgress && (
-        <div className="border-t border-line/60 px-3 py-1.5 text-[10px] text-ink-dim">
-          <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-          {taskProgress}
-        </div>
-      )}
-
-      {/* skill chips */}
-      <div className="flex flex-wrap items-center gap-1 border-t border-line/60 px-3 pt-2">
-        {[...AGENT_SKILLS.map((s) => s.name), ...customSkills.filter((s) => s.name.trim()).map((s) => s.name)].map(
-          (name) => (
-            <button
-              key={name}
-              onClick={() =>
-                useAgentStore.getState().setForcedSkill(forcedSkill === name ? null : name)
-              }
-              className={`rounded-full px-2 py-0.5 text-[10px] ${
-                forcedSkill === name ? 'bg-accent text-white' : 'bg-panel-2 text-ink-dim hover:text-ink'
-              }`}
-            >
-              {name}
-            </button>
-          ),
-        )}
-        <button
-          onClick={() => setShowSkills(true)}
-          title="Create and edit camera skills"
-          className="rounded-full px-2 py-0.5 text-[10px] text-accent hover:bg-panel-2"
-        >
-          + skill
-        </button>
+      <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-3 py-2">
+        <span className="text-[11px] font-medium text-ink">Director</span>
         {chat.length > 0 && (
           <button
-            onClick={() => useAgentStore.getState().clearChat()}
-            className="ml-auto rounded-full px-2 py-0.5 text-[10px] text-ink-dim hover:text-ink"
-            title="Clear conversation"
+            onClick={() => {
+              useAgentStore.getState().clearChat()
+              useProjectStore.getState().setDirectorChat([])
+            }}
+            title="New conversation"
+            className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
           >
-            clear
+            New
           </button>
         )}
       </div>
 
-      {showSkills && <SkillsManager onClose={() => setShowSkills(false)} />}
-
-      {/* input */}
-      <div className="p-3 pt-2">
-        <div className="flex items-end gap-1.5 rounded-lg bg-panel-2 p-1.5">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault()
-                send()
-              }
-            }}
-            rows={2}
-            placeholder="Describe a camera move…"
-            className="max-h-32 w-full resize-none bg-transparent text-[12px] leading-relaxed text-ink outline-none placeholder:text-ink-dim"
-          />
-          {status === 'thinking' ? (
-            <button
-              onClick={() => useAgentStore.getState().stop()}
-              title="Stop"
-              className="shrink-0 rounded-md bg-panel-3 px-2.5 py-1.5 text-[11px] text-ink hover:bg-panel-3/70"
-            >
-              ■
-            </button>
-          ) : (
-            <button
-              onClick={send}
-              disabled={!input.trim()}
-              title="Send (Enter)"
-              className={`shrink-0 rounded-md px-2.5 py-1.5 text-[11px] font-medium ${
-                input.trim() ? 'bg-accent text-white hover:bg-accent/85' : 'bg-panel-3 text-ink-dim/50'
-              }`}
-            >
-              ↑
-            </button>
-          )}
+      {!hasKey ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 text-center">
+          <p className="text-[12px] leading-relaxed text-ink-dim">
+            The Director builds camera moves from a prompt. Add your API key to start.
+          </p>
+          <button
+            onClick={() => useEditorStore.getState().setShowSettings(true)}
+            className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent/85"
+          >
+            Open Settings
+          </button>
         </div>
-      </div>
+      ) : (
+        <>
+          <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-x-hidden overflow-y-auto px-3 py-2">
+            {chat.length === 0 && (
+              <div className="pt-4 text-[11px] leading-relaxed text-ink-dim">
+                Ask the Director to block a shot.
+                <div className="mt-2 flex flex-col gap-1">
+                  {EMPTY_PROMPTS.map((prompt) => (
+                    <button
+                      key={prompt}
+                      type="button"
+                      onClick={() => void useAgentStore.getState().sendMessage(prompt)}
+                      className="rounded-md bg-panel-2 px-2 py-1.5 text-left text-[11px] text-ink hover:bg-panel-3"
+                    >
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {chat.map((entry) => (
+              <div key={entry.id}>
+                {entry.role === 'user' ? (
+                  <div className="rounded-lg bg-panel-2 px-2.5 py-1.5 text-[12px] leading-relaxed text-ink">
+                    {entry.attached && (
+                      <div className="mb-1 text-[10px] text-ink-dim">Photo: {entry.attached}</div>
+                    )}
+                    <span className="whitespace-pre-wrap">{entry.text}</span>
+                  </div>
+                ) : (
+                  <div className="text-[12px] leading-relaxed text-ink">
+                    {entry.text ? (
+                      <span className="whitespace-pre-wrap">{entry.text}</span>
+                    ) : status === 'thinking' ? (
+                      <span className="text-ink-dim">Working…</span>
+                    ) : null}
+                    {entry.tools.length > 0 && (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {entry.tools.map((tool, i) => (
+                          <ToolChip key={i} name={tool} />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+            {status === 'thinking' && taskProgress && (
+              <div className="text-[10px] text-ink-dim">
+                <span className="mr-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                {taskProgress}
+              </div>
+            )}
+            {error && (
+              <div className="rounded-md bg-red-500/10 px-2.5 py-1.5 text-[11px] leading-relaxed text-red-400">
+                {error}
+              </div>
+            )}
+            {failChips.length > 0 && status === 'idle' && (
+              <div className="flex flex-wrap gap-1">
+                {failChips.map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => void useAgentStore.getState().sendMessage(chip)}
+                    className="rounded-md bg-panel-2 px-2 py-1 text-[10px] text-ink hover:bg-panel-3"
+                  >
+                    {chip}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {showSkills && <SkillsManager onClose={() => setShowSkills(false)} />}
+
+          <div className="shrink-0 px-2 pb-2 pt-1">
+            <input
+              id="director-attach-photo"
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="sr-only"
+              onChange={(e) => {
+                const file = e.target.files?.[0] ?? null
+                setPendingImage(file)
+                e.target.value = ''
+              }}
+            />
+            <div className="overflow-hidden rounded-xl bg-panel-2 p-2">
+              {pendingImage && (
+                <div className="mb-1 truncate px-0.5 text-[10px] text-ink-dim">
+                  Photo: {pendingImage.name}
+                </div>
+              )}
+              {!pendingImage && liftPhotoName && (
+                <div className="mb-1 truncate px-0.5 text-[10px] text-ink-dim">
+                  Photo in use: {liftPhotoName} — ask to lift again
+                </div>
+              )}
+              <textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    send()
+                  }
+                }}
+                rows={2}
+                placeholder="Ask the Director…"
+                className="max-h-28 w-full resize-none overflow-x-hidden bg-transparent text-[12px] leading-relaxed text-ink outline-none placeholder:text-ink-dim"
+              />
+              <div ref={composerBarRef} className="mt-1 flex min-w-0 items-center gap-1">
+                <label
+                  htmlFor="director-attach-photo"
+                  title="Attach a reference photo"
+                  className={`cursor-pointer rounded-md px-1.5 py-1 text-[10px] ${
+                    pendingImage || liftPhotoName ? 'bg-accent text-white' : 'text-ink-dim hover:text-ink'
+                  }`}
+                >
+                  Attach
+                </label>
+                <button
+                  type="button"
+                  onClick={() => setShowSkills(true)}
+                  title="Camera skills"
+                  className="rounded-md px-1.5 py-1 text-[10px] text-ink-dim hover:text-ink"
+                >
+                  Skills
+                </button>
+                {forcedSkill && (
+                  <span className="min-w-0 truncate rounded-md bg-accent/20 px-1.5 py-0.5 text-[10px] text-accent">
+                    {forcedSkill}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => useEditorStore.getState().setShowSettings(true)}
+                  title="Provider and keys"
+                  className="ml-auto shrink-0 text-[10px] text-ink-dim hover:text-ink"
+                >
+                  {PROVIDERS[provider].label}
+                </button>
+                {status === 'thinking' ? (
+                  <button
+                    onClick={() => useAgentStore.getState().stop()}
+                    title="Stop"
+                    className="shrink-0 rounded-md bg-panel-3 px-2 py-1 text-[11px] text-ink hover:bg-panel-3/70"
+                  >
+                    ■
+                  </button>
+                ) : (
+                  <button
+                    onClick={send}
+                    disabled={!input.trim() && !pendingImage}
+                    title="Send (Enter)"
+                    className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[12px] font-medium ${
+                      input.trim() || pendingImage
+                        ? 'bg-accent text-white hover:bg-accent/85'
+                        : 'bg-panel-3 text-ink-dim/50'
+                    }`}
+                  >
+                    ↑
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

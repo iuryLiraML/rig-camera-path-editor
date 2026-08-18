@@ -1,18 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCameraAnchorCount, useCameraFollowers } from '../state/cameraPathLink'
 import { useEditorStore, type SelectableId } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { openImportDialog, resetScene } from '../lib/sceneIO'
 import { createProject, deleteProject, switchProject } from '../lib/projects'
 import { useProjectStore } from '../state/useProjectStore'
 import { useRigStore } from '../state/useRigStore'
-import { CAMERA_PATH_ID, usePathStore, selectCameraAnchorCount } from '../state/usePathStore'
+import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { generateRacingDroneCameras } from '../lib/cameraBatch/generateRacingDroneCameras'
+import { AddSceneMenu, addDrawnPath } from './AddSceneMenu'
 import {
-  BookIcon,
   CameraIcon,
   CubeIcon,
-  HelpIcon,
   ImportIcon,
   MenuIcon,
   PenIcon,
@@ -22,6 +23,8 @@ import {
   TargetIcon,
   TrashIcon,
 } from './icons'
+import { DesignInspector } from './RightPanel'
+import { GUTTER, useViewportInsets } from './viewportInsets'
 
 function TreeItem({
   id,
@@ -48,30 +51,156 @@ function TreeItem({
   )
 }
 
+/** Scene objects (GLB, primitives) — same always-visible trash as cameras/paths. */
+function ObjectTreeItem({
+  id,
+  icon,
+  name,
+}: {
+  id: string
+  icon: React.ReactNode
+  name: string
+}) {
+  const selection = useEditorStore((s) => s.selection)
+  const select = useEditorStore((s) => s.select)
+  const selectableId: SelectableId = `obj:${id}`
+  const selected = selection === selectableId
+  const [confirming, setConfirming] = useState(false)
+
+  useEffect(() => {
+    if (!confirming) return
+    const cancel = setTimeout(() => setConfirming(false), 4000)
+    return () => clearTimeout(cancel)
+  }, [confirming])
+
+  return (
+    <div
+      className={`group flex w-full items-center gap-1 rounded-md pr-1 transition-colors ${
+        selected ? 'bg-accent text-white' : 'text-ink hover:bg-panel-2'
+      }`}
+    >
+      <button
+        onClick={() => select(selected ? null : selectableId)}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
+      >
+        <span className={selected ? 'text-white' : 'text-ink-dim'}>{icon}</span>
+        <span className="truncate">{name}</span>
+      </button>
+      {confirming ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            useSceneStore.getState().removeObject(id)
+            if (useEditorStore.getState().selection === selectableId) {
+              useEditorStore.getState().select(null)
+            }
+            setConfirming(false)
+          }}
+          title={`Delete "${name}" for good`}
+          className="shrink-0 rounded px-1.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/15"
+        >
+          Delete?
+        </button>
+      ) : (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setConfirming(true)
+          }}
+          title="Delete object"
+          className={`shrink-0 rounded p-1 ${
+            selected
+              ? 'text-white/70 hover:bg-white/15 hover:text-white'
+              : 'text-ink-dim hover:bg-panel hover:text-red-400'
+          }`}
+        >
+          <TrashIcon size={12} />
+        </button>
+      )}
+    </div>
+  )
+}
+
 /** A motion path in the tree — selecting it makes it the active/editable path. */
 function PathTreeItem({ id, name }: { id: string; name: string }) {
   const selection = useEditorStore((s) => s.selection)
   const activePathId = usePathStore((s) => s.activePathId)
+  const pathCount = usePathStore((s) => s.paths.length)
+  const followedBy = useCameraFollowers(id)
   const selected = selection === 'camera-path' && activePathId === id
+  const [confirming, setConfirming] = useState(false)
+
+  /*
+   * Paths had no remove control here at all — the only way to delete one was to
+   * select it and use the right panel. Two cases refuse rather than hide: a path
+   * a camera still follows (the camera would fall back silently and the move
+   * would be gone) and the last remaining path (the camera's fallback).
+   */
+  const blocked =
+    followedBy.length > 0
+      ? 'In use by ' +
+        followedBy.join(', ') +
+        ' - point ' +
+        (followedBy.length === 1 ? 'that camera' : 'those cameras') +
+        ' at another path first'
+      : pathCount <= 1
+        ? 'The last path cannot be deleted'
+        : null
+
   return (
-    <button
-      onClick={() => {
-        if (selected) {
-          useEditorStore.getState().select(null)
-          return
-        }
-        usePathStore.getState().setActivePath(id)
-        useEditorStore.getState().select('camera-path')
-      }}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+    <div
+      className={`group flex w-full items-center gap-1 rounded-md pr-1 transition-colors ${
         selected ? 'bg-accent text-white' : 'text-ink hover:bg-panel-2'
       }`}
     >
-      <span className={selected ? 'text-white' : 'text-ink-dim'}>
-        <PenIcon />
-      </span>
-      <span className="truncate">{name}</span>
-    </button>
+      <button
+        onClick={() => {
+          if (selected) {
+            useEditorStore.getState().select(null)
+            return
+          }
+          usePathStore.getState().setActivePath(id)
+          useEditorStore.getState().select('camera-path')
+        }}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
+      >
+        <span className={selected ? 'text-white' : 'text-ink-dim'}>
+          <PenIcon />
+        </span>
+        <span className="truncate">{name}</span>
+      </button>
+      {confirming && !blocked ? (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            usePathStore.getState().removePath(id)
+            setConfirming(false)
+          }}
+          title={'Delete "' + name + '" for good'}
+          className="shrink-0 rounded px-1.5 py-1 text-[10px] font-medium text-red-400 hover:bg-red-500/15"
+        >
+          Delete?
+        </button>
+      ) : (
+        <button
+          disabled={!!blocked}
+          onClick={(e) => {
+            e.stopPropagation()
+            setConfirming(true)
+          }}
+          title={blocked ?? 'Delete path'}
+          className={`shrink-0 rounded p-1 ${
+            blocked
+              ? 'cursor-not-allowed text-ink-dim/35'
+              : selected
+                ? 'text-white/70 hover:bg-white/15 hover:text-white'
+                : 'text-ink-dim hover:bg-panel hover:text-red-400'
+          }`}
+        >
+          <TrashIcon size={12} />
+        </button>
+      )}
+    </div>
   )
 }
 
@@ -146,8 +275,15 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
 {/* This was a 10px "x" at opacity-0 until you hovered the exact row, which
           read as "cameras cannot be deleted". Always visible, real icon, and it
           asks once before throwing away a camera move. */}
-      {canRemove &&
-        (confirming ? (
+      {!canRemove ? (
+        <button
+          disabled
+          title="The last camera cannot be deleted"
+          className="shrink-0 cursor-not-allowed rounded p-1 text-ink-dim/35"
+        >
+          <TrashIcon size={12} />
+        </button>
+      ) : confirming ? (
           <button
             onClick={(e) => {
               e.stopPropagation()
@@ -173,7 +309,7 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
           >
             <TrashIcon size={12} />
           </button>
-        ))}
+        )}
     </div>
   )
 }
@@ -205,23 +341,42 @@ function FooterItem({
   )
 }
 
+const PROJECT_MENU_WIDTH = 208
+
+function menuCoords(button: HTMLElement) {
+  const r = button.getBoundingClientRect()
+  const left = Math.min(r.left, window.innerWidth - PROJECT_MENU_WIDTH - 8)
+  return { top: r.bottom + 6, left: Math.max(8, left) }
+}
+
 function ProjectMenu() {
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState<'reset' | 'delete' | null>(null)
-  const ref = useRef<HTMLDivElement>(null)
+  const [coords, setCoords] = useState({ top: 0, left: 0 })
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
   const projectId = useProjectStore((s) => s.projectId)
   const projectList = useProjectStore((s) => s.projectList)
 
   useEffect(() => {
     if (!open) return
+    const place = () => {
+      const button = buttonRef.current
+      if (button) setCoords(menuCoords(button))
+    }
     const close = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) {
-        setOpen(false)
-        setConfirming(null)
-      }
+      const t = e.target as Node
+      if (wrapRef.current?.contains(t) || menuRef.current?.contains(t)) return
+      setOpen(false)
+      setConfirming(null)
     }
     window.addEventListener('pointerdown', close)
-    return () => window.removeEventListener('pointerdown', close)
+    window.addEventListener('resize', place)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('resize', place)
+    }
   }, [open])
 
   const item = 'w-full rounded-md px-2 py-1.5 text-left text-[11px] text-ink hover:bg-panel-2'
@@ -231,19 +386,27 @@ function ProjectMenu() {
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={wrapRef} className="relative">
       <button
+        ref={buttonRef}
         className={open ? 'text-ink' : 'text-ink-dim hover:text-ink'}
         title="Project menu"
         onClick={() => {
+          const button = buttonRef.current
+          if (!open && button) setCoords(menuCoords(button))
           setOpen((v) => !v)
           setConfirming(null)
         }}
       >
         <MenuIcon />
       </button>
-      {open && (
-        <div className="panel absolute left-0 top-7 z-30 w-52 p-1">
+      {open &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="panel fixed z-50 w-52 p-1"
+            style={{ top: coords.top, left: coords.left }}
+          >
           {projectList.length > 1 && (
             <>
               <div className="px-2 pb-1 pt-1.5 text-[10px] font-medium text-ink-dim">Open project</div>
@@ -267,9 +430,15 @@ function ProjectMenu() {
           <button
             onClick={() => {
               closeMenu()
-              void createProject().catch(() =>
-                useSceneStore.getState().showNotice('Project could not be created'),
-              )
+              void createProject()
+                .then(() => {
+                  const store = useProjectStore.getState()
+                  store.setWorkflow({ ...store.workflow, legacyEditorAccess: true })
+                  useEditorStore.getState().setAppView('editor')
+                })
+                .catch(() =>
+                  useSceneStore.getState().showNotice('Project could not be created'),
+                )
             }}
             className={item}
           >
@@ -317,8 +486,9 @@ function ProjectMenu() {
           >
             Settings…
           </button>
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }
@@ -337,24 +507,22 @@ function ProjectNameInput() {
 
 export function LeftPanel() {
   const objects = useSceneStore((s) => s.objects)
-  const hasPath = usePathStore(selectCameraAnchorCount) > 0
+  const pendingLifts = useSceneStore((s) => s.pendingLifts)
+  const hasPath = useCameraAnchorCount() > 0
   const paths = usePathStore((s) => s.paths)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
   const cameraOptions = useCameraOptionsStore((s) => s.options)
   const [query, setQuery] = useState('')
+  const insets = useViewportInsets()
 
   const items: { id: SelectableId; icon: React.ReactNode; name: string }[] = [
-    ...objects.map((o) => ({
-      id: `obj:${o.id}` as SelectableId,
-      icon: <CubeIcon />,
-      name: o.name,
-    })),
     { id: 'light', icon: <SunIcon />, name: 'Directional Light' },
   ]
   if (hasPath && lookAtMode === 'target') {
     items.push({ id: 'target', icon: <TargetIcon />, name: 'Look-At Target' })
   }
   const q = query.toLowerCase()
+  const visibleObjects = objects.filter((o) => o.name.toLowerCase().includes(q))
   const visible = items.filter((i) => i.name.toLowerCase().includes(q))
   const visibleCameras = cameraOptions.filter((c) => c.name.toLowerCase().includes(q))
   const pathItems = paths
@@ -362,10 +530,24 @@ export function LeftPanel() {
     .filter((p) => p.name.toLowerCase().includes(q))
 
   return (
-    <div className="panel absolute bottom-3 left-3 top-3 z-20 flex w-[232px] flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-2 border-b border-line/60 px-3 py-2.5">
-        <ProjectNameInput />
-        <ProjectMenu />
+    <div
+      className="panel absolute z-20 flex flex-col overflow-hidden"
+      style={{
+        left: GUTTER,
+        top: GUTTER,
+        bottom: GUTTER,
+        width: insets.leftWidth,
+      }}
+    >
+      <DesignInspector />
+
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-line/60">
+      <div className="flex items-center justify-between gap-2 border-b border-line/60 px-3 py-2">
+        <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">Project</span>
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
+          <ProjectNameInput />
+          <ProjectMenu />
+        </div>
       </div>
 
       <div className="px-2 pt-2">
@@ -381,7 +563,30 @@ export function LeftPanel() {
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
+        <div className="flex items-center justify-between px-2 pb-1">
+          <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">
+            Scene
+          </span>
+          <AddSceneMenu compact title="Add a shape or import a model" />
+        </div>
         <div className="flex flex-col gap-0.5">
+          {pendingLifts.map((lift) => (
+            <div
+              key={lift.id}
+              className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-ink-dim"
+            >
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+              <span className="truncate">{lift.name}</span>
+            </div>
+          ))}
+          {visibleObjects.map((object) => (
+            <ObjectTreeItem
+              key={object.id}
+              id={object.id}
+              icon={<CubeIcon />}
+              name={object.name}
+            />
+          ))}
           {visible.map((item) => (
             <TreeItem key={item.id} {...item} />
           ))}
@@ -421,10 +626,19 @@ export function LeftPanel() {
             </div>
           </div>
         )}
-        {pathItems.length > 0 && (
-          <div className="mt-3">
-            <div className="px-2 pb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim">
-              Paths
+        <div className="mt-3">
+            <div className="flex items-center justify-between px-2 pb-1">
+              <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">
+                Paths
+              </span>
+              <button
+                type="button"
+                onClick={addDrawnPath}
+                className="rounded p-0.5 text-ink-dim hover:bg-panel-2 hover:text-ink"
+                title="Add a path"
+              >
+                <PlusIcon size={12} />
+              </button>
             </div>
             <div className="flex flex-col gap-0.5">
               {pathItems.map((p) => (
@@ -432,13 +646,11 @@ export function LeftPanel() {
               ))}
             </div>
           </div>
-        )}
       </div>
 
       <div className="border-t border-line/60 p-2">
-        <FooterItem icon={<BookIcon />} label="Library" disabled />
         <FooterItem icon={<ImportIcon />} label="Import" onClick={openImportDialog} />
-        <FooterItem icon={<HelpIcon />} label="Help" disabled />
+      </div>
       </div>
     </div>
   )

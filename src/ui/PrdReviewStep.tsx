@@ -13,6 +13,7 @@ export function PrdReviewStep() {
   const workflow = useProjectStore((state) => state.workflow)
   const provider = useAgentStore((state) => state.provider)
   const apiKey = useAgentStore((state) => state.keys[state.provider])
+  const serverKey = useAgentStore((state) => state.serverKeys[state.provider])
   const model = useAgentStore((state) => state.models[state.provider])
   const [draft, setDraft] = useState(workflow.prd.draft ?? '')
   const [status, setStatus] = useState<'idle' | 'generating'>('idle')
@@ -21,7 +22,7 @@ export function PrdReviewStep() {
   const [saving, setSaving] = useState(false)
   const startedRef = useRef(false)
 
-  const hasKey = apiKey.trim().length > 0
+  const hasKey = apiKey.trim().length > 0 || serverKey
   const needsGeneration =
     !workflow.prd.draft?.trim() &&
     workflow.prd.status !== 'review-required' &&
@@ -41,7 +42,7 @@ export function PrdReviewStep() {
 
   const generate = async () => {
     const trimmedKey = apiKey.trim()
-    if (!trimmedKey) {
+    if (!trimmedKey && !serverKey) {
       setError(`Add your ${PROVIDERS[provider].label} API key in Settings first.`)
       return
     }

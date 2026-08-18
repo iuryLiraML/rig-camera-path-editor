@@ -1,0 +1,10 @@
+.cursor
+.git
+.vercel
+node_modules
+dist
+.env
+.env.local
+.env*.local
+*.log
+agent-transcripts

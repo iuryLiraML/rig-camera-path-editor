@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { runAgent, type ToolDef } from './providers'
+import { runAgent, userStills, type ToolDef } from './providers'
 
 const stepTool: ToolDef = {
   name: 'create_step',
@@ -208,5 +208,64 @@ describe('runAgent', () => {
     ).rejects.toThrow('provider disconnected')
 
     expect(checkpoint.at(-1)).toMatchObject({ role: 'tool', name: 'create_step', content: 'ok' })
+  })
+
+  it('awaits an async execute before sending the tool result', async () => {
+    let request = 0
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        request++
+        if (request === 1) {
+          return streamResponse({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call-async',
+                      function: { name: 'create_step', arguments: JSON.stringify({ index: 1 }) },
+                    },
+                  ],
+                },
+                finish_reason: 'tool_calls',
+              },
+            ],
+          })
+        }
+        return streamResponse({
+          choices: [{ delta: { content: 'Lifted.' }, finish_reason: 'stop' }],
+        })
+      }),
+    )
+
+    let saw = ''
+    const result = await runAgent({
+      provider: { kind: 'kimi', apiKey: 'test-key', model: 'kimi-test', vision: false },
+      system: 'Lift.',
+      messages: [{ role: 'user', text: 'Lift the person.' }],
+      tools: [stepTool],
+      execute: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+        saw = 'done'
+        return 'placed obj-1'
+      },
+    })
+
+    expect(saw).toBe('done')
+    expect(result.messages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'tool', content: 'placed obj-1' }),
+      ]),
+    )
+  })
+})
+
+describe('userStills', () => {
+  it('prefers the images list over a single still', () => {
+    expect(userStills({ image: 'mid', images: ['a', 'b', 'c'] })).toEqual(['a', 'b', 'c'])
+    expect(userStills({ image: 'mid' })).toEqual(['mid'])
+    expect(userStills({})).toEqual([])
   })
 })

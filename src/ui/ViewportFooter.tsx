@@ -27,6 +27,7 @@ const LAYOUTS: { value: LayoutPreset; label: string; title: string }[] = [
 ]
 
 export function ViewportFooter() {
+  const cameraView = useEditorStore((s) => s.cameraView)
   const projection = useEditorStore((s) => s.projection)
   const setProjection = useEditorStore((s) => s.setProjection)
   const requestView = useEditorStore((s) => s.requestView)
@@ -37,6 +38,8 @@ export function ViewportFooter() {
   const paneCount = useLayoutStore((s) => leafList(s.root).length)
   const preset = useLayoutStore((s) => detectPreset(s.root))
   const win = useWindowSize()
+
+  if (cameraView) return null
 
   // put the dividers in the middle of the *visible* viewport, not of the canvas
   const free = freeAreaRect(insets, win.h)

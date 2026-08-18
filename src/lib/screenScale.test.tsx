@@ -83,3 +83,16 @@ describe('useScreenScale', () => {
     expect(mesh.scale.x).toBeCloseTo(0.09 * 5, 5)
   })
 })
+
+const { RING_SCREEN_SCALE } = await import('../viewport/rig/RingHandle')
+
+describe('static rig ring scale', () => {
+  it('stays in the path-anchor family at editor distance, not 0.58', () => {
+    const mesh = new THREE.Mesh()
+    const ref = { current: mesh as THREE.Object3D | null }
+    const tick = mount(ref, RING_SCREEN_SCALE)
+    tick(perspectiveAt(7))
+    expect(mesh.scale.x).toBeCloseTo(0.12, 5)
+    expect(mesh.scale.x).not.toBeCloseTo(0.58, 2)
+  })
+})

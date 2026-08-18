@@ -166,12 +166,7 @@ export function AssetIntakeStep() {
                       <span>
                         <span className="font-medium">{asset.fileName}</span>
                         <span className="mt-1 block text-xs text-ink-dim">
-                          {(asset.byteSize / 1024).toFixed(1)} KB · object {asset.sceneObjectId}
-                          {asset.cloudAssetId && (
-                            <span className="ml-2 font-mono text-[10px]">
-                              cloud:{asset.cloudAssetId.slice(0, 8)}…
-                            </span>
-                          )}
+                          {(asset.byteSize / 1024).toFixed(1)} KB
                         </span>
                       </span>
                     </label>
@@ -186,8 +181,7 @@ export function AssetIntakeStep() {
             </div>
           ) : (
             <p className="rounded-lg border border-line/80 bg-panel px-3 py-2 text-xs text-ink-dim">
-              No models imported yet. The default placeholder shape will be replaced by your first
-              upload.
+              No models imported yet. Import a GLB or GLTF to use as the hero subject.
             </p>
           )}
           {errors.assets && (

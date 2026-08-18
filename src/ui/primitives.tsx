@@ -1,5 +1,10 @@
-import type { ReactNode } from 'react'
+import { useRef, type PointerEvent, type ReactNode } from 'react'
 import type { Vec3 } from '../state/useSceneStore'
+import {
+  NUMBER_SCRUB_THRESHOLD_PX,
+  numberScrubScale,
+  numberScrubValue,
+} from './numberScrub'
 
 export function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -47,21 +52,83 @@ export function Segmented<T extends string>({
   )
 }
 
+export const KEYED_GREEN = '#3dd68c'
+
 export function NumberInput({
   value,
   onChange,
   step = 0.1,
   prefix,
+  keyed = false,
+  onFocusChange,
 }: {
   value: number
   onChange: (value: number) => void
   step?: number
   prefix?: string
+  keyed?: boolean
+  onFocusChange?: (on: boolean) => void
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dragRef = useRef<{
+    pointerId: number
+    startY: number
+    startValue: number
+    scrubbing: boolean
+  } | null>(null)
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return
+    dragRef.current = {
+      pointerId: e.pointerId,
+      startY: e.clientY,
+      startValue: value,
+      scrubbing: false,
+    }
+  }
+
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    const dy = e.clientY - drag.startY
+    if (!drag.scrubbing) {
+      if (Math.abs(dy) < NUMBER_SCRUB_THRESHOLD_PX) return
+      drag.scrubbing = true
+      e.currentTarget.setPointerCapture(e.pointerId)
+      inputRef.current?.blur()
+    }
+    e.preventDefault()
+    const next = numberScrubValue(
+      drag.startValue,
+      dy,
+      step,
+      numberScrubScale(e.shiftKey, e.altKey),
+    )
+    if (next !== value) onChange(next)
+  }
+
+  const endPointer = (e: PointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== e.pointerId) return
+    if (drag.scrubbing && e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId)
+    }
+    dragRef.current = null
+  }
+
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-1 rounded-md bg-panel-2 px-1.5 py-1">
+    <div
+      className={`flex min-w-0 flex-1 cursor-ns-resize select-none items-center gap-1 rounded-md bg-panel-2 px-1.5 py-1 focus-within:cursor-text ${
+        keyed ? 'ring-1 ring-[#3dd68c]' : ''
+      }`}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={endPointer}
+      onPointerCancel={endPointer}
+    >
       {prefix && <span className="text-[10px] text-ink-dim">{prefix}</span>}
       <input
+        ref={inputRef}
         type="number"
         step={step}
         value={Number(value.toFixed(3))}
@@ -69,7 +136,11 @@ export function NumberInput({
           const parsed = parseFloat(e.target.value)
           if (!Number.isNaN(parsed)) onChange(parsed)
         }}
-        className="w-full min-w-0 bg-transparent text-right text-[11px] text-ink outline-none"
+        onFocus={() => onFocusChange?.(true)}
+        onBlur={() => onFocusChange?.(false)}
+        className={`w-full min-w-0 cursor-ns-resize bg-transparent text-right text-[11px] outline-none focus:cursor-text ${
+          keyed ? 'text-[#3dd68c]' : 'text-ink'
+        }`}
       />
     </div>
   )
@@ -79,10 +150,14 @@ export function XYZInput({
   value,
   onChange,
   step = 0.1,
+  keyed = false,
+  onFocusChange,
 }: {
   value: Vec3
   onChange: (axis: 0 | 1 | 2, value: number) => void
   step?: number
+  keyed?: boolean
+  onFocusChange?: (on: boolean) => void
 }) {
   return (
     <div className="flex flex-1 gap-1">
@@ -92,6 +167,8 @@ export function XYZInput({
           prefix={axis}
           step={step}
           value={value[i]}
+          keyed={keyed}
+          onFocusChange={onFocusChange}
           onChange={(v) => onChange(i as 0 | 1 | 2, v)}
         />
       ))}
@@ -134,6 +211,8 @@ export function Slider({
   max = 1,
   step = 0.01,
   format,
+  keyed = false,
+  onFocusChange,
 }: {
   value: number
   onChange: (value: number) => void
@@ -141,9 +220,11 @@ export function Slider({
   max?: number
   step?: number
   format?: (value: number) => string
+  keyed?: boolean
+  onFocusChange?: (on: boolean) => void
 }) {
   return (
-    <div className="flex min-w-0 flex-1 items-center gap-2">
+    <div className={`flex min-w-0 flex-1 items-center gap-2 ${keyed ? 'rounded-md ring-1 ring-[#3dd68c] px-1' : ''}`}>
       <input
         type="range"
         min={min}
@@ -151,9 +232,15 @@ export function Slider({
         step={step}
         value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))}
+        onFocus={() => onFocusChange?.(true)}
+        onBlur={() => onFocusChange?.(false)}
         className="w-full min-w-0 flex-1 accent-accent"
       />
-      <span className="w-9 shrink-0 text-right text-[11px] tabular-nums text-ink">
+      <span
+        className={`w-9 shrink-0 text-right text-[11px] tabular-nums ${
+          keyed ? 'text-[#3dd68c]' : 'text-ink'
+        }`}
+      >
         {format ? format(value) : value.toFixed(2)}
       </span>
     </div>

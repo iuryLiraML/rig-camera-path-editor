@@ -31,6 +31,7 @@ export function ShotListReviewStep() {
   const workflow = useProjectStore((state) => state.workflow)
   const provider = useAgentStore((state) => state.provider)
   const apiKey = useAgentStore((state) => state.keys[state.provider])
+  const serverKey = useAgentStore((state) => state.serverKeys[state.provider])
   const model = useAgentStore((state) => state.models[state.provider])
   const [summary, setSummary] = useState(workflow.shotList.summary ?? '')
   const [status, setStatus] = useState<'idle' | 'generating'>('idle')
@@ -40,7 +41,7 @@ export function ShotListReviewStep() {
   const startedRef = useRef(false)
 
   const shots = workflow.shotList.shots
-  const hasKey = apiKey.trim().length > 0
+  const hasKey = apiKey.trim().length > 0 || serverKey
   const needsGeneration =
     shots.length === 0 &&
     workflow.shotList.status !== 'review-required' &&
@@ -60,7 +61,7 @@ export function ShotListReviewStep() {
 
   const generate = async () => {
     const trimmedKey = apiKey.trim()
-    if (!trimmedKey) {
+    if (!trimmedKey && !serverKey) {
       setError(`Add your ${PROVIDERS[provider].label} API key in Settings first.`)
       return
     }
@@ -164,7 +165,8 @@ export function ShotListReviewStep() {
             </h1>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-ink-dim">
               Review every planned camera move before production. Approving this list completes
-              intake and opens the editor for batch generation.
+              intake and opens the editor — ask the Director to build each shot, or draw paths
+              yourself.
             </p>
           </div>
           <span className="rounded-full border border-line px-2.5 py-1 text-[11px] text-ink-dim">
@@ -275,14 +277,17 @@ export function ShotListReviewStep() {
                       <input
                         type="number"
                         min="0.5"
+                        max="30"
                         step="0.5"
                         value={shot.durationSeconds}
                         disabled={status === 'generating'}
-                        onChange={(event) =>
+                        onChange={(event) => {
+                          const n = Number(event.target.value)
+                          if (!Number.isFinite(n)) return
                           void patchShot(shot.id, {
-                            durationSeconds: Number(event.target.value),
+                            durationSeconds: Math.min(30, Math.max(0.5, n)),
                           })
-                        }
+                        }}
                         className="mt-1 w-full rounded-lg border border-line bg-panel-2 px-3 py-2 text-sm text-ink outline-none focus:border-accent"
                       />
                     </div>

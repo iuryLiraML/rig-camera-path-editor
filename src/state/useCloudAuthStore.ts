@@ -1,21 +1,71 @@
 import { create } from 'zustand'
-import { fetchCloudSession, storeProviderCredential } from '../lib/cloud/client'
+import {
+  CLOUD_ACCESS_TOKEN_KEY,
+  fetchCloudSession,
+  isTeamCloudApp,
+  listOwnCredentials,
+  retrieveOwnCredential,
+  storeProviderCredential,
+} from '../lib/cloud/client'
+import { idbClear } from '../lib/idb'
 import type { ProviderKind } from '../lib/agent/providers'
+import { useAgentStore } from './useAgentStore'
+import { useEditorStore } from './useEditorStore'
+import { useProjectStore } from './useProjectStore'
 
-const TOKEN_KEY = 'rig-cloud-access-token'
+const TOKEN_KEY = CLOUD_ACCESS_TOKEN_KEY
+
+export type VaultProvider = ProviderKind | 'fal'
+
+export interface CloudSaveConflict {
+  projectId: string
+  updatedAt: string
+}
 
 interface CloudAuthState {
   accessToken: string | null
-  session: { userId: string; tenantId: string } | null
+  session: {
+    userId: string
+    tenantId: string
+    email: string | null
+    name: string | null
+    picture: string | null
+  } | null
   status: 'idle' | 'checking' | 'signed-in' | 'signed-out' | 'error'
   error: string | null
   /** id of the encrypted vault credential stored per AI provider (server-side) */
-  credentialIds: Partial<Record<ProviderKind, string>>
+  credentialIds: Partial<Record<VaultProvider, string>>
+  saveConflict: CloudSaveConflict | null
   setAccessToken: (token: string | null) => Promise<void>
   bootstrap: () => Promise<void>
-  signOut: () => void
+  signOut: () => Promise<void>
+  setSaveConflict: (conflict: CloudSaveConflict | null) => void
   /** store an API key in the encrypted cloud vault; returns the credential id */
-  storeCredential: (provider: ProviderKind, secret: string) => Promise<string>
+  storeCredential: (provider: VaultProvider, secret: string) => Promise<string>
+}
+
+function clearAgentSecrets() {
+  const agent = useAgentStore.getState()
+  agent.setKey('anthropic', '')
+  agent.setKey('kimi', '')
+  agent.setFalKey('')
+}
+
+async function hydrateVaultSecrets(accessToken: string) {
+  const listed = await listOwnCredentials(accessToken)
+  const credentialIds: Partial<Record<VaultProvider, string>> = {}
+  const agent = useAgentStore.getState()
+  for (const row of listed) {
+    const retrieved = await retrieveOwnCredential(accessToken, row.id)
+    if (retrieved.provider === 'anthropic' || retrieved.provider === 'kimi') {
+      agent.setKey(retrieved.provider, retrieved.secret)
+      credentialIds[retrieved.provider] = retrieved.id
+    } else if (retrieved.provider === 'fal') {
+      agent.setFalKey(retrieved.secret)
+      credentialIds.fal = retrieved.id
+    }
+  }
+  return credentialIds
 }
 
 export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
@@ -24,11 +74,23 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
   status: 'idle',
   error: null,
   credentialIds: {},
+  saveConflict: null,
+
+  setSaveConflict(conflict) {
+    set({ saveConflict: conflict })
+  },
 
   async setAccessToken(token) {
     if (!token?.trim()) {
       localStorage.removeItem(TOKEN_KEY)
-      set({ accessToken: null, session: null, status: 'signed-out', error: null, credentialIds: {} })
+      set({
+        accessToken: null,
+        session: null,
+        status: 'signed-out',
+        error: null,
+        credentialIds: {},
+        saveConflict: null,
+      })
       return
     }
 
@@ -37,7 +99,8 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
     set({ accessToken: trimmed, status: 'checking', error: null })
     try {
       const session = await fetchCloudSession(trimmed)
-      set({ session, status: 'signed-in', error: null })
+      const credentialIds = await hydrateVaultSecrets(trimmed)
+      set({ session, status: 'signed-in', error: null, credentialIds })
     } catch (error) {
       localStorage.removeItem(TOKEN_KEY)
       set({
@@ -45,12 +108,13 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
         session: null,
         status: 'error',
         error: error instanceof Error ? error.message : 'Cloud sign-in failed',
+        credentialIds: {},
       })
     }
   },
 
   async bootstrap() {
-    const envToken = import.meta.env.VITE_DEV_ACCESS_TOKEN?.trim()
+    const envToken = isTeamCloudApp() ? null : import.meta.env.VITE_DEV_ACCESS_TOKEN?.trim()
     const storedToken = localStorage.getItem(TOKEN_KEY)?.trim()
     const token = storedToken || envToken || null
     if (!token) {
@@ -60,9 +124,21 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
     await get().setAccessToken(token)
   },
 
-  signOut() {
+  async signOut() {
     localStorage.removeItem(TOKEN_KEY)
-    set({ accessToken: null, session: null, status: 'signed-out', error: null, credentialIds: {} })
+    clearAgentSecrets()
+    await idbClear().catch((error) => console.error('Failed to wipe project cache', error))
+    useProjectStore.getState().setProjectList([])
+    useProjectStore.setState({ projectId: '' })
+    useEditorStore.getState().setAppView('projects')
+    set({
+      accessToken: null,
+      session: null,
+      status: 'signed-out',
+      error: null,
+      credentialIds: {},
+      saveConflict: null,
+    })
   },
 
   async storeCredential(provider, secret) {

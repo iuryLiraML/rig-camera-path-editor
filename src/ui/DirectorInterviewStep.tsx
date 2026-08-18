@@ -26,6 +26,7 @@ export function DirectorInterviewStep() {
   const workflow = useProjectStore((state) => state.workflow)
   const provider = useAgentStore((state) => state.provider)
   const apiKey = useAgentStore((state) => state.keys[state.provider])
+  const serverKey = useAgentStore((state) => state.serverKeys[state.provider])
   const model = useAgentStore((state) => state.models[state.provider])
   const [input, setInput] = useState('')
   const [status, setStatus] = useState<'idle' | 'thinking'>('idle')
@@ -57,7 +58,7 @@ export function DirectorInterviewStep() {
   /** Returns true when the turn completed, so callers only clear input on success. */
   const runTurn = async (userText: string, nextWorkflow?: ProjectWorkflow): Promise<boolean> => {
     const trimmedKey = apiKey.trim()
-    if (!trimmedKey) {
+    if (!trimmedKey && !serverKey) {
       setError(`Add your ${PROVIDERS[provider].label} API key in Settings first.`)
       return false
     }
@@ -162,7 +163,7 @@ export function DirectorInterviewStep() {
     }
   }
 
-  const hasKey = apiKey.trim().length > 0
+  const hasKey = apiKey.trim().length > 0 || serverKey
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
@@ -207,7 +208,9 @@ export function DirectorInterviewStep() {
               {workflow.interview.transcript.length === 0 && status === 'thinking' && (
                 <p className="text-sm text-ink-dim">Preparing the first question…</p>
               )}
-              {workflow.interview.transcript.map((turn, index) => (
+              {workflow.interview.transcript.map((turn, index) => {
+                if (turn.role === 'client' && turn.text === START_PROMPT) return null
+                return (
                 <div
                   key={`${turn.at}-${index}`}
                   className={turn.role === 'client' ? 'flex justify-end' : ''}
@@ -225,7 +228,8 @@ export function DirectorInterviewStep() {
                     <p className="whitespace-pre-wrap">{turn.text}</p>
                   </div>
                 </div>
-              ))}
+                )
+              })}
               {status === 'thinking' && workflow.interview.transcript.length > 0 && (
                 <p className="text-sm text-ink-dim">Director is thinking…</p>
               )}

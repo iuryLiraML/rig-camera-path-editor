@@ -129,13 +129,18 @@ function solveU(t: number, x1: number, x2: number) {
   return u
 }
 
-/** Progress 0..1 at normalized time 0..1 through the given curve. */
-export function applyEase(kind: EaseKind, t: number): number {
+/** Progress 0..1 at normalized time 0..1 through a cubic-bezier (CSS form). */
+export function applyCubicBezier(bezier: [number, number, number, number], t: number): number {
   if (t <= 0) return 0
   if (t >= 1) return 1
-  const [x1, y1, x2, y2] = easeDef(kind).bezier
+  const [x1, y1, x2, y2] = bezier
   if (x1 === 0 && y1 === 0 && x2 === 1 && y2 === 1) return t
   return calc(solveU(t, x1, x2), y1, y2)
+}
+
+/** Progress 0..1 at normalized time 0..1 through the given named curve. */
+export function applyEase(kind: EaseKind, t: number): number {
+  return applyCubicBezier(easeDef(kind).bezier, t)
 }
 
 /** css value, for showing the curve the way the rest of the industry writes it */

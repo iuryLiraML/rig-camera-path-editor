@@ -3,10 +3,26 @@ import { useState } from 'react'
 import { useEditorStore, type ExportAspect, type ExportRes } from '../state/useEditorStore'
 import { AssistantPanel } from './AssistantPanel'
 import { defaultFollow, useSceneStore, type Vec3 } from '../state/useSceneStore'
-import { getRigSnapshot, openRigImportDialog, useRigStore, type RigChannel } from '../state/useRigStore'
+import {
+  getRigSnapshot,
+  openRigImportDialog,
+  useRigStore,
+  type RigChannel,
+  type ScalarChannel,
+} from '../state/useRigStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
-import { evalProgress, evalValue, evalVec3 } from '../lib/keyframes'
+import { anchorTangentMode, type TangentMode } from '../lib/curve'
+import { addStaticCamera, switchActiveCameraToPath, switchActiveCameraToStatic } from '../lib/addStaticCamera'
+import {
+  otherCamerasOnPath,
+  useCameraAnchorCount,
+  useCameraPath,
+} from '../state/cameraPathLink'
+import { evalProgress, evalValue, evalVec3, type ValueKey } from '../lib/keyframes'
+import { evalObjectWorldPosition, resolveTrackTarget } from '../lib/objectMotion'
+import { setCameraPathSpace, setTrackObjectId } from '../lib/pathSpaceBind'
+import { hasKeyAtTime } from '../lib/keyAtPlayhead'
 import { easeGroups, easeDef, type EaseKind } from '../lib/easing'
 import { exportDimensions } from '../lib/recorder'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
@@ -23,6 +39,8 @@ import {
   Slider,
   XYZInput,
 } from './primitives'
+import { GUTTER, useViewportInsets } from './viewportInsets'
+import { SettingsIcon } from './icons'
 
 function PanelButton({
   label,
@@ -84,6 +102,17 @@ function KeyList({
 const deg = (v: number) => `${Math.round(v)}°`
 
 /**
+ * Open the path the active camera follows. Selection carries the *kind*
+ * ('camera-path' means "a path is selected"); which path is `activePathId`, so
+ * both must be set — that is the idiom the outliner already uses.
+ */
+function openCameraPath() {
+  const id = useRigStore.getState().cameraPathId || CAMERA_PATH_ID
+  usePathStore.getState().setActivePath(id)
+  useEditorStore.getState().select('camera-path')
+}
+
+/**
  * The animation-curve picker, in the vocabulary of After Effects and Premiere:
  * Penner families grouped by direction, with the shortlist that matters for a
  * camera move on top. See lib/easing.ts for the bezier values and why.
@@ -118,13 +147,21 @@ function EaseSelect({
 }
 
 /** the ◆ that pins the current value of a channel at the playhead */
-function KeyButton({ active, onClick }: { active: boolean; onClick: () => void }) {
+function KeyButton({
+  active,
+  onKey,
+  onClick,
+}: {
+  active: boolean
+  onKey?: boolean
+  onClick: () => void
+}) {
   return (
     <button
       onClick={onClick}
-      title="Add a keyframe for this property at the playhead"
+      title="Add a keyframe for this property at the playhead (I)"
       className={`shrink-0 text-[11px] leading-none transition-colors ${
-        active ? 'text-accent' : 'text-ink-dim hover:text-ink'
+        onKey ? 'text-[#3dd68c]' : active ? 'text-accent' : 'text-ink-dim hover:text-ink'
       }`}
     >
       ◆
@@ -181,6 +218,69 @@ function ChannelKeys({
         </div>
       ))}
     </div>
+  )
+}
+
+function FxKeyedRow({
+  label,
+  channel,
+  keys,
+  now,
+  duration,
+  min,
+  max,
+  step,
+  format,
+  onStatic,
+}: {
+  label: string
+  channel: ScalarChannel
+  keys: ValueKey[]
+  now: number
+  duration: number
+  min?: number
+  max?: number
+  step?: number
+  format: (value: number) => string
+  onStatic: (value: number) => void
+}) {
+  const t = useRigStore((s) => s.t)
+  return (
+    <>
+      <Row label={label}>
+        <div className="flex items-center gap-2">
+          <Slider
+            value={now}
+            keyed={hasKeyAtTime(keys, t)}
+            onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? channel : null)}
+            onChange={(v) => {
+              const state = useRigStore.getState()
+              if (keys.length > 0) state.upsertChannelKey(channel, state.t, v)
+              else onStatic(v)
+            }}
+            min={min}
+            max={max}
+            step={step}
+            format={format}
+          />
+          <KeyButton
+            active={keys.length > 0}
+            onKey={hasKeyAtTime(keys, t)}
+            onClick={() => {
+              const state = useRigStore.getState()
+              state.setPlaying(false)
+              state.upsertChannelKey(channel, state.t, now)
+            }}
+          />
+        </div>
+      </Row>
+      <ChannelKeys
+        channel={channel}
+        keys={keys}
+        duration={duration}
+        format={(k) => format(keys.find((x) => x.id === k.id)?.value ?? 0)}
+      />
+    </>
   )
 }
 
@@ -358,6 +458,8 @@ function ObjectSections({ objectId }: { objectId: string }) {
           <Row label="Position">
             <XYZInput
               value={object.transform.position}
+              keyed={hasKeyAtTime(object.keys, t)}
+              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
               onChange={(a, v) => scene.setTransform(object.id, 'position', a, v)}
             />
           </Row>
@@ -367,15 +469,19 @@ function ObjectSections({ objectId }: { objectId: string }) {
             <XYZInput
               value={object.transform.rotation}
               step={1}
+              keyed={hasKeyAtTime(object.keys, t)}
+              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
               onChange={(a, v) => scene.setTransform(object.id, 'rotation', a, v)}
             />
           </Row>
         )}
         <Row label="Scale">
-          <XYZInput
-            value={object.transform.scale}
-            onChange={(a, v) => scene.setTransform(object.id, 'scale', a, v)}
-          />
+            <XYZInput
+              value={object.transform.scale}
+              keyed={hasKeyAtTime(object.keys, t)}
+              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
+              onChange={(a, v) => scene.setTransform(object.id, 'scale', a, v)}
+            />
         </Row>
       </Section>
       <Section title="Material · Clay">
@@ -437,6 +543,7 @@ function PathSections() {
   const closed = active?.closed ?? false
   const rounding = active?.rounding ?? 0.8
   const selectedAnchorId = usePathStore((s) => s.selectedAnchorId)
+  const selectedAnchorIds = usePathStore((s) => s.selectedAnchorIds)
   const drawPlaneY = usePathStore((s) => s.drawPlaneY)
   const path = usePathStore.getState()
   const showNotice = useSceneStore((s) => s.showNotice)
@@ -444,6 +551,7 @@ function PathSections() {
   const isCamera = activePathId === CAMERA_PATH_ID
   const selected = anchors.find((a) => a.id === selectedAnchorId)
   const index = selected ? anchors.indexOf(selected) : -1
+  const multi = selectedAnchorIds.length > 1
   const pathHeight = anchors[0]?.position[1] ?? drawPlaneY
   const hasManual = anchors.some((a) => a.manual)
 
@@ -540,28 +648,42 @@ function PathSections() {
       </Section>
 
       {selected && (
-        <Section title={`Point ${index + 1}`}>
+        <Section title={multi ? `${selectedAnchorIds.length} points` : `Point ${index + 1}`}>
+          <Row label="Tangent">
+            <Segmented
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'smooth', label: 'Smooth' },
+                { value: 'corner', label: 'Corner' },
+                { value: 'broken', label: 'Broken' },
+              ]}
+              value={anchorTangentMode(selected)}
+              onChange={(v) => path.setAnchorsTangent(selectedAnchorIds, v as TangentMode)}
+            />
+          </Row>
           <Row label="Height">
             <Slider
               value={selected.position[1]}
-              onChange={(y) => path.setAnchorHeight(selected.id, y)}
+              onChange={(y) => path.setAnchorsHeight(selectedAnchorIds, y)}
               min={0.2}
               max={10}
               step={0.1}
               format={meters}
             />
           </Row>
-          <Row label="Position">
-            <XYZInput
-              value={selected.position}
-              onChange={(axis, v) => {
-                const next = [...selected.position] as Vec3
-                next[axis] = v
-                path.updateAnchorPosition(selected.id, next)
-              }}
-            />
-          </Row>
-          {selected.manual && (
+          {!multi && (
+            <Row label="Position">
+              <XYZInput
+                value={selected.position}
+                onChange={(axis, v) => {
+                  const next = [...selected.position] as Vec3
+                  next[axis] = v
+                  path.updateAnchorPosition(selected.id, next)
+                }}
+              />
+            </Row>
+          )}
+          {!multi && selected.manual && (
             <>
               <Row label="Handles">
                 <Segmented
@@ -595,17 +717,62 @@ function PathSections() {
               </Row>
             </>
           )}
-          <PanelButton label="Delete Point" tone="danger" onClick={() => path.removeAnchor(selected.id)} />
+          <PanelButton
+            label={multi ? 'Delete Points' : 'Delete Point'}
+            tone="danger"
+            onClick={() => path.removeAnchors(selectedAnchorIds)}
+          />
         </Section>
       )}
     </>
   )
 }
 
+function TrackObjectRow() {
+  const targetObjectId = useRigStore((s) => s.targetObjectId)
+  const objects = useSceneStore((s) => s.objects)
+  const liveId = targetObjectId && objects.some((object) => object.id === targetObjectId)
+    ? targetObjectId
+    : ''
+
+  return (
+    <Row label="Track">
+      <select
+        value={liveId}
+        onChange={(e) => {
+          const id = e.target.value
+          const rig = useRigStore.getState()
+          const scene = {
+            objects: useSceneStore.getState().objects,
+            paths: usePathStore.getState().paths,
+          }
+          if (!id) {
+            const track = resolveTrackTarget(rig.targetObjectId, scene.objects, scene.paths)
+            if (track) {
+              rig.setTarget(evalObjectWorldPosition(rig.t, track.object, track.path, rig.ease))
+            }
+            setTrackObjectId(null, scene)
+            return
+          }
+          rig.clearChannel('target')
+          setTrackObjectId(id, scene)
+        }}
+        className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
+      >
+        <option value="">None — point</option>
+        {objects.map((object) => (
+          <option key={object.id} value={object.id}>
+            {object.name}
+          </option>
+        ))}
+      </select>
+    </Row>
+  )
+}
+
 function CinemaCameraSections() {
   const duration = useRigStore((s) => s.duration)
   const ease = useRigStore((s) => s.ease)
-  const loop = useRigStore((s) => s.loop)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
   const target = useRigStore((s) => s.target)
   const roll = useRigStore((s) => s.roll)
@@ -614,20 +781,79 @@ function CinemaCameraSections() {
   const progressKeys = useRigStore((s) => s.progressKeys)
   const fovKeys = useRigStore((s) => s.fovKeys)
   const rollKeys = useRigStore((s) => s.rollKeys)
+  const intensityKeys = useRigStore((s) => s.intensityKeys)
+  const fadeInKeys = useRigStore((s) => s.fadeInKeys)
+  const fadeOutKeys = useRigStore((s) => s.fadeOutKeys)
+  const ampPosKeys = useRigStore((s) => s.ampPosKeys)
+  const ampRotKeys = useRigStore((s) => s.ampRotKeys)
+  const freqKeys = useRigStore((s) => s.freqKeys)
   const targetKeys = useRigStore((s) => s.targetKeys)
+  const lookOffset = useRigStore((s) => s.lookOffset)
+  const lookOffsetKeys = useRigStore((s) => s.lookOffsetKeys)
+  const cameraNoise = useRigStore((s) => s.cameraNoise)
+  const [fxMore, setFxMore] = useState(false)
+  const [inspectorMore, setInspectorMore] = useState(false)
+  const targetObjectId = useRigStore((s) => s.targetObjectId)
+  const pathSpace = useRigStore((s) => s.pathSpace)
+  const objects = useSceneStore((s) => s.objects)
+  const cameraCount = useCameraOptionsStore((s) => s.options.length)
+  const cameraKind = useRigStore((s) => s.cameraKind)
+  const staticPose = useRigStore((s) => s.staticPose)
+  const tracking = Boolean(targetObjectId && objects.some((object) => object.id === targetObjectId))
   const rig = useRigStore.getState()
+  const isStatic = cameraKind === 'static'
 
   // a channel with keyframes shows its animated value at the playhead, so the
   // slider always reflects what the camera is doing right now
   const fovNow = evalValue(t, fovKeys, fov, ease)
   const rollNow = evalValue(t, rollKeys, roll, ease)
+  const intensityNow = evalValue(t, intensityKeys, cameraNoise.intensity, ease)
+  const fadeInNow = evalValue(t, fadeInKeys, cameraNoise.fadeIn, ease)
+  const fadeOutNow = evalValue(t, fadeOutKeys, cameraNoise.fadeOut, ease)
+  const ampPosNow = evalValue(t, ampPosKeys, cameraNoise.ampPos, ease)
+  const ampRotNow = evalValue(t, ampRotKeys, cameraNoise.ampRot, ease)
+  const freqNow = evalValue(t, freqKeys, cameraNoise.freq, ease)
   const targetNow = evalVec3(t, targetKeys, target, ease)
+  const lookOffsetNow = evalVec3(t, lookOffsetKeys, lookOffset, ease)
 
   const currentProgress = evalProgress(t, progressKeys, ease)
   const sortedKeys = [...progressKeys].sort((a, b) => a.time - b.time)
 
   return (
     <>
+      <Section title="Placement">
+        <Row label="Camera">
+          <Segmented
+            options={[
+              { value: 'path', label: 'On path' },
+              { value: 'static', label: 'Free' },
+            ]}
+            value={cameraKind}
+            onChange={(kind) => {
+              if (kind === 'static') switchActiveCameraToStatic()
+              else switchActiveCameraToPath()
+            }}
+          />
+        </Row>
+        {isStatic && (
+          <>
+            <p className="text-[10px] leading-relaxed text-ink-dim">
+              Click the camera to get the move gizmo (W move, E rotate). The
+              floor pad trucks, the diamond aims. Look through, then WASD to fly.
+            </p>
+            <Row label="Position">
+              <XYZInput
+                value={staticPose.position}
+                onChange={(axis, v) => {
+                  const next = [...staticPose.position] as Vec3
+                  next[axis] = v
+                  useRigStore.getState().setStaticPose({ position: next })
+                }}
+              />
+            </Row>
+          </>
+        )}
+      </Section>
       <Section title="Animation">
         <Row label="Duration">
           <Slider value={duration} onChange={rig.setDuration} min={1} max={30} step={0.5} format={secs} />
@@ -635,21 +861,12 @@ function CinemaCameraSections() {
         <Row label="Curve">
           <EaseSelect value={ease} onChange={rig.setEase} />
         </Row>
-        <Row label="Loop">
-          <Segmented
-            options={[
-              { value: 'yes', label: 'Yes' },
-              { value: 'no', label: 'No' },
-            ]}
-            value={loop ? 'yes' : 'no'}
-            onChange={(v) => rig.setLoop(v === 'yes')}
-          />
-        </Row>
       </Section>
+      {!isStatic && (
       <Section title="Keyframes">
         <PanelButton
           label="Path, presets & shape"
-          onClick={() => useEditorStore.getState().select(CAMERA_PATH_ID)}
+          onClick={openCameraPath}
         />
         <div className="text-[10px] leading-relaxed text-ink-dim">
           Move the playhead, then drag the slider to pin where on the path the camera
@@ -658,6 +875,8 @@ function CinemaCameraSections() {
         <Row label="On path">
           <Slider
             value={currentProgress}
+            keyed={hasKeyAtTime(progressKeys, t)}
+            onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'progress' : null)}
             onChange={(p) => {
               const state = useRigStore.getState()
               state.setPlaying(false)
@@ -678,15 +897,16 @@ function CinemaCameraSections() {
           <PanelButton label="Clear keyframes" tone="danger" onClick={rig.clearProgressKeys} />
         )}
       </Section>
+      )}
       <Section title="Lens">
         <Row label="FOV">
           <div className="flex items-center gap-2">
             <Slider
               value={fovNow}
+              keyed={hasKeyAtTime(fovKeys, t)}
+              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'fov' : null)}
               onChange={(v) => {
                 const state = useRigStore.getState()
-                // editing an animated channel writes the keyframe at the
-                // playhead; editing a static one moves the static value
                 if (state.fovKeys.length > 0) state.upsertChannelKey('fov', state.t, v)
                 else state.setFov(v)
               }}
@@ -697,6 +917,7 @@ function CinemaCameraSections() {
             />
             <KeyButton
               active={fovKeys.length > 0}
+              onKey={hasKeyAtTime(fovKeys, t)}
               onClick={() => {
                 const state = useRigStore.getState()
                 state.setPlaying(false)
@@ -715,6 +936,8 @@ function CinemaCameraSections() {
           <div className="flex items-center gap-2">
             <Slider
               value={rollNow}
+              keyed={hasKeyAtTime(rollKeys, t)}
+              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'roll' : null)}
               onChange={(v) => {
                 const state = useRigStore.getState()
                 if (state.rollKeys.length > 0) state.upsertChannelKey('roll', state.t, v)
@@ -727,6 +950,7 @@ function CinemaCameraSections() {
             />
             <KeyButton
               active={rollKeys.length > 0}
+              onKey={hasKeyAtTime(rollKeys, t)}
               onClick={() => {
                 const state = useRigStore.getState()
                 state.setPlaying(false)
@@ -742,25 +966,117 @@ function CinemaCameraSections() {
           format={(k) => deg(rollKeys.find((x) => x.id === k.id)?.value ?? 0)}
         />
       </Section>
-      <CameraFormatSection />
-      <CameraOptionSection />
       <Section title="Look At">
         <Row label="Mode">
           <Segmented
-            options={[
-              { value: 'target', label: 'Target' },
-              { value: 'path-tangent', label: 'Motion' },
-            ]}
+            options={
+              isStatic
+                ? [
+                    { value: 'free', label: 'Free' },
+                    { value: 'target', label: 'Target' },
+                  ]
+                : [
+                    { value: 'target', label: 'Target' },
+                    { value: 'path-tangent', label: 'Motion' },
+                  ]
+            }
             value={lookAtMode}
             onChange={(v) => rig.setLookAtMode(v)}
           />
         </Row>
-        {lookAtMode === 'target' && (
+        {isStatic && lookAtMode === 'free' && (
+          <Row label="Rotation">
+            <XYZInput
+              value={staticPose.rotation}
+              onChange={(axis, v) => {
+                const next = [...staticPose.rotation] as Vec3
+                next[axis] = v
+                useRigStore.getState().setStaticPose({ rotation: next })
+              }}
+            />
+          </Row>
+        )}
+        {lookAtMode !== 'free' && <TrackObjectRow />}
+        {!isStatic && (
+          <>
+            <Row label="Path">
+              <Segmented
+                options={[
+                  { value: 'world', label: 'World' },
+                  { value: 'object', label: 'Object' },
+                ]}
+                value={pathSpace}
+                onChange={(space) =>
+                  setCameraPathSpace(space, {
+                    objects: useSceneStore.getState().objects,
+                    paths: usePathStore.getState().paths,
+                  })
+                }
+              />
+            </Row>
+            {pathSpace === 'object' && tracking && (
+              <p className="text-[10px] leading-relaxed text-ink-dim">
+                Path rides with the tracked object — chase, over-shoulder, hood-mount.
+              </p>
+            )}
+            {pathSpace === 'world' && !tracking && (
+              <p className="text-[10px] leading-relaxed text-ink-dim">
+                Track an object, then set Path to Object to ride with it.
+              </p>
+            )}
+          </>
+        )}
+        {lookAtMode === 'target' && tracking && (
+          <>
+            <p className="text-[10px] leading-relaxed text-ink-dim">
+              Target follows the object plus a local offset — head, label, over-shoulder.
+            </p>
+            <Row label="Offset">
+              <div className="flex items-center gap-2">
+                <XYZInput
+                  value={lookOffsetNow}
+                  keyed={hasKeyAtTime(lookOffsetKeys, t)}
+                  onFocusChange={(on) =>
+                    useEditorStore.getState().setKeyableFocus(on ? 'lookOffset' : null)
+                  }
+                  onChange={(axis, v) => {
+                    const state = useRigStore.getState()
+                    const next = [...lookOffsetNow] as Vec3
+                    next[axis] = v
+                    if (state.lookOffsetKeys.length > 0) state.upsertLookOffsetKey(state.t, next)
+                    else state.setLookOffset(next)
+                  }}
+                />
+                <KeyButton
+                  active={lookOffsetKeys.length > 0}
+                  onKey={hasKeyAtTime(lookOffsetKeys, t)}
+                  onClick={() => {
+                    const state = useRigStore.getState()
+                    state.setPlaying(false)
+                    state.upsertLookOffsetKey(state.t, lookOffsetNow)
+                  }}
+                />
+              </div>
+            </Row>
+            <ChannelKeys
+              channel="lookOffset"
+              keys={lookOffsetKeys}
+              duration={duration}
+              format={(k) => {
+                const v = lookOffsetKeys.find((x) => x.id === k.id)?.value
+                return v ? v.map((n) => n.toFixed(1)).join(', ') : ''
+              }}
+            />
+          </>
+        )}
+        {lookAtMode === 'target' && !tracking && (
           <>
             <Row label="Target">
               <div className="flex items-center gap-2">
                 <XYZInput
                   value={targetNow}
+                  keyed={hasKeyAtTime(targetKeys, t)}
+                  onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'target' : null)}
                   onChange={(axis, v) => {
                     const state = useRigStore.getState()
                     const next = [...targetNow] as Vec3
@@ -771,6 +1087,7 @@ function CinemaCameraSections() {
                 />
                 <KeyButton
                   active={targetKeys.length > 0}
+                  onKey={hasKeyAtTime(targetKeys, t)}
                   onClick={() => {
                     const state = useRigStore.getState()
                     state.setPlaying(false)
@@ -791,6 +1108,142 @@ function CinemaCameraSections() {
           </>
         )}
       </Section>
+      <Section title="Camera FX">
+        <Row label="Style">
+          <Segmented
+            options={[
+              { value: 'off', label: 'Off' },
+              { value: 'shake', label: 'Shake' },
+              { value: 'handheld', label: 'Handheld' },
+              { value: 'rumble', label: 'Rumble' },
+            ]}
+            value={cameraNoise.enabled ? cameraNoise.style : 'off'}
+            onChange={(v) => {
+              if (v === 'off') useRigStore.getState().setCameraNoise({ enabled: false })
+              else useRigStore.getState().setCameraNoise({ enabled: true, style: v })
+            }}
+          />
+        </Row>
+        {cameraNoise.enabled && (
+          <>
+            <FxKeyedRow
+              label="Amount"
+              channel="intensity"
+              keys={intensityKeys}
+              now={intensityNow}
+              duration={duration}
+              min={0}
+              max={1}
+              step={0.05}
+              format={pct}
+              onStatic={(v) => useRigStore.getState().setCameraNoise({ intensity: v })}
+            />
+            <Row label="On shot">
+              <div className="flex min-w-0 flex-1 items-center gap-2">
+                <Slider
+                  value={cameraNoise.start}
+                  onChange={(v) =>
+                    useRigStore.getState().setCameraNoise({
+                      start: v,
+                      end: Math.max(v, cameraNoise.end),
+                    })
+                  }
+                  format={(v) => `${(v * duration).toFixed(1)}s`}
+                />
+                <Slider
+                  value={cameraNoise.end}
+                  onChange={(v) =>
+                    useRigStore.getState().setCameraNoise({
+                      end: v,
+                      start: Math.min(v, cameraNoise.start),
+                    })
+                  }
+                  format={(v) => `${(v * duration).toFixed(1)}s`}
+                />
+              </div>
+            </Row>
+            <FxKeyedRow
+              label="Fade in"
+              channel="fadeIn"
+              keys={fadeInKeys}
+              now={fadeInNow}
+              duration={duration}
+              min={0}
+              max={3}
+              step={0.05}
+              format={secs}
+              onStatic={(v) => useRigStore.getState().setCameraNoise({ fadeIn: v })}
+            />
+            <FxKeyedRow
+              label="Fade out"
+              channel="fadeOut"
+              keys={fadeOutKeys}
+              now={fadeOutNow}
+              duration={duration}
+              min={0}
+              max={3}
+              step={0.05}
+              format={secs}
+              onStatic={(v) => useRigStore.getState().setCameraNoise({ fadeOut: v })}
+            />
+            <PanelButton
+              label={fxMore ? 'Less' : 'More'}
+              onClick={() => setFxMore((open) => !open)}
+            />
+            {fxMore && (
+              <>
+                <FxKeyedRow
+                  label="Pos"
+                  channel="ampPos"
+                  keys={ampPosKeys}
+                  now={ampPosNow}
+                  duration={duration}
+                  min={0}
+                  max={0.2}
+                  step={0.005}
+                  format={meters}
+                  onStatic={(v) => useRigStore.getState().setCameraNoise({ ampPos: v })}
+                />
+                <FxKeyedRow
+                  label="Rot"
+                  channel="ampRot"
+                  keys={ampRotKeys}
+                  now={ampRotNow}
+                  duration={duration}
+                  min={0}
+                  max={8}
+                  step={0.1}
+                  format={deg}
+                  onStatic={(v) => useRigStore.getState().setCameraNoise({ ampRot: v })}
+                />
+                <FxKeyedRow
+                  label="Freq"
+                  channel="freq"
+                  keys={freqKeys}
+                  now={freqNow}
+                  duration={duration}
+                  min={0.5}
+                  max={12}
+                  step={0.5}
+                  format={(v) => v.toFixed(1)}
+                  onStatic={(v) => useRigStore.getState().setCameraNoise({ freq: v })}
+                />
+              </>
+            )}
+          </>
+        )}
+      </Section>
+      {cameraCount > 1 && <CameraOptionSection />}
+      <PanelButton
+        label={inspectorMore ? 'Less' : 'More'}
+        onClick={() => setInspectorMore((open) => !open)}
+      />
+      {inspectorMore && (
+        <>
+          <CameraFormatSection />
+          {cameraCount <= 1 && <CameraOptionSection />}
+        </>
+      )}
     </>
   )
 }
@@ -803,9 +1256,15 @@ function CinemaCameraSections() {
 function CameraOptionSection() {
   const options = useCameraOptionsStore((s) => s.options)
   const activeId = useCameraOptionsStore((s) => s.activeOptionId)
+  const paths = usePathStore((s) => s.paths)
+  const followed = useCameraPath()
   const active = options.find((option) => option.id === activeId)
   const [confirming, setConfirming] = useState(false)
   if (!active) return null
+
+  // sharing a path is the point of a reference, but finding out by surprise when
+  // an edit moves another camera is not — name the others here
+  const sharedWith = followed ? otherCamerasOnPath(followed.id, active.id) : []
 
   return (
     <Section title="Camera">
@@ -816,6 +1275,40 @@ function CameraOptionSection() {
           className="w-full rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none focus:ring-1 focus:ring-accent"
         />
       </Row>
+      <Row label="Follows">
+        <select
+          value={followed?.id ?? CAMERA_PATH_ID}
+          onChange={(e) => useRigStore.getState().setCameraPath(e.target.value)}
+          title="Which path this camera travels along. Cameras can share a path."
+          className="w-full rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none focus:ring-1 focus:ring-accent"
+        >
+          {paths.map((path) => (
+            <option key={path.id} value={path.id}>
+              {path.id === CAMERA_PATH_ID ? 'Camera Path' : path.name}
+            </option>
+          ))}
+        </select>
+      </Row>
+      {sharedWith.length > 0 && (
+        <p className="px-0.5 text-[10px] leading-4 text-ink-dim">
+          Also followed by {sharedWith.join(', ')} — editing this path moves{' '}
+          {sharedWith.length === 1 ? 'that camera' : 'those cameras'} too.
+        </p>
+      )}
+      <div className="flex gap-1.5">
+        <PanelButton
+          label="Edit this path"
+          onClick={openCameraPath}
+        />
+        <PanelButton
+          label="New path"
+          onClick={() => {
+            const id = usePathStore.getState().createPath(`${active.name} path`)
+            useRigStore.getState().setCameraPath(id)
+            useEditorStore.getState().select('camera-path')
+          }}
+        />
+      </div>
       <div className="flex gap-1.5">
         <PanelButton
           label="Duplicate"
@@ -823,6 +1316,10 @@ function CameraOptionSection() {
             const id = useCameraOptionsStore.getState().createOption(`${active.name} copy`, getRigSnapshot())
             useCameraOptionsStore.getState().switchOption(id)
           }}
+        />
+        <PanelButton
+          label="Add free camera"
+          onClick={() => addStaticCamera()}
         />
         {options.length > 1 ? (
           <PanelButton
@@ -906,29 +1403,85 @@ function CameraFormatSection() {
 
 function TargetSections() {
   const target = useRigStore((s) => s.target)
+  const lookOffset = useRigStore((s) => s.lookOffset)
+  const lookOffsetKeys = useRigStore((s) => s.lookOffsetKeys)
+  const t = useRigStore((s) => s.t)
+  const ease = useRigStore((s) => s.ease)
+  const duration = useRigStore((s) => s.duration)
+  const targetObjectId = useRigStore((s) => s.targetObjectId)
+  const objects = useSceneStore((s) => s.objects)
+  const tracking = Boolean(targetObjectId && objects.some((object) => object.id === targetObjectId))
   const rig = useRigStore.getState()
+  const lookOffsetNow = evalVec3(t, lookOffsetKeys, lookOffset, ease)
   return (
     <Section title="Look-At Target">
-      <Row label="Height">
-        <Slider
-          value={target[1]}
-          onChange={(y) => rig.setTarget([target[0], y, target[2]])}
-          min={0}
-          max={8}
-          step={0.1}
-          format={meters}
-        />
-      </Row>
-      <Row label="Position">
-        <XYZInput
-          value={target}
-          onChange={(axis, v) => {
-            const next = [...target] as Vec3
-            next[axis] = v
-            rig.setTarget(next)
-          }}
-        />
-      </Row>
+      <TrackObjectRow />
+      {tracking ? (
+        <>
+          <p className="text-[10px] leading-relaxed text-ink-dim">
+            Target follows the object plus a local offset. Choose None to place a point again.
+          </p>
+          <Row label="Offset">
+            <div className="flex items-center gap-2">
+              <XYZInput
+                value={lookOffsetNow}
+                keyed={hasKeyAtTime(lookOffsetKeys, t)}
+                onFocusChange={(on) =>
+                  useEditorStore.getState().setKeyableFocus(on ? 'lookOffset' : null)
+                }
+                onChange={(axis, v) => {
+                  const state = useRigStore.getState()
+                  const next = [...lookOffsetNow] as Vec3
+                  next[axis] = v
+                  if (state.lookOffsetKeys.length > 0) state.upsertLookOffsetKey(state.t, next)
+                  else state.setLookOffset(next)
+                }}
+              />
+              <KeyButton
+                active={lookOffsetKeys.length > 0}
+                onKey={hasKeyAtTime(lookOffsetKeys, t)}
+                onClick={() => {
+                  const state = useRigStore.getState()
+                  state.setPlaying(false)
+                  state.upsertLookOffsetKey(state.t, lookOffsetNow)
+                }}
+              />
+            </div>
+          </Row>
+          <ChannelKeys
+            channel="lookOffset"
+            keys={lookOffsetKeys}
+            duration={duration}
+            format={(k) => {
+              const v = lookOffsetKeys.find((x) => x.id === k.id)?.value
+              return v ? v.map((n) => n.toFixed(1)).join(', ') : ''
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <Row label="Height">
+            <Slider
+              value={target[1]}
+              onChange={(y) => rig.setTarget([target[0], y, target[2]])}
+              min={0}
+              max={8}
+              step={0.1}
+              format={meters}
+            />
+          </Row>
+          <Row label="Position">
+            <XYZInput
+              value={target}
+              onChange={(axis, v) => {
+                const next = [...target] as Vec3
+                next[axis] = v
+                rig.setTarget(next)
+              }}
+            />
+          </Row>
+        </>
+      )}
     </Section>
   )
 }
@@ -938,15 +1491,10 @@ function SceneSections() {
   const setBgColor = useSceneStore((s) => s.setBgColor)
   const showGrid = useSceneStore((s) => s.showGrid)
   const setShowGrid = useSceneStore((s) => s.setShowGrid)
-  const hasCameraPath = usePathStore(
-    (s) => (s.paths.find((path) => path.id === CAMERA_PATH_ID)?.anchors.length ?? 0) >= 2,
-  )
+  const hasCameraPath = useCameraAnchorCount() >= 2
 
   return (
     <>
-      {/* The ready-made moves and the path options only existed under the
-          "Camera Path" item in the outliner, so with nothing selected — where you
-          land — there was no sign the app could build a move for you. */}
       <Section title="Camera move">
         <div className="grid grid-cols-2 gap-1">
           {PRESETS.map((preset) => (
@@ -954,7 +1502,7 @@ function SceneSections() {
               key={preset.kind}
               onClick={() => {
                 applyCameraPreset(preset.kind)
-                useEditorStore.getState().select(CAMERA_PATH_ID)
+                openCameraPath()
               }}
               title={preset.hint}
               className="rounded-md bg-panel-2 px-2 py-1.5 text-[11px] text-ink hover:bg-panel-3"
@@ -966,7 +1514,7 @@ function SceneSections() {
         <PanelButton
           label={hasCameraPath ? 'Path options & keyframes' : 'Draw a path (P)'}
           onClick={() => {
-            if (hasCameraPath) useEditorStore.getState().select(CAMERA_PATH_ID)
+            if (hasCameraPath) openCameraPath()
             else useEditorStore.getState().setTool('pen')
           }}
         />
@@ -990,66 +1538,58 @@ function SceneSections() {
   )
 }
 
-export function RightPanel() {
+/** Selection inspector — lives on the left, above Project (After Effects stack). */
+export function DesignInspector() {
   const selection = useEditorStore((s) => s.selection)
   const tool = useEditorStore((s) => s.tool)
-  const tab = useEditorStore((s) => s.panelTab)
-  const setTab = useEditorStore((s) => s.setPanelTab)
 
   return (
-    <div
-      className={`panel absolute bottom-3 right-3 top-3 z-20 flex flex-col overflow-hidden ${
-        tab === 'assistant' ? 'w-80' : 'w-60'
-      }`}
-    >
+    <div className="flex min-h-0 flex-[1.15] flex-col overflow-hidden">
       <div className="flex items-center gap-1 border-b border-line/60 px-2 py-2">
-        {(
-          [
-            { value: 'design', label: 'Design' },
-            { value: 'assistant', label: 'Assistant' },
-          ] as const
-        ).map((option) => (
-          <button
-            key={option.value}
-            onClick={() => setTab(option.value)}
-            className={`rounded-md px-2.5 py-1 text-[11px] ${
-              tab === option.value ? 'bg-panel-3 text-ink' : 'text-ink-dim hover:text-ink'
-            }`}
-          >
-            {option.label}
-          </button>
-        ))}
+        <span className="px-1 text-[11px] font-medium text-ink">Design</span>
         <button
           onClick={() => useEditorStore.getState().setShowSettings(true)}
           className="ml-auto rounded-md px-2 py-1 text-[11px] text-ink-dim hover:text-ink"
           title="Settings (API keys, guidelines)"
         >
-          ⚙
+          <SettingsIcon size={13} />
         </button>
       </div>
 
-      {tab === 'assistant' ? (
-        <AssistantPanel />
-      ) : (
-        <>
-          {tool === 'pen' && (
-            <div className="border-b border-line/60 bg-accent/10 px-3 py-2.5 text-[11px] leading-relaxed text-ink">
-              <span className="font-medium text-accent">Pen:</span> click to add a point;
-              click and drag to curve it. Click the 1st point to close the loop.{' '}
-              <kbd>Enter</kbd>/<kbd>Esc</kbd> to finish.
-            </div>
-          )}
-
-          <div className="flex-1 overflow-y-auto">
-            {selection?.startsWith('obj:') && <ObjectSections objectId={selection.slice(4)} />}
-            {selection === 'light' && <LightSections />}
-            {selection === 'camera-path' && <PathSections />}
-            {selection === 'cinema-camera' && <CinemaCameraSections />}
-            {selection === 'target' && <TargetSections />}
-            {selection === null && <SceneSections />}
-          </div>
-        </>
+      {tool === 'pen' && (
+        <div className="border-b border-line/60 bg-accent/10 px-3 py-2 text-[11px] leading-relaxed text-ink">
+          <span className="font-medium text-accent">Pen:</span> click to add a point;
+          click and drag to curve it. Click the 1st point to close the loop.{' '}
+          <kbd>Enter</kbd>/<kbd>Esc</kbd> to finish.
+        </div>
       )}
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {selection?.startsWith('obj:') && <ObjectSections objectId={selection.slice(4)} />}
+        {selection === 'light' && <LightSections />}
+        {selection === 'camera-path' && <PathSections />}
+        {selection === 'cinema-camera' && <CinemaCameraSections />}
+        {selection === 'target' && <TargetSections />}
+        {selection === null && <SceneSections />}
+      </div>
+    </div>
+  )
+}
+
+export function RightPanel() {
+  const insets = useViewportInsets()
+
+  return (
+    <div
+      className="panel absolute z-20 flex flex-col overflow-hidden"
+      style={{
+        right: GUTTER,
+        top: GUTTER,
+        bottom: GUTTER,
+        width: insets.rightWidth,
+      }}
+    >
+      <AssistantPanel />
     </div>
   )
 }

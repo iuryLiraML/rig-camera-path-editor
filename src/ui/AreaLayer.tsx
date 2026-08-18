@@ -1,5 +1,5 @@
 import { useEditorStore } from '../state/useEditorStore'
-import { selectCameraAnchorCount, usePathStore } from '../state/usePathStore'
+import { useCameraReady } from '../state/cameraPathLink'
 import {
   computeRects,
   FIXED_VIEWS,
@@ -41,7 +41,7 @@ export function AreaLayer() {
   const root = useLayoutStore((s) => s.root)
   const activePaneId = useLayoutStore((s) => s.activePaneId)
   const playMode = useEditorStore((s) => s.playMode)
-  const hasCameraPath = usePathStore(selectCameraAnchorCount) >= 2
+  const hasCameraPath = useCameraReady()
   const exportAspect = useEditorStore((s) => s.exportAspect)
   const exportRes = useEditorStore((s) => s.exportRes)
   const customSize = useEditorStore((s) => s.customSize)
@@ -154,7 +154,7 @@ export function AreaLayer() {
         const roomForGrip = vis.w >= 56 && vis.h >= 56
         return (
           <div key={pane.id}>
-            {/* the interactive pane is the one that orbits and selects — say so */}
+            {/* gizmos live here; Front/Top/Right can still be orbited */}
             {isActive && (
               <div
                 className="absolute rounded-sm border border-accent/50"
@@ -167,14 +167,14 @@ export function AreaLayer() {
                 style={{ left: vis.x + 6, top: vis.y + 6 }}
               >
                 {isActive ? (
-                  <span className="px-1 font-medium text-accent" title="The interactive pane">
+                  <span className="px-1 font-medium text-accent" title="Gizmos live in this pane">
                     {VIEW_LABEL.editor}
                   </span>
                 ) : (
                   <select
                     value={pane.view}
                     onChange={(e) => store.setPaneView(pane.id, e.target.value as PaneView)}
-                    title="What this pane shows — pick Editor to move the interactive view here"
+                    title="What this pane shows. Front, Top and Right can be orbited — pick Editor to move gizmos here"
                     className="rounded bg-panel-2 px-1 py-0.5 text-[10px] text-ink outline-none"
                   >
                     {FIXED_VIEWS.map((v) => (
@@ -182,7 +182,7 @@ export function AreaLayer() {
                         {VIEW_LABEL[v]}
                       </option>
                     ))}
-                    <option value="editor">Editor (make interactive)</option>
+                    <option value="editor">Editor (move gizmos here)</option>
                   </select>
                 )}
                 {!isActive && (

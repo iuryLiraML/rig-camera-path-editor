@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
 import { useEditorStore } from '../state/useEditorStore'
@@ -6,60 +5,16 @@ import { computeRects, leafList, useLayoutStore, type PaneView, type Rect } from
 import { editorOnlySet } from '../lib/editorOnly'
 import { cinemaCameraRef } from './rig/CinemaCamera'
 import { clearRegion, renderSceneRegion } from './RenderPasses'
-import { sceneBounds } from './SceneObjects'
+import { ensureSpatialCamera, isSpatialView, spatialCameras } from './spatialViews'
 import { freeAreaRect, intersectRect, viewportInsets } from '../ui/viewportInsets'
-
-/** axis directions for the fixed views (slight y-bias so they don't read flat) */
-const VIEW_DIRS: Record<'front' | 'top' | 'right', [number, number, number]> = {
-  front: [0, 0.12, 1],
-  top: [0.001, 1, 0.001],
-  right: [1, 0.12, 0],
-}
-
-const _center = new THREE.Vector3()
-const _size = new THREE.Vector3()
-const _dir = new THREE.Vector3()
-
-/** Frame a fixed-view camera on the whole scene. */
-function frameFixed(cam: THREE.PerspectiveCamera, view: 'front' | 'top' | 'right', aspect: number) {
-  const box = sceneBounds()
-  if (box) {
-    box.getCenter(_center)
-    box.getSize(_size)
-  } else {
-    _center.set(0, 0.8, 0)
-    _size.set(2, 2, 2)
-  }
-  const radius = _size.length() / 2 || 1
-  const dist = radius * 2.6 + 1
-  _dir.set(...VIEW_DIRS[view]).normalize()
-  cam.position.copy(_center).addScaledVector(_dir, dist)
-  cam.up.set(0, 1, 0)
-  cam.lookAt(_center)
-  cam.near = 0.05
-  cam.far = 200
-  cam.fov = 40
-  cam.aspect = aspect
-  cam.updateProjectionMatrix()
-}
 
 /**
  * Owns the whole edit-mode render when the viewport is split into >1 pane.
  * Each leaf is rendered through its own camera into a scissored region (reusing
- * the PiP's renderSceneRegion). The active pane shows the interactive editor
- * camera with helpers visible; the others are clean fixed views. In single-pane
- * mode this is a no-op (drei's GizmoHelper + CameraPreview keep the old path).
+ * the PiP's renderSceneRegion). The editor pane shows gizmos; front/top/right
+ * keep an independent orbit camera. In single-pane mode this is a no-op.
  */
 export function PaneCompositor() {
-  const fixedCams = useMemo(
-    () => ({
-      front: new THREE.PerspectiveCamera(40, 1, 0.05, 200),
-      top: new THREE.PerspectiveCamera(40, 1, 0.05, 200),
-      right: new THREE.PerspectiveCamera(40, 1, 0.05, 200),
-    }),
-    [],
-  )
-
   useFrame((state) => {
     const { gl, scene, camera, size } = state
     const editor = useEditorStore.getState()
@@ -82,7 +37,10 @@ export function PaneCompositor() {
     const rects = computeRects(root, { x: 0, y: 0, w: size.width, h: size.height }).leaves
     // a camera pane is there to show the shot, so it must not be half-hidden
     // behind a panel the way the spatial views can afford to be
-    const free = freeAreaRect(viewportInsets(editor.panelTab, size.width, true), size.height)
+    const free = freeAreaRect(
+      viewportInsets(editor.panelTab, size.width, true, size.height, editor.timelineHeight),
+      size.height,
+    )
 
     // GL scissor uses bottom-up y; DOM rects are top-left
     const toGL = (r: Rect) => ({ x: r.x, y: size.height - (r.y + r.h), w: r.w, h: r.h })
@@ -104,7 +62,6 @@ export function PaneCompositor() {
       const aspect = r.w / Math.max(1, r.h)
 
       if (leaf.id === activePaneId) {
-        // interactive pane: editor camera, helpers visible
         const cam = camera as THREE.PerspectiveCamera
         if (cam.isPerspectiveCamera && Math.abs(cam.aspect - aspect) > 1e-4) {
           cam.aspect = aspect
@@ -114,7 +71,6 @@ export function PaneCompositor() {
         continue
       }
 
-      // fixed pane: hide editor-only helpers, pick the view's camera
       const view = leaf.view as Exclude<PaneView, 'editor'>
       let cam: THREE.Camera | null = null
       if (view === 'camera') {
@@ -123,9 +79,9 @@ export function PaneCompositor() {
           cinema.aspect = aspect
           cinema.updateProjectionMatrix()
         }
-      } else {
-        frameFixed(fixedCams[view], view, aspect)
-        cam = fixedCams[view]
+      } else if (isSpatialView(view)) {
+        ensureSpatialCamera(view, aspect)
+        cam = spatialCameras[view]
       }
       // no cinema camera yet (no path drawn): clear, don't leave stale pixels
       if (!cam) {

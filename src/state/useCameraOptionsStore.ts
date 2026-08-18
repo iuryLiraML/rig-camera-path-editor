@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { applyRigSnapshot, getRigSnapshot, type RigSnapshot } from './useRigStore'
+import { applyRigSnapshot, DEFAULT_STATIC_POSE, getRigSnapshot, type RigSnapshot } from './useRigStore'
 
 export interface CameraOption {
   id: string
@@ -38,6 +38,8 @@ export function makeEmptyRigSnapshot(): RigSnapshot {
     roll: 0,
     fov: 45,
     progressKeys: [],
+    cameraKind: 'path',
+    staticPose: { ...DEFAULT_STATIC_POSE },
   }
 }
 
@@ -54,7 +56,8 @@ function isPristineRig(rig: RigSnapshot) {
     rig.target[2] === 0 &&
     rig.roll === 0 &&
     rig.fov === 45 &&
-    rig.progressKeys.length === 0
+    rig.progressKeys.length === 0 &&
+    (rig.cameraKind ?? 'path') === 'path'
   )
 }
 

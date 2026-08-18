@@ -28,6 +28,14 @@ describe('evalValue', () => {
     expect(evalValue(0.25, keys, 0, 'cubicOut')).toBeCloseTo(applyEase('cubicOut', 0.25) * 100, 4)
   })
 
+  it('retimes an interval via easeOut without changing the keyed values', () => {
+    const keys = [key(0, 0), key(1, 100)]
+    keys[0].easeOut = 0
+    expect(evalValue(0, keys, 0, 'linear')).toBe(0)
+    expect(evalValue(1, keys, 0, 'linear')).toBe(100)
+    expect(evalValue(0.5, keys, 0, 'linear')).toBeLessThan(50)
+  })
+
   it("lets a keyframe's own curve win over the default", () => {
     const keys = [key(0, 0, 'expoOut'), key(1, 100)]
     expect(evalValue(0.3, keys, 0, 'linear')).toBeCloseTo(applyEase('expoOut', 0.3) * 100, 4)
@@ -35,6 +43,14 @@ describe('evalValue', () => {
     // key's own ease is irrelevant here
     const other = [key(0, 0, 'expoOut'), key(1, 100, 'linear')]
     expect(evalValue(0.3, other, 0, 'linear')).toBeCloseTo(evalValue(0.3, keys, 0, 'linear'), 6)
+  })
+
+  it("lets a keyframe's own cubic-bezier win over the named curve", () => {
+    const keys: ValueKey[] = [
+      { id: 'a', time: 0, value: 0, ease: 'linear', easeBezier: [0.33, 1, 0.68, 1] },
+      { id: 'b', time: 1, value: 100 },
+    ]
+    expect(evalValue(0.5, keys, 0, 'linear')).toBeGreaterThan(70)
   })
 
   it('survives two keyframes stacked at the same time', () => {

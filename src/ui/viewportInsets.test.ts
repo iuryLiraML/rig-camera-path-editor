@@ -1,17 +1,23 @@
 import { describe, expect, it } from 'vitest'
-import { freeAreaRect, GUTTER, viewportInsets } from './viewportInsets'
+import {
+  freeAreaRect,
+  GUTTER,
+  LEFT_PANEL_MAX,
+  toolbarSlot,
+  VIEW_SWITCHER_RESERVE,
+  viewportInsets,
+} from './viewportInsets'
 import { TIMELINE_HEIGHT } from './Timeline'
 
 /**
  * The floating chrome used to hard-code its own offsets (left-[244px],
  * right-[252px], right-[332px], pipRect.right: 264). They disagreed with each
- * other and with the right panel, whose width changes with its tab, so the
- * timeline ended up 80 px short of the panel in one tab and would be covered by
- * it in the other. These assertions pin the geometry to the real panel widths.
+ * other and with the right panel. Left is Design + Project (280); right is
+ * Director only (320). These assertions pin the geometry to those widths.
  */
 const WINDOW = 1202
-const LEFT_PANEL_RIGHT_EDGE = GUTTER + 232 // left-3 + w-[232px]
-const RIGHT_PANEL_WIDTHS = { design: 240, assistant: 320 }
+const LEFT_PANEL_RIGHT_EDGE = GUTTER + LEFT_PANEL_MAX
+const RIGHT_PANEL_WIDTH = 320
 
 describe('viewportInsets', () => {
   it('leaves a gutter after the left panel instead of sitting flush against it', () => {
@@ -21,22 +27,19 @@ describe('viewportInsets', () => {
   })
 
   for (const tab of ['design', 'assistant'] as const) {
-    it(`stops a gutter before the right panel in the ${tab} tab`, () => {
+    it(`stops a gutter before the right panel (${tab} arg is unused)`, () => {
       const insets = viewportInsets(tab, WINDOW, true)
-      const panelLeftEdge = WINDOW - GUTTER - RIGHT_PANEL_WIDTHS[tab]
+      const panelLeftEdge = WINDOW - GUTTER - RIGHT_PANEL_WIDTH
       // never under the panel, and never leaving a dead strip wider than the gutter
       expect(insets.right).toBe(panelLeftEdge - GUTTER)
       expect(panelLeftEdge - insets.right).toBe(GUTTER)
     })
   }
 
-  it('tracks the panel when the tab changes', () => {
+  it('keeps the same free area regardless of the leftover panelTab arg', () => {
     const design = viewportInsets('design', WINDOW, true)
     const assistant = viewportInsets('assistant', WINDOW, true)
-    // the assistant panel is 80 px wider, so the free area must shrink by 80 px
-    expect(design.right - assistant.right).toBe(
-      RIGHT_PANEL_WIDTHS.assistant - RIGHT_PANEL_WIDTHS.design,
-    )
+    expect(design.right).toBe(assistant.right)
   })
 
   it('centres on the free area, not on the window', () => {
@@ -53,8 +56,8 @@ describe('viewportInsets', () => {
 
   it('keeps the default PiP offset inside the free area', () => {
     const insets = viewportInsets('design', WINDOW, true)
-    // 264 is the shipped default: it must equal the minimum allowed `right`
-    expect(WINDOW - insets.right).toBe(264)
+    // 344 is the shipped default: it must equal the minimum allowed `right`
+    expect(WINDOW - insets.right).toBe(344)
   })
 
   it('reserves the top row, so pane chrome cannot land under the Toolbar', () => {
@@ -85,5 +88,37 @@ describe('viewportInsets', () => {
     expect(insets.contentBottom).toBeGreaterThan(insets.bottom + GUTTER)
     // the shipped PiP default (192) sat inside the footer band — it must not pass
     expect(insets.contentBottom).toBeGreaterThan(192)
+  })
+
+  it('keeps a free canvas when the window is too narrow for max panel widths', () => {
+    const insets = viewportInsets('design', 820, true, 700)
+    expect(insets.leftWidth).toBeLessThan(LEFT_PANEL_MAX)
+    expect(insets.rightWidth).toBeLessThan(320)
+    const free = freeAreaRect(insets, 700)
+    expect(free.w).toBeGreaterThanOrEqual(200)
+    expect(free.h).toBeGreaterThan(0)
+  })
+
+  it('shrinks the timeline on a short window so the viewport is not crushed', () => {
+    const tall = viewportInsets('design', WINDOW, true, 900)
+    const short = viewportInsets('design', WINDOW, true, 360)
+    expect(short.timelineHeight).toBeLessThan(tall.timelineHeight)
+    expect(freeAreaRect(short, 360).h).toBeGreaterThan(80)
+  })
+
+  it('grows the dock when a taller height is requested', () => {
+    const compact = viewportInsets('design', WINDOW, true, 900, 168)
+    const taller = viewportInsets('design', WINDOW, true, 900, 320)
+    expect(taller.timelineHeight).toBeGreaterThan(compact.timelineHeight)
+    expect(taller.bottom).toBeGreaterThan(compact.bottom)
+  })
+
+  it('keeps the toolbar to the right of the Projects/Editor/Board pill', () => {
+    const insets = viewportInsets('design', WINDOW, true)
+    const slot = toolbarSlot(insets)
+    expect(slot.left).toBe(insets.left + VIEW_SWITCHER_RESERVE + GUTTER)
+    expect(slot.left).toBeGreaterThan(insets.left + 200)
+    expect(slot.width).toBeGreaterThan(200)
+    expect(slot.left + slot.width).toBe(insets.right)
   })
 })

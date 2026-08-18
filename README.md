@@ -18,7 +18,7 @@ npm run build   # type-check + production build in dist/
 > Note: this folder lives on a drive where native file-watching is unreliable, so
 > `vite.config.ts` uses polling for HMR.
 
-## Features (v0.5.0)
+## Features (v0.7.0)
 
 ### Scene
 - Multiple `.glb`/`.gltf` objects (drag & drop or Import, multi-file), normalized and
@@ -102,7 +102,7 @@ npm run build   # type-check + production build in dist/
 - Camera rig JSON export/import (versioned, backward compatible)
 
 ### AI assistant (BYOK)
-- Design | Assistant tabs in the right panel — a Claude agent drives the editor from chat
+- Design inspector + Director chat split in the right panel — a Claude agent drives the editor from chat
   (presets, custom paths, keyframes, look-at, lens, object poses, primitives, save shot,
   output format)
 - Sees a scene JSON + viewport screenshot every turn
@@ -131,4 +131,4 @@ npm run build   # type-check + production build in dist/
 
 ## Known limitations / backlog
 - Undo of object add/remove relies on an in-memory graveyard (capped at 40 objects)
-- Deliberately out of scope: graph editor, states/events, collaboration, mobile
+- Deliberately out of scope: states/events, collaboration, mobile
