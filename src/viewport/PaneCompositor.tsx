@@ -38,7 +38,14 @@ export function PaneCompositor() {
     // a camera pane is there to show the shot, so it must not be half-hidden
     // behind a panel the way the spatial views can afford to be
     const free = freeAreaRect(
-      viewportInsets(editor.panelTab, size.width, true, size.height, editor.timelineHeight),
+      viewportInsets(
+        editor.workspaceMode,
+        size.width,
+        editor.workspaceMode === 'compose',
+        size.height,
+        editor.timelineHeight,
+        { composeDock: editor.composeDock, showOutliner: editor.showOutliner },
+      ),
       size.height,
     )
 

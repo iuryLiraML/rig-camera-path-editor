@@ -1,7 +1,6 @@
 import { useState } from 'react'
 
 import { useEditorStore, type ExportAspect, type ExportRes } from '../state/useEditorStore'
-import { AssistantPanel } from './AssistantPanel'
 import { defaultFollow, useSceneStore, type Vec3 } from '../state/useSceneStore'
 import {
   getRigSnapshot,
@@ -39,7 +38,6 @@ import {
   Slider,
   XYZInput,
 } from './primitives'
-import { GUTTER, useViewportInsets } from './viewportInsets'
 import { SettingsIcon } from './icons'
 
 function PanelButton({
@@ -770,7 +768,7 @@ function TrackObjectRow() {
   )
 }
 
-function CinemaCameraSections() {
+export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust' | 'fx' }) {
   const duration = useRigStore((s) => s.duration)
   const ease = useRigStore((s) => s.ease)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
@@ -818,9 +816,13 @@ function CinemaCameraSections() {
 
   const currentProgress = evalProgress(t, progressKeys, ease)
   const sortedKeys = [...progressKeys].sort((a, b) => a.time - b.time)
+  const showAdjust = pane !== 'fx'
+  const showFx = pane !== 'adjust'
 
   return (
     <>
+      {showAdjust && (
+        <>
       <Section title="Placement">
         <Row label="Camera">
           <Segmented
@@ -1108,6 +1110,9 @@ function CinemaCameraSections() {
           </>
         )}
       </Section>
+        </>
+      )}
+      {showFx && (
       <Section title="Camera FX">
         <Row label="Style">
           <Segmented
@@ -1186,11 +1191,13 @@ function CinemaCameraSections() {
               format={secs}
               onStatic={(v) => useRigStore.getState().setCameraNoise({ fadeOut: v })}
             />
-            <PanelButton
-              label={fxMore ? 'Less' : 'More'}
-              onClick={() => setFxMore((open) => !open)}
-            />
-            {fxMore && (
+            {pane !== 'fx' && (
+              <PanelButton
+                label={fxMore ? 'Less' : 'More'}
+                onClick={() => setFxMore((open) => !open)}
+              />
+            )}
+            {(fxMore || pane === 'fx') && (
               <>
                 <FxKeyedRow
                   label="Pos"
@@ -1233,15 +1240,26 @@ function CinemaCameraSections() {
           </>
         )}
       </Section>
-      {cameraCount > 1 && <CameraOptionSection />}
-      <PanelButton
-        label={inspectorMore ? 'Less' : 'More'}
-        onClick={() => setInspectorMore((open) => !open)}
-      />
-      {inspectorMore && (
+      )}
+      {showAdjust && pane === 'adjust' && (
         <>
+          <CameraOptionSection />
           <CameraFormatSection />
-          {cameraCount <= 1 && <CameraOptionSection />}
+        </>
+      )}
+      {showAdjust && pane === 'all' && (
+        <>
+          {cameraCount > 1 && <CameraOptionSection />}
+          <PanelButton
+            label={inspectorMore ? 'Less' : 'More'}
+            onClick={() => setInspectorMore((open) => !open)}
+          />
+          {inspectorMore && (
+            <>
+              <CameraFormatSection />
+              {cameraCount <= 1 && <CameraOptionSection />}
+            </>
+          )}
         </>
       )}
     </>
@@ -1576,20 +1594,6 @@ export function DesignInspector() {
   )
 }
 
-export function RightPanel() {
-  const insets = useViewportInsets()
-
-  return (
-    <div
-      className="panel absolute z-20 flex flex-col overflow-hidden"
-      style={{
-        right: GUTTER,
-        top: GUTTER,
-        bottom: GUTTER,
-        width: insets.rightWidth,
-      }}
-    >
-      <AssistantPanel />
-    </div>
-  )
+export function RightPanel(_props: { variant?: 'chat' | 'generate' }) {
+  return null
 }

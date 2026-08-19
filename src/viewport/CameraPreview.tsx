@@ -36,6 +36,9 @@ export function CameraPreview() {
       renderOutline(gl, scene as THREE.Scene, camera, 0, 0, size.width, size.height)
     }
 
+    // PiP is Compose chrome. Build/Visualize keep a full-bleed editor view.
+    if (editor.workspaceMode !== 'compose') return
+
     const cam = cinemaCameraRef.current
     if (editor.cameraView) {
       // the corner gizmo (whose Hud pass draws the main frame in edit mode) is

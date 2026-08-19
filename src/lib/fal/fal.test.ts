@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { consumeLiftAttachment, getLiftAttachment, setLiftAttachment } from './attachment'
 import { configureFal, resetFalForTests, setFalTransportForTests } from './client'
+import { requireModelGlb } from './files'
+import { generateFromImage, generateFromText } from './generate3d'
 import { liftPerson, liftPersonDetailed, liftProp } from './lift'
-import { SAM_3D_BODY, SAM_3D_OBJECTS, SAM_IMAGE_MODELS } from './models'
+import {
+  GENERATE_FACE_LIMIT,
+  MESHY_TARGET_POLYCOUNT,
+  MESHY_V7_IMAGE_TO_3D,
+  SAM_3D_BODY,
+  SAM_3D_OBJECTS,
+  SAM_IMAGE_MODELS,
+  TRIPO_H31_TEXT_TO_3D,
+  TRIPO_REMESH,
+} from './models'
 import { liftAttachedStill, runMaskThenLift } from './pipeline'
+import { remeshGlb } from './remesh'
 import { segmentImage, segmentImageWithFallback } from './segment'
 
 afterEach(() => {
@@ -386,5 +398,95 @@ describe('block video attachments', () => {
         endLift: () => undefined,
       }),
     ).resolves.toMatch(/Attach a photo/)
+  })
+})
+
+describe('requireModelGlb', () => {
+  it('accepts Tripo model_mesh and Meshy model_glb', () => {
+    expect(requireModelGlb({ model_mesh: { url: 'https://a.glb' } }, 'tripo')).toBe('https://a.glb')
+    expect(requireModelGlb({ model_glb: { url: 'https://b.glb' } }, 'meshy')).toBe('https://b.glb')
+  })
+
+  it('rejects FBX even when a url is present', () => {
+    expect(() =>
+      requireModelGlb({ model_mesh: { url: 'https://a.fbx', file_name: 'out.fbx' } }, 'tripo'),
+    ).toThrow(/FBX/)
+  })
+})
+
+describe('generateFromText', () => {
+  it('calls Tripo H3.1 without textures and with the clay face cap', async () => {
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { model_mesh: { url: 'https://house.glb' } }
+      },
+    })
+    await expect(generateFromText({ prompt: 'a clay house' })).resolves.toBe('https://house.glb')
+    expect(calls[0]?.modelId).toBe(TRIPO_H31_TEXT_TO_3D)
+    expect(calls[0]?.input).toMatchObject({
+      prompt: 'a clay house',
+      texture: false,
+      pbr: false,
+      face_limit: GENERATE_FACE_LIMIT,
+    })
+  })
+
+  it('does not call Fal when the abort signal is already aborted', async () => {
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async () => {
+        throw new Error('should not subscribe')
+      },
+    })
+    const controller = new AbortController()
+    controller.abort()
+    await expect(generateFromText({ prompt: 'a clay house', signal: controller.signal })).rejects.toMatchObject(
+      { name: 'AbortError' },
+    )
+  })
+})
+
+describe('generateFromImage', () => {
+  it('calls Meshy v7 without texture or PBR and remeshes to triangles', async () => {
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { model_glb: { url: 'https://from-photo.glb' } }
+      },
+    })
+    await expect(generateFromImage({ imageUrl: 'https://photo' })).resolves.toBe(
+      'https://from-photo.glb',
+    )
+    expect(calls[0]?.modelId).toBe(MESHY_V7_IMAGE_TO_3D)
+    expect(calls[0]?.input).toMatchObject({
+      image_url: 'https://photo',
+      should_texture: false,
+      enable_pbr: false,
+      should_remesh: true,
+      target_polycount: MESHY_TARGET_POLYCOUNT,
+      topology: 'triangle',
+    })
+  })
+})
+
+describe('remeshGlb', () => {
+  it('calls Tripo remesh without quad, bake, or a face_limit', async () => {
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { model_mesh: { url: 'https://retopo.glb' } }
+      },
+    })
+    await expect(remeshGlb({ meshUrl: 'https://source.glb' })).resolves.toBe('https://retopo.glb')
+    expect(calls[0]?.modelId).toBe(TRIPO_REMESH)
+    expect(calls[0]?.input).toEqual({ mesh_url: 'https://source.glb', quad: false, bake: false })
+    expect(calls[0]?.input).not.toHaveProperty('face_limit')
   })
 })

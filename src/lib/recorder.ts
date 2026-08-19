@@ -53,14 +53,14 @@ function resolvePasses(): ViewMode[] {
  * Enters the deterministic offline-render environment (play mode, exact output
  * size via the canvas container, manual frame loop). Returns a restore fn.
  */
-async function setupOffline(preserveT: boolean) {
+async function setupOffline(preserveT: boolean, kind: 'video' | 'still' = 'video') {
   const editor = useEditorStore.getState()
   const rig = useRigStore.getState()
   const prev = { selection: editor.selection, viewMode: editor.viewMode, t: rig.t }
 
   cancelled = false
-  editor.setRecording(true)
-  editor.setRecordProgress(0)
+  editor.setRecording(true, kind)
+  editor.setRecordProgress(kind === 'still' ? NaN : 0)
   editor.select(null) // leave posing mode so object keyframes apply
   editor.setPlayMode(true)
   rig.setPlaying(false)
@@ -271,7 +271,7 @@ export async function exportFrame() {
 export async function captureShotStill(maxWidth = 480): Promise<Blob | null> {
   const { advance } = renderBridge
   if (!advance || !renderBridge.setFrameloop || isRecording()) return null
-  const { canvas, width, height, restore } = await setupOffline(true)
+  const { canvas, width, height, restore } = await setupOffline(true, 'still')
   if (!canvas) {
     restore()
     return null
@@ -308,7 +308,7 @@ function recordWebmRealtime() {
   const rig = useRigStore.getState()
 
   cancelled = false
-  editor.setRecording(true)
+  editor.setRecording(true, 'video')
   editor.setRecordProgress(NaN)
   editor.setPlayMode(true)
   rig.setPlaying(false)

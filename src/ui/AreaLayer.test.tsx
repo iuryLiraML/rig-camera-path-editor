@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from '@testing-library/react'
 import { AreaLayer } from './AreaLayer'
 import { useLayoutStore } from '../state/useLayoutStore'
+import { useEditorStore } from '../state/useEditorStore'
 import { freeAreaRect, viewportInsets } from './viewportInsets'
 
 /**
@@ -33,8 +34,18 @@ function chrome() {
   }
 }
 
-const insets = () => viewportInsets('design', window.innerWidth, true)
+const insets = () => viewportInsets('compose', window.innerWidth, true, window.innerHeight, 240, { composeDock: 'timeline' })
 const free = () => freeAreaRect(insets(), window.innerHeight)
+
+beforeEach(() => {
+  useEditorStore.setState({
+    playMode: false,
+    workspaceMode: 'compose',
+    composeDock: 'timeline',
+    showOutliner: false,
+    timelineHeight: 240,
+  })
+})
 
 afterEach(() => {
   cleanup()

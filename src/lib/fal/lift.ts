@@ -79,10 +79,10 @@ export async function liftProp(opts: {
   return requireGlb(data, SAM_3D_OBJECTS)
 }
 
-export async function downloadGlb(url: string): Promise<ArrayBuffer> {
-  const response = await fetch(url)
+export async function downloadGlb(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const response = await fetch(url, { signal })
   if (!response.ok) {
-    throw new Error(`Could not download the lifted model (${response.status}).`)
+    throw new Error(`Could not download the 3D model (${response.status}).`)
   }
   return response.arrayBuffer()
 }

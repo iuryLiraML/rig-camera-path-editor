@@ -37,6 +37,8 @@ beforeEach(() => {
   useEditorStore.setState({
     playMode: false,
     panelTab: 'design',
+    workspaceMode: 'compose',
+    composeDock: 'timeline',
     timelineEasing: false,
     timelineHeight: 168,
     timelineView: { start: 0, span: 1 },
@@ -76,13 +78,13 @@ describe('Timeline', () => {
     setAnchors(3)
     expect(() => rerender(<Timeline />)).not.toThrow()
     expect(container.textContent).not.toContain('No camera path yet')
-    expect(container.textContent).toContain('Save shot')
+    expect(container.textContent).toContain('Add a Shot')
   })
 
   it('survives a path disappearing again', () => {
     setAnchors(3)
     const { container, rerender } = render(<Timeline />)
-    expect(container.textContent).toContain('Save shot')
+    expect(container.textContent).toContain('Add a Shot')
 
     setAnchors(0)
     expect(() => rerender(<Timeline />)).not.toThrow()

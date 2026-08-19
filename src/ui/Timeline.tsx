@@ -76,6 +76,7 @@ import {
 import { saveCurrentAsShot } from '../lib/projects'
 import { applyTogglePlayback } from '../lib/playback'
 import { PlayIcon } from './icons'
+import { ComposeDockTabs } from './ComposeDockTabs'
 
 /** height of the docked timeline, used by other floating UI to move out of the way */
 export const TIMELINE_HEIGHT = TIMELINE_HEIGHT_DEFAULT
@@ -1020,24 +1021,30 @@ export function Timeline() {
       onWheel={(e) => applyWheelZoom(e)}
     >
       <TimelineResizeHandle />
-      {/* transport */}
-      <div className="flex items-center gap-2 pb-1.5">
-        <button
-          title="Play / Pause (Space)"
-          onClick={() => applyTogglePlayback()}
-          className={`flex h-7 w-7 items-center justify-center rounded-md ${
-            playing ? 'bg-accent text-white' : 'bg-panel-2 text-ink hover:bg-panel-3'
-          }`}
-        >
-          {playing ? <PauseIcon /> : <PlayIcon size={12} />}
-        </button>
-        <span
-          className="min-w-[7.5rem] text-[11px] tabular-nums text-ink-dim"
-          title={`${TIMELINE_FPS} fps — same as the MP4 export`}
-        >
-          {formatTimecode(t, duration)} / {formatTimecode(1, duration)}
-          <span className="ml-1.5 text-[10px] opacity-70">{frameCount}f</span>
-        </span>
+      {/* transport: tabs | play+timecode | loop/easing/graph — Add a Shot stays at the end */}
+      <div className="flex items-center gap-3 pb-1.5">
+        <ComposeDockTabs />
+        <span className="h-4 w-px shrink-0 bg-line" aria-hidden />
+        <div className="flex items-center gap-1.5">
+          <button
+            title="Play / Pause (Space)"
+            onClick={() => applyTogglePlayback()}
+            className={`flex h-7 w-7 items-center justify-center rounded-md ${
+              playing ? 'bg-accent text-white' : 'bg-panel-2 text-ink hover:bg-panel-3'
+            }`}
+          >
+            {playing ? <PauseIcon /> : <PlayIcon size={12} />}
+          </button>
+          <span
+            className="min-w-[7.5rem] text-[11px] tabular-nums text-ink-dim"
+            title={`${TIMELINE_FPS} fps — same as the MP4 export`}
+          >
+            {formatTimecode(t, duration)} / {formatTimecode(1, duration)}
+            <span className="ml-1.5 text-[10px] opacity-70">{frameCount}f</span>
+          </span>
+        </div>
+        <span className="h-4 w-px shrink-0 bg-line" aria-hidden />
+        <div className="flex items-center gap-1">
         <button
           title="Repeat automatically"
           onClick={() => rig.setLoop(!loop)}
@@ -1125,6 +1132,7 @@ export function Timeline() {
             </button>
           </>
         )}
+        </div>
         {selectedKeyframe && (
           <label className="flex items-center gap-1 text-[10px] text-ink-dim">
             Curve
@@ -1157,10 +1165,10 @@ export function Timeline() {
           </span>
           <button
             onClick={() => void saveCurrentAsShot()}
-            title="Snapshot this camera move as a shot on the Board"
+            title="Snapshot this camera move as a shot in Sequence"
             className="shrink-0 rounded-md bg-panel-2 px-2.5 py-1 text-[11px] text-ink hover:bg-panel-3"
           >
-            Save shot
+            Add a Shot
           </button>
         </div>
       </div>

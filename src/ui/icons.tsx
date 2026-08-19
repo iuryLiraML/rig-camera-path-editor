@@ -125,3 +125,100 @@ export const HelpIcon = (p: IconProps) => (
     <circle cx="8" cy="11.4" r="0.4" fill="currentColor" />
   </svg>
 )
+
+export const WandIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 13L10.5 5.5" />
+    <path d="M11.2 4.8l1 1-1.6 1.6-1-1z" />
+    <path d="M12.2 2.4v1.4M14.4 4.6h1.4M13.5 3.1l1 1M13.5 6.1l1-1" />
+  </svg>
+)
+
+export const ClapperIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M2.5 6.5h11v7H2.5z" />
+    <path d="M2.5 6.5l11-3.2 1.2 4.2-11 3.2z" />
+    <path d="M4.2 4.8l1.6 1.1M7 4.1l1.6 1.1M9.8 3.4l1.6 1.1" />
+  </svg>
+)
+
+export const FrameIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="3" y="3.5" width="10" height="9" rx="1.2" />
+    <path d="M5.5 6.5h5v4h-5z" />
+  </svg>
+)
+
+export const ListIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 4.5h10M3 8h10M3 11.5h10" />
+    <circle cx="3" cy="4.5" r="0.6" fill="currentColor" />
+    <circle cx="3" cy="8" r="0.6" fill="currentColor" />
+    <circle cx="3" cy="11.5" r="0.6" fill="currentColor" />
+  </svg>
+)
+
+export const SlidersIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3 5h10M3 11h10" />
+    <circle cx="6" cy="5" r="1.4" />
+    <circle cx="11" cy="11" r="1.4" />
+  </svg>
+)
+
+export const MoveIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M8 2.5v11M2.5 8h11" />
+    <path d="M5.5 4.5L8 2.5l2.5 2M5.5 11.5L8 13.5l2.5-2M4.5 5.5L2.5 8l2 2.5M11.5 5.5L13.5 8l-2 2.5" />
+  </svg>
+)
+
+export const DotsIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="3.5" r="1.1" fill="currentColor" />
+    <circle cx="8" cy="8" r="1.1" fill="currentColor" />
+    <circle cx="8" cy="12.5" r="1.1" fill="currentColor" />
+  </svg>
+)
+
+export const MagnetIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M4 2.8v5.2a4 4 0 008 0V2.8" />
+    <path d="M4 2.8h2.6M9.4 2.8H12" />
+    <path d="M4 6.6h2.6M9.4 6.6H12" />
+  </svg>
+)
+
+export const LinkIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M6.2 9.8l3.6-3.6" />
+    <path d="M7.2 4.2l1-1a2.4 2.4 0 013.4 3.4l-1 1" />
+    <path d="M8.8 11.8l-1 1a2.4 2.4 0 01-3.4-3.4l1-1" />
+  </svg>
+)
+
+export const PathNodesIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="4" cy="8" r="1.6" />
+    <circle cx="12" cy="5" r="1.6" />
+    <circle cx="12" cy="11" r="1.6" />
+    <path d="M5.5 7.4L10.5 5.6M5.5 8.6L10.5 10.4" />
+  </svg>
+)
+
+export const ImageIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <rect x="2.5" y="3.5" width="11" height="9" rx="1.4" />
+    <path d="M2.8 11.2l3.1-3.1 2.2 2.2 2.2-2.8 3.2 3.7" />
+    <circle cx="6.2" cy="6.3" r="0.9" />
+  </svg>
+)
+
+export const ExpandIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9.5 3.5H12.5V6.5" />
+    <path d="M6.5 12.5H3.5V9.5" />
+    <path d="M12.5 3.5L9 7" />
+    <path d="M3.5 12.5L7 9" />
+  </svg>
+)

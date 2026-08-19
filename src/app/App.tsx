@@ -4,63 +4,43 @@ import { useSceneStore } from '../state/useSceneStore'
 import { useRigStore } from '../state/useRigStore'
 import { usePathStore } from '../state/usePathStore'
 import { cameraReady } from '../state/cameraPathLink'
+import { editorChrome } from '../lib/workspaceChrome'
 import { Viewport } from '../viewport/Viewport'
 import { Toolbar } from '../ui/Toolbar'
 import { LeftPanel } from '../ui/LeftPanel'
-import { RightPanel } from '../ui/RightPanel'
+import { DirectorDock } from '../ui/DirectorDock'
 import { ViewportFooter } from '../ui/ViewportFooter'
 import { Timeline } from '../ui/Timeline'
 import { OnboardingCard } from '../ui/OnboardingCard'
 import { CameraPreviewFrame } from '../ui/CameraPreviewFrame'
 import { CameraRigHud } from '../ui/CameraRigHud'
 import { AreaLayer } from '../ui/AreaLayer'
-import { useViewportInsets } from '../ui/viewportInsets'
 import { SettingsDialog } from '../ui/SettingsDialog'
-import { BoardView } from '../ui/BoardView'
 import { ProjectsWorkspace } from '../ui/ProjectsWorkspace'
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { isTeamCloudApp } from '../lib/cloud/client'
 import { reloadActiveProjectFromCloud } from '../lib/projects'
 import { syncActiveProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
-import { redo, undo } from '../lib/history'
+import { redo, undo, historyIsDirty } from '../lib/history'
 import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
 import { deleteSelectedTimelineKey } from '../lib/timelineKey'
 import { applyTogglePlayback } from '../lib/playback'
-import { importModelFile } from '../lib/sceneIO'
+import { importDroppedModels, openDenseImportQueue, undoLastMeshRevision } from '../lib/sceneIO'
 import { useProjectStore } from '../state/useProjectStore'
 import { resolveWorkspace } from './resolveWorkspace'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
-
-function ViewSwitcher() {
-  const appView = useEditorStore((s) => s.appView)
-  const setAppView = useEditorStore((s) => s.setAppView)
-  const insets = useViewportInsets()
-  return (
-    <div
-      className="panel absolute top-3 z-40 flex shrink-0 items-center gap-0.5 whitespace-nowrap px-1 py-1"
-      style={{ left: insets.left }}
-    >
-      {(
-        [
-          { value: 'projects', label: 'Projects' },
-          { value: 'editor', label: 'Editor' },
-          { value: 'board', label: 'Board' },
-        ] as const
-      ).map((option) => (
-        <button
-          key={option.value}
-          onClick={() => setAppView(option.value)}
-          className={`rounded-md px-2.5 py-1 text-[11px] ${
-            appView === option.value ? 'bg-accent text-white' : 'text-ink-dim hover:text-ink'
-          }`}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  )
-}
+import { ModeSwitcher } from '../ui/ModeSwitcher'
+import { ProjectChip } from '../ui/ProjectChip'
+import { AddObjectDrawer } from '../ui/AddObjectDrawer'
+import { ObjectBar } from '../ui/ObjectBar'
+import { BuildTools } from '../ui/BuildTools'
+import { NavLegend } from '../ui/NavLegend'
+import { ImportAssetsModal } from '../ui/ImportAssetsModal'
+import { ShotFrame } from '../ui/ShotFrame'
+import { CameraBar } from '../ui/CameraBar'
+import { CameraAdjustPanel } from '../ui/CameraAdjustPanel'
+import { SequenceStrip } from '../ui/SequenceStrip'
 
 function isTyping() {
   const el = document.activeElement
@@ -93,8 +73,13 @@ function useShortcuts() {
 
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault()
-        if (e.shiftKey) redo()
-        else undo()
+        if (e.shiftKey) {
+          redo()
+        } else {
+          const objectId = editor.selection?.startsWith('obj:') ? editor.selection.slice(4) : null
+          if (historyIsDirty()) undo()
+          else if (!undoLastMeshRevision(objectId)) undo()
+        }
         return
       }
       if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || e.key === 'Y')) {
@@ -117,7 +102,7 @@ function useShortcuts() {
           break
         case 'p':
         case 'P':
-          if (!editor.playMode) editor.setTool('pen')
+          if (!editor.playMode && editor.workspaceMode === 'compose') editor.setTool('pen')
           break
         case 'w':
         case 'W':
@@ -165,6 +150,16 @@ function useShortcuts() {
           } else if (editor.playMode) {
             editor.setPlayMode(false)
             rig.setPlaying(false)
+          } else if (editor.showImportModal) {
+            editor.setShowImportModal(false)
+          } else if (editor.showAddDrawer) {
+            editor.setShowAddDrawer(false)
+          } else if (editor.objectBarPanel !== 'none') {
+            editor.setObjectBarPanel('none')
+          } else if (editor.cameraPanel !== 'closed') {
+            editor.setCameraPanel('closed')
+          } else if (editor.directorExpanded) {
+            editor.setDirectorExpanded(false)
           } else if (editor.cameraView) {
             editor.setCameraView(false)
           } else if (editor.tool === 'pen') {
@@ -213,8 +208,19 @@ function EditorWorkspace() {
   const showNotice = useSceneStore((s) => s.showNotice)
   const playMode = useEditorStore((s) => s.playMode)
   const recording = useEditorStore((s) => s.recording)
+  const recordingKind = useEditorStore((s) => s.recordingKind)
   const recordProgress = useEditorStore((s) => s.recordProgress)
-  const appView = useEditorStore((s) => s.appView)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const composeDock = useEditorStore((s) => s.composeDock)
+  const showOutliner = useEditorStore((s) => s.showOutliner)
+  const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
+  const chrome = editorChrome({
+    playMode,
+    workspaceMode,
+    composeDock,
+    showOutliner,
+    showAddDrawer,
+  })
   const [dragging, setDragging] = useState(false)
 
   useShortcuts()
@@ -236,7 +242,7 @@ function EditorWorkspace() {
       showNotice('Unsupported file — drop a .glb or .gltf')
       return
     }
-    models.forEach((f) => void importModelFile(f))
+    void importDroppedModels(models).then((heavies) => openDenseImportQueue(heavies))
   }
 
   return (
@@ -248,23 +254,33 @@ function EditorWorkspace() {
     >
       <Viewport />
 
-      {appView === 'editor' && <AreaLayer />}
+      <AreaLayer />
 
-      {!playMode && (
+      {chrome.toolbar && (
         <>
+          <ProjectChip />
+          <ModeSwitcher />
           <Toolbar />
-          <LeftPanel />
-          <RightPanel />
-          <Timeline />
-          <ViewportFooter />
-          <OnboardingCard />
-          <CameraPreviewFrame />
-          <CameraRigHud />
-          <ViewSwitcher />
         </>
       )}
-
-      {appView === 'board' && !playMode && <BoardView />}
+      {chrome.outliner && <LeftPanel />}
+      {chrome.directorDock && <DirectorDock />}
+      {chrome.timeline && <Timeline />}
+      {chrome.sequence && <SequenceStrip />}
+      {chrome.footer && (
+        <ViewportFooter center={chrome.cameraBar ? <CameraBar embedded /> : null} />
+      )}
+      {chrome.navLegend && <NavLegend />}
+      {chrome.onboarding && <OnboardingCard />}
+      {chrome.pip && <CameraPreviewFrame />}
+      {chrome.cameraHud && <CameraRigHud />}
+      {chrome.shotFrame && <ShotFrame />}
+      {chrome.cameraBar && !chrome.footer && <CameraBar />}
+      {chrome.cameraBar && <CameraAdjustPanel />}
+      {chrome.objectBar && <ObjectBar />}
+      {chrome.buildTools && <BuildTools />}
+      {chrome.addDrawer && <AddObjectDrawer />}
+      <ImportAssetsModal />
 
       {playMode && !recording && (
         <button
@@ -281,7 +297,9 @@ function EditorWorkspace() {
       {recording && (
         <div className="panel absolute right-4 top-4 z-30 flex items-center gap-2 px-3 py-1.5 text-[11px] text-ink">
           <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
-          {Number.isNaN(recordProgress) ? (
+          {recordingKind === 'still' ? (
+            <>Capturing still…</>
+          ) : Number.isNaN(recordProgress) ? (
             <>Recording…</>
           ) : (
             <>Rendering MP4 · {Math.round(recordProgress * 100)}%</>

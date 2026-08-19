@@ -18,7 +18,7 @@ npm run build   # type-check + production build in dist/
 > Note: this folder lives on a drive where native file-watching is unreliable, so
 > `vite.config.ts` uses polling for HMR.
 
-## Features (v0.7.0)
+## Features (v0.5.0)
 
 ### Scene
 - Multiple `.glb`/`.gltf` objects (drag & drop or Import, multi-file), normalized and

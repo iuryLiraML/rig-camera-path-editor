@@ -14,6 +14,7 @@ import {
 } from '../../lib/pathSpaceBind'
 import { useScreenScale } from '../../lib/screenScale'
 import { useShiftHeld } from '../../lib/useShiftHeld'
+import { isPathEditing, isSceneEditing } from '../../lib/workspaceChrome'
 import { useEditorStore, type GizmoMode } from '../../state/useEditorStore'
 import { usePathStore, type PathAnchor } from '../../state/usePathStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
@@ -355,6 +356,7 @@ export function InactivePaths() {
   const paths = usePathStore((s) => s.paths)
   const activePathId = usePathStore((s) => s.activePathId)
   const playMode = useEditorStore((s) => s.playMode)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const rootRef = useRef<THREE.Group>(null)
   useEditorOnly(rootRef)
@@ -371,7 +373,7 @@ export function InactivePaths() {
     [paths, activePathId],
   )
 
-  if (playMode || tech || lines.length === 0) return null
+  if (!isSceneEditing(playMode, workspaceMode) || tech || lines.length === 0) return null
 
   return (
     <group ref={rootRef} renderOrder={9}>
@@ -400,6 +402,7 @@ export function PathEditor() {
   const selectedAnchorId = usePathStore((s) => s.selectedAnchorId)
   const tool = useEditorStore((s) => s.tool)
   const playMode = useEditorStore((s) => s.playMode)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
 
   const curve = useMemo(() => buildCurve(anchors, closed, rounding), [anchors, closed, rounding])
@@ -413,7 +416,7 @@ export function PathEditor() {
     [anchors, closed, rounding],
   )
 
-  if (playMode || tech || anchors.length === 0) return null
+  if (!isPathEditing(playMode, workspaceMode) || tech || anchors.length === 0) return null
 
   const selected = resolved.find((a) => a.id === selectedAnchorId)
 

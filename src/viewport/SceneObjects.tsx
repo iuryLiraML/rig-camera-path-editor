@@ -17,6 +17,7 @@ import {
 } from '../lib/planeDrag'
 import { repairImportedShading } from '../lib/prepareImport'
 import { usePathStore } from '../state/usePathStore'
+import { isSceneEditing } from '../lib/workspaceChrome'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneStore'
@@ -72,6 +73,9 @@ function ObjectNode({ object }: { object: SceneObject }) {
   const selected = useEditorStore((s) => s.selection === `obj:${object.id}`)
   const tool = useEditorStore((s) => s.tool)
   const playMode = useEditorStore((s) => s.playMode)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const locked = useEditorStore((s) => s.lockedIds.includes(object.id))
+  const editing = isSceneEditing(playMode, workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const [hovered, setHovered] = useState(false)
   const groupRef = useRef<THREE.Group>(null)
@@ -87,7 +91,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
     [followPath],
   )
 
-  useCursor(hovered && tool === 'select' && !playMode)
+  useCursor(hovered && tool === 'select' && editing && !locked)
 
   useEffect(() => {
     repairImportedShading(object.root)
@@ -97,10 +101,8 @@ function ObjectNode({ object }: { object: SceneObject }) {
 
   // hover/selection feedback: a subtle grayscale lift, no color involved
   useEffect(() => {
-    object.material.emissive.setScalar(
-      playMode ? 0 : selected ? 0.1 : hovered ? 0.05 : 0,
-    )
-  }, [object.material, selected, hovered, playMode])
+    object.material.emissive.setScalar(!editing ? 0 : selected ? 0.1 : hovered ? 0.05 : 0)
+  }, [object.material, selected, hovered, editing])
 
   useEffect(() => {
     const group = groupRef.current
@@ -254,7 +256,12 @@ function ObjectNode({ object }: { object: SceneObject }) {
         userData={{ pickKind: 'object', pickId: `obj:${object.id}` }}
         onPointerDown={(e) => {
           const editor = useEditorStore.getState()
-          if (editor.tool !== 'select' || editor.playMode || e.button !== 0) return
+          if (editor.tool !== 'select' || !isSceneEditing(editor.playMode, editor.workspaceMode) || e.button !== 0) return
+          if (useEditorStore.getState().lockedIds.includes(object.id)) {
+            e.stopPropagation()
+            editor.select(`obj:${object.id}`)
+            return
+          }
           e.stopPropagation()
           editor.select(`obj:${object.id}`)
           if (follow) return
@@ -282,7 +289,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
       >
         <primitive object={object.root} />
       </group>
-      {selected && tool === 'select' && !playMode && !tech && !follow && (
+      {selected && tool === 'select' && editing && !tech && !follow && !locked && (
         <ObjectGizmo groupRef={groupRef} onChange={syncTransform} />
       )}
     </>

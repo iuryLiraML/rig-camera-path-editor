@@ -74,7 +74,7 @@ export async function liftAttachedStill(opts: {
     buffer: ArrayBuffer,
     name: string,
   ) => Promise<{ objectId: string; objectName: string } | null>
-  beginLift: (name: string, kind: LiftKind) => string
+  beginLift: (name: string, kind: LiftKind, objectId?: string) => string
   endLift: (id: string) => void
   replacePrevious?: (objectId: string) => void
   placeObject?: (objectId: string, position: [number, number, number]) => void

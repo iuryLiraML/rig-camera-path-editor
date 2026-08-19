@@ -4,6 +4,7 @@ import { useCameraAnchorCount, useCameraFollowers } from '../state/cameraPathLin
 import { useEditorStore, type SelectableId } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { openImportDialog, resetScene } from '../lib/sceneIO'
+import { cancelMeshJob } from '../lib/meshJobs'
 import { createProject, deleteProject, switchProject } from '../lib/projects'
 import { useProjectStore } from '../state/useProjectStore'
 import { useRigStore } from '../state/useRigStore'
@@ -23,7 +24,6 @@ import {
   TargetIcon,
   TrashIcon,
 } from './icons'
-import { DesignInspector } from './RightPanel'
 import { GUTTER, useViewportInsets } from './viewportInsets'
 
 function TreeItem({
@@ -63,6 +63,7 @@ function ObjectTreeItem({
 }) {
   const selection = useEditorStore((s) => s.selection)
   const select = useEditorStore((s) => s.select)
+  const remeshJob = useSceneStore((s) => s.pendingLifts.find((lift) => lift.objectId === id))
   const selectableId: SelectableId = `obj:${id}`
   const selected = selection === selectableId
   const [confirming, setConfirming] = useState(false)
@@ -83,10 +84,28 @@ function ObjectTreeItem({
         onClick={() => select(selected ? null : selectableId)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
       >
-        <span className={selected ? 'text-white' : 'text-ink-dim'}>{icon}</span>
-        <span className="truncate">{name}</span>
+        {remeshJob ? (
+          <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+        ) : (
+          <span className={selected ? 'text-white' : 'text-ink-dim'}>{icon}</span>
+        )}
+        <span className="truncate">{remeshJob ? `${name} — Remeshing…` : name}</span>
       </button>
-      {confirming ? (
+      {remeshJob ? (
+        <button
+          type="button"
+          title="Cancel remesh"
+          onClick={(e) => {
+            e.stopPropagation()
+            cancelMeshJob(remeshJob.id)
+          }}
+          className={`shrink-0 rounded px-1.5 py-1 text-[10px] ${
+            selected ? 'text-white/80 hover:bg-white/10' : 'text-ink-dim hover:bg-panel-3 hover:text-ink'
+          }`}
+        >
+          Cancel
+        </button>
+      ) : confirming ? (
         <button
           onClick={(e) => {
             e.stopPropagation()
@@ -536,17 +555,23 @@ export function LeftPanel() {
         left: GUTTER,
         top: GUTTER,
         bottom: GUTTER,
-        width: insets.leftWidth,
+        width: insets.leftWidth || 280,
       }}
     >
-      <DesignInspector />
-
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-line/60">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="flex items-center justify-between gap-2 border-b border-line/60 px-3 py-2">
         <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">Project</span>
         <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
           <ProjectNameInput />
           <ProjectMenu />
+          <button
+            type="button"
+            title="Close outliner"
+            onClick={() => useEditorStore.getState().setShowOutliner(false)}
+            className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+          >
+            ×
+          </button>
         </div>
       </div>
 
@@ -570,13 +595,25 @@ export function LeftPanel() {
           <AddSceneMenu compact title="Add a shape or import a model" />
         </div>
         <div className="flex flex-col gap-0.5">
-          {pendingLifts.map((lift) => (
+          {pendingLifts
+            .filter((lift) => !lift.objectId)
+            .map((lift) => (
             <div
               key={lift.id}
               className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs text-ink-dim"
             >
-              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
-              <span className="truncate">{lift.name}</span>
+              <span className="inline-block h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-accent" />
+              <span className="min-w-0 flex-1 truncate">{lift.name}</span>
+              {(lift.kind === 'generate' || lift.kind === 'remesh') && (
+                <button
+                  type="button"
+                  title="Cancel"
+                  onClick={() => cancelMeshJob(lift.id)}
+                  className="shrink-0 rounded px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-3 hover:text-ink"
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           ))}
           {visibleObjects.map((object) => (

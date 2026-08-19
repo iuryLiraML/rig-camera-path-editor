@@ -555,7 +555,7 @@ export async function saveCurrentAsShot() {
   const project = useProjectStore.getState()
   const shot: Shot = {
     id: makeSceneId('shot'),
-    name: `Shot ${(project.shots.length + 1) * 10}`,
+    name: `Shot ${project.shots.length + 1}`,
     order: project.shots.length,
     rig: getRigSnapshot(),
     format: { aspect: editor.exportAspect, res: editor.exportRes, custom: editor.customSize },
@@ -565,7 +565,8 @@ export async function saveCurrentAsShot() {
     thumbnail: (await captureShotStill()) ?? (await captureThumbnail()),
   }
   project.addShot(shot)
-  useSceneStore.getState().showNotice(`"${shot.name}" saved — open the Board to see it`)
+  useEditorStore.getState().setActiveShotId(shot.id)
+  useSceneStore.getState().showNotice(`"${shot.name}" saved — it is in Sequence`)
 }
 
 export function loadShot(shot: Shot) {
@@ -576,6 +577,7 @@ export function loadShot(shot: Shot) {
   editor.setCustomSize(shot.format.custom)
   editor.setAppView('editor')
   editor.select('camera-path')
+  editor.setActiveShotId(shot.id)
   useSceneStore.getState().showNotice(`"${shot.name}" loaded`)
 }
 

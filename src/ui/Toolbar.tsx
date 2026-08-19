@@ -9,7 +9,7 @@ import type { ViewMode } from '../state/useEditorStore'
 import { Segmented } from './primitives'
 import { AddSceneMenu } from './AddSceneMenu'
 import { CameraIcon, CursorIcon, ExportIcon, PenIcon, PlayIcon } from './icons'
-import { useViewportInsets, toolbarSlot } from './viewportInsets'
+import { toolbarSlot, useViewportInsets, useWindowSize } from './viewportInsets'
 
 function ToolButton({
   children,
@@ -227,10 +227,14 @@ export function Toolbar() {
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const selection = useEditorStore((s) => s.selection)
   const zoomPct = useEditorStore((s) => s.zoomPct)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const hasPath = useCameraReady()
   const insets = useViewportInsets()
-  const slot = toolbarSlot(insets)
+  const win = useWindowSize()
+  const slot = toolbarSlot(insets, win.w)
   const scaleLocked = selection === 'cinema-camera'
+  const sceneTools = workspaceMode !== 'visualize'
+  const composeTools = workspaceMode === 'compose'
 
   const enterPlay = () => {
     if (!hasPath) return
@@ -245,53 +249,61 @@ export function Toolbar() {
 
   return (
     <div
-      className="panel absolute top-3 z-20 flex items-center justify-center gap-0.5 overflow-x-auto px-1.5 py-1"
-      style={{ left: slot.left, width: slot.width }}
+      className="panel absolute top-3 z-20 flex w-max items-center justify-center gap-0.5 px-1.5 py-1"
+      style={{ right: slot.right }}
     >
-      <AddSceneMenu includePath title="Add a shape, path, or import a model" />
-      <Divider />
-      <ToolButton title="Select (V)" active={tool === 'select'} onClick={() => setTool('select')}>
-        <CursorIcon />
-      </ToolButton>
-      <ToolButton
-        title="Pen — draw the camera path (P)"
-        active={tool === 'pen'}
-        onClick={() => setTool('pen')}
-      >
-        <PenIcon />
-      </ToolButton>
-      <Divider />
-      <div className="flex items-center gap-px px-0.5">
-      <ToolButton
-        title="Move (W)"
-        active={tool === 'select' && gizmoMode === 'translate'}
-        onClick={() => pickGizmo('translate')}
-      >
-        <span className="text-[10px] font-semibold">W</span>
-      </ToolButton>
-      <ToolButton
-        title="Rotate (E)"
-        active={tool === 'select' && gizmoMode === 'rotate'}
-        onClick={() => pickGizmo('rotate')}
-      >
-        <span className="text-[10px] font-semibold">E</span>
-      </ToolButton>
-      <ToolButton
-        title={scaleLocked ? 'Scale does not apply to the camera' : 'Scale (R)'}
-        active={tool === 'select' && gizmoMode === 'scale'}
-        disabled={scaleLocked}
-        onClick={() => pickGizmo('scale')}
-      >
-        <span className="text-[10px] font-semibold">R</span>
-      </ToolButton>
-      </div>
-      {tool === 'pen' && (
+      {sceneTools && (
         <>
+          {composeTools && (
+            <AddSceneMenu includePath title="Add a shape, path, or import a model" />
+          )}
+          {composeTools && <Divider />}
+          <ToolButton title="Select (V)" active={tool === 'select'} onClick={() => setTool('select')}>
+            <CursorIcon />
+          </ToolButton>
+          {composeTools && (
+            <ToolButton
+              title="Pen — draw the camera path (P)"
+              active={tool === 'pen'}
+              onClick={() => setTool('pen')}
+            >
+              <PenIcon />
+            </ToolButton>
+          )}
           <Divider />
-          <SnapControls />
+          <div className="flex items-center gap-px px-0.5">
+          <ToolButton
+            title="Move (W)"
+            active={tool === 'select' && gizmoMode === 'translate'}
+            onClick={() => pickGizmo('translate')}
+          >
+            <span className="text-[10px] font-semibold">W</span>
+          </ToolButton>
+          <ToolButton
+            title="Rotate (E)"
+            active={tool === 'select' && gizmoMode === 'rotate'}
+            onClick={() => pickGizmo('rotate')}
+          >
+            <span className="text-[10px] font-semibold">E</span>
+          </ToolButton>
+          <ToolButton
+            title={scaleLocked ? 'Scale does not apply to the camera' : 'Scale (R)'}
+            active={tool === 'select' && gizmoMode === 'scale'}
+            disabled={scaleLocked}
+            onClick={() => pickGizmo('scale')}
+          >
+            <span className="text-[10px] font-semibold">R</span>
+          </ToolButton>
+          </div>
+          {tool === 'pen' && composeTools && (
+            <>
+              <Divider />
+              <SnapControls />
+            </>
+          )}
+          <Divider />
         </>
       )}
-      <Divider />
       <button
         title="Click to frame the scene (F)"
         onClick={() => useEditorStore.getState().requestFrame()}

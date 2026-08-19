@@ -17,6 +17,14 @@ export type QuickView = 'front' | 'top' | 'right'
 export type ViewMode = 'clay' | 'depth' | 'outline' | 'normals'
 export type AppView = 'projects' | 'editor' | 'board' | 'intake'
 export type PanelTab = 'design' | 'assistant'
+/** Job the editor chrome is serving. Same 3D scene; different overlays. */
+export type WorkspaceMode = 'build' | 'compose' | 'visualize'
+export type ComposeDock = 'sequence' | 'timeline'
+export type ObjectBarPanel = 'none' | 'transform' | 'name' | 'properties' | 'more'
+/** Floating camera inspector in Compose — not inside the outliner tree. */
+export type CameraPanel = 'closed' | 'adjust' | 'fx'
+export type VisualizeMedia = 'still' | 'motion'
+export type RecordingKind = 'video' | 'still'
 
 export type SelectableId =
   | 'light'
@@ -33,10 +41,14 @@ interface EditorState {
   playMode: boolean
   /** main viewport looks through the cinema camera (editing UI stays visible) */
   cameraView: boolean
-  /** a video export is currently being recorded */
+  /** a video export or still capture is currently being recorded */
   recording: boolean
+  /** still capture must not look like an MP4 export */
+  recordingKind: RecordingKind | null
   /** 0..1 progress of the offline MP4 render (NaN for realtime capture) */
   recordProgress: number
+  /** shot currently framed in Compose (HUD / Sequence highlight) */
+  activeShotId: string | null
   exportAspect: ExportAspect
   exportRes: ExportRes
   /** manual output size, used when exportRes === 'custom' */
@@ -56,6 +68,28 @@ interface EditorState {
   /** leftover tab key — side columns no longer tab between Design/Director.
    *  Kept so persisted editor state and viewportInsets() callers stay typed. */
   panelTab: PanelTab
+  /** Build = place, Compose = frame, Visualize = generate. */
+  workspaceMode: WorkspaceMode
+  /** Sequence strip vs AE timeline, only while Compose is active. */
+  composeDock: ComposeDock
+  /** Outliner overlay (Build/Compose). Not a permanent column. */
+  showOutliner: boolean
+  /** Add-an-object drawer (Build). */
+  showAddDrawer: boolean
+  /** Which object-bar popover is open. */
+  objectBarPanel: ObjectBarPanel
+  /** Compose camera inspector (Adjust / FX). Independent of the outliner. */
+  cameraPanel: CameraPanel
+  /** Import Assets modal. */
+  showImportModal: boolean
+  /** Dense GLBs waiting for Keep as-is / Remesh. */
+  importRetopoQueue: { objectId: string; name: string; triangles: number }[]
+  /** Object ids that refuse transform (Lock on the object bar). */
+  lockedIds: string[]
+  /** Visualize Generate media toggle — still vs motion reference. */
+  visualizeMedia: VisualizeMedia
+  /** Director composer transcript is open above the floating bar. */
+  directorExpanded: boolean
   /** Design field that should receive I, or null to use the selection rule */
   keyableFocus: KeyableFocus | null
   /** settings dialog (API keys, model, guidelines) */
@@ -92,13 +126,27 @@ interface EditorState {
   setGizmoMode: (mode: GizmoMode) => void
   setPlayMode: (on: boolean) => void
   setCameraView: (on: boolean) => void
-  setRecording: (on: boolean) => void
+  setRecording: (on: boolean, kind?: RecordingKind) => void
   setRecordProgress: (progress: number) => void
+  setActiveShotId: (id: string | null) => void
   setExportAspect: (aspect: ExportAspect) => void
   setExportRes: (res: ExportRes) => void
   setCustomSize: (size: [number, number]) => void
   setViewMode: (mode: ViewMode) => void
   setAppView: (view: AppView) => void
+  setWorkspaceMode: (mode: WorkspaceMode) => void
+  setComposeDock: (dock: ComposeDock) => void
+  setShowOutliner: (on: boolean) => void
+  toggleOutliner: () => void
+  setShowAddDrawer: (on: boolean) => void
+  toggleAddDrawer: () => void
+  setObjectBarPanel: (panel: ObjectBarPanel) => void
+  setCameraPanel: (panel: CameraPanel) => void
+  setShowImportModal: (on: boolean) => void
+  setImportRetopoQueue: (queue: { objectId: string; name: string; triangles: number }[]) => void
+  toggleLock: (id: string) => void
+  setVisualizeMedia: (media: VisualizeMedia) => void
+  setDirectorExpanded: (on: boolean) => void
   toggleExportPass: (pass: ViewMode) => void
   setExportSize: (size: [number, number] | null) => void
   setShowPreview: (on: boolean) => void
@@ -130,16 +178,29 @@ export const useEditorStore = create<EditorState>((set) => ({
   playMode: false,
   cameraView: false,
   recording: false,
+  recordingKind: null,
   recordProgress: NaN,
+  activeShotId: null,
   exportAspect: '16:9',
   exportRes: 1080,
   customSize: [1920, 1080],
   appView: 'editor',
+  workspaceMode: 'build',
+  composeDock: 'sequence',
+  showOutliner: false,
+  showAddDrawer: false,
+  objectBarPanel: 'none',
+  cameraPanel: 'closed',
+  showImportModal: false,
+  importRetopoQueue: [],
+  lockedIds: [],
+  visualizeMedia: 'still',
+  directorExpanded: false,
   viewMode: 'clay',
   exportPasses: ['clay'],
   exportSize: null,
   showPreview: true,
-  pipRect: { right: 344, bottom: 192, fraction: 0.22 },
+  pipRect: { right: 16, bottom: 192, fraction: 0.22 },
   panelTab: 'design',
   keyableFocus: null,
   showSettings: false,
@@ -158,7 +219,14 @@ export const useEditorStore = create<EditorState>((set) => ({
   setTool: (tool) => set({ tool }),
   setProjection: (projection) => set({ projection }),
   select: (selection) => {
-    set({ selection, selectedKeyframe: null })
+    set((s) => ({
+      selection,
+      selectedKeyframe: null,
+      cameraPanel:
+        selection === 'cinema-camera' && s.workspaceMode === 'compose' && s.cameraPanel === 'closed'
+          ? 'adjust'
+          : s.cameraPanel,
+    }))
     // Empty viewport click and picking anything but the path must drop the
     // spline-point set, otherwise W/E/R stays glued to the last anchors.
     if (selection !== 'camera-path') usePathStore.getState().selectAnchor(null)
@@ -168,13 +236,57 @@ export const useEditorStore = create<EditorState>((set) => ({
   setGizmoMode: (gizmoMode) => set({ gizmoMode }),
   setPlayMode: (playMode) => set({ playMode }),
   setCameraView: (cameraView) => set({ cameraView }),
-  setRecording: (recording) => set({ recording }),
+  setRecording: (recording, kind = 'video') =>
+    set({ recording, recordingKind: recording ? kind : null }),
+  setActiveShotId: (activeShotId) => set({ activeShotId }),
   setRecordProgress: (recordProgress) => set({ recordProgress }),
   setExportAspect: (exportAspect) => set({ exportAspect }),
   setExportRes: (exportRes) => set({ exportRes }),
   setCustomSize: (customSize) => set({ customSize }),
   setViewMode: (viewMode) => set({ viewMode }),
-  setAppView: (appView) => set({ appView }),
+  setAppView: (appView) => {
+    if (appView === 'board') {
+      set({
+        appView: 'editor',
+        workspaceMode: 'compose',
+        composeDock: 'sequence',
+      })
+      return
+    }
+    set({ appView })
+  },
+  setWorkspaceMode: (workspaceMode) =>
+    set((s) => ({
+      workspaceMode,
+      tool:
+        workspaceMode === 'visualize'
+          ? 'select'
+          : workspaceMode !== 'compose' && s.tool === 'pen'
+            ? 'select'
+            : s.tool,
+      showAddDrawer: workspaceMode === 'build' ? s.showAddDrawer : false,
+      objectBarPanel: workspaceMode === 'build' ? s.objectBarPanel : 'none',
+      showOutliner: workspaceMode === 'build' ? s.showOutliner : false,
+      cameraPanel: workspaceMode === 'compose' ? s.cameraPanel : 'closed',
+    })),
+  setComposeDock: (composeDock) => set({ composeDock }),
+  setShowOutliner: (showOutliner) => set({ showOutliner }),
+  toggleOutliner: () => set((s) => ({ showOutliner: !s.showOutliner })),
+  setShowAddDrawer: (showAddDrawer) => set({ showAddDrawer }),
+  toggleAddDrawer: () => set((s) => ({ showAddDrawer: !s.showAddDrawer })),
+  setObjectBarPanel: (objectBarPanel) => set({ objectBarPanel }),
+  setCameraPanel: (cameraPanel) => set({ cameraPanel }),
+  setShowImportModal: (showImportModal) =>
+    set(showImportModal ? { showImportModal } : { showImportModal: false, importRetopoQueue: [] }),
+  setImportRetopoQueue: (importRetopoQueue) => set({ importRetopoQueue }),
+  toggleLock: (id) =>
+    set((s) => ({
+      lockedIds: s.lockedIds.includes(id)
+        ? s.lockedIds.filter((locked) => locked !== id)
+        : [...s.lockedIds, id],
+    })),
+  setVisualizeMedia: (visualizeMedia) => set({ visualizeMedia }),
+  setDirectorExpanded: (directorExpanded) => set({ directorExpanded }),
   toggleExportPass: (pass) =>
     set((s) => ({
       exportPasses: s.exportPasses.includes(pass)

@@ -7,3 +7,11 @@ export const SAM_IMAGE_MODELS = {
 
 export const SAM_3D_BODY = 'fal-ai/sam-3/3d-body'
 export const SAM_3D_OBJECTS = 'fal-ai/sam-3/3d-objects'
+
+export const TRIPO_REMESH = 'tripo3d/tripo/remesh'
+export const TRIPO_H31_TEXT_TO_3D = 'tripo3d/h3.1/text-to-3d'
+export const MESHY_V7_IMAGE_TO_3D = 'meshy/v7/image-to-3d'
+
+/** Clay-friendly cap so Generate does not immediately trip the remesh warning. */
+export const GENERATE_FACE_LIMIT = 15_000
+export const MESHY_TARGET_POLYCOUNT = 20_000

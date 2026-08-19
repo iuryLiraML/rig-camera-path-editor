@@ -97,11 +97,18 @@ export async function fileToDataUri(file: File): Promise<string> {
 
 const DATA_URI_LIMIT = 4_000_000
 
-export async function uploadImage(file: File): Promise<string> {
+export async function uploadImage(file: File, signal?: AbortSignal): Promise<string> {
+  return uploadFile(file, signal)
+}
+
+/** GLB uploads skip the data-URI path when they would blow past the size cap. */
+export async function uploadFile(file: File, signal?: AbortSignal): Promise<string> {
   if (!falUsable()) {
     throw new Error('Add your Fal API key in Settings first.')
   }
+  throwIfAborted(signal)
   if (uploadImpl) return uploadImpl(file)
   if (file.size <= DATA_URI_LIMIT) return fileToDataUri(file)
+  throwIfAborted(signal)
   return liveClient().storage.upload(file)
 }

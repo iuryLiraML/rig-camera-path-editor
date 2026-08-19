@@ -74,6 +74,20 @@ let currentJson = ''
 let applying = false
 let suspended = false
 let commitTimer: ReturnType<typeof setTimeout> | undefined
+let clock = 0
+
+export function historyClock() {
+  return clock
+}
+
+export function historyIsDirty() {
+  if (!currentJson) return false
+  return JSON.stringify(capture()) !== currentJson
+}
+
+export function setHistoryClockForTests(value: number) {
+  clock = value
+}
 
 function apply(snapshot: Snapshot) {
   applying = true
@@ -102,6 +116,7 @@ function onStoreChange() {
     future = []
     current = next
     currentJson = nextJson
+    clock += 1
   }, COMMIT_DELAY)
 }
 
@@ -112,6 +127,7 @@ export function resetHistory() {
   currentJson = JSON.stringify(current)
   past = []
   future = []
+  clock = 0
 }
 
 export function setHistorySuspended(value: boolean) {
@@ -139,7 +155,8 @@ export function undo() {
   // flush any pending edit so it becomes the state we undo FROM
   const pending = capture()
   const pendingJson = JSON.stringify(pending)
-  if (pendingJson !== currentJson) {
+  const dirty = pendingJson !== currentJson
+  if (dirty) {
     past.push(current)
     current = pending
     currentJson = pendingJson
@@ -148,6 +165,7 @@ export function undo() {
   if (!snapshot) return false
   future.push(current)
   apply(snapshot)
+  if (!dirty) clock = Math.max(0, clock - 1)
   return true
 }
 
@@ -156,5 +174,6 @@ export function redo() {
   if (!snapshot) return false
   past.push(current)
   apply(snapshot)
+  clock += 1
   return true
 }

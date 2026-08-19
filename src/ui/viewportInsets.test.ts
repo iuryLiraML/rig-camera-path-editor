@@ -1,76 +1,77 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DIRECTOR_COMPOSER_HEIGHT,
   freeAreaRect,
   GUTTER,
   LEFT_PANEL_MAX,
+  SEQUENCE_HEIGHT,
   toolbarSlot,
-  VIEW_SWITCHER_RESERVE,
   viewportInsets,
 } from './viewportInsets'
 import { TIMELINE_HEIGHT } from './Timeline'
 
-/**
- * The floating chrome used to hard-code its own offsets (left-[244px],
- * right-[252px], right-[332px], pipRect.right: 264). They disagreed with each
- * other and with the right panel. Left is Design + Project (280); right is
- * Director only (320). These assertions pin the geometry to those widths.
- */
 const WINDOW = 1202
-const LEFT_PANEL_RIGHT_EDGE = GUTTER + LEFT_PANEL_MAX
-const RIGHT_PANEL_WIDTH = 320
 
 describe('viewportInsets', () => {
-  it('leaves a gutter after the left panel instead of sitting flush against it', () => {
-    const insets = viewportInsets('design', WINDOW, true)
-    expect(insets.left).toBe(LEFT_PANEL_RIGHT_EDGE + GUTTER)
-    expect(insets.left).toBeGreaterThan(LEFT_PANEL_RIGHT_EDGE)
+  it('Build leaves the canvas full-bleed when the outliner is closed', () => {
+    const insets = viewportInsets('build', WINDOW, false)
+    expect(insets.leftWidth).toBe(0)
+    expect(insets.rightWidth).toBe(0)
+    expect(insets.left).toBe(GUTTER)
+    expect(insets.right).toBe(WINDOW - GUTTER)
+    expect(insets.bottom).toBe(GUTTER)
   })
 
-  for (const tab of ['design', 'assistant'] as const) {
-    it(`stops a gutter before the right panel (${tab} arg is unused)`, () => {
-      const insets = viewportInsets(tab, WINDOW, true)
-      const panelLeftEdge = WINDOW - GUTTER - RIGHT_PANEL_WIDTH
-      // never under the panel, and never leaving a dead strip wider than the gutter
-      expect(insets.right).toBe(panelLeftEdge - GUTTER)
-      expect(panelLeftEdge - insets.right).toBe(GUTTER)
+  it('Build reserves the outliner when it is open', () => {
+    const insets = viewportInsets('build', WINDOW, false, 900, 240, { showOutliner: true })
+    expect(insets.leftWidth).toBe(LEFT_PANEL_MAX)
+    expect(insets.left).toBe(GUTTER + LEFT_PANEL_MAX + GUTTER)
+  })
+
+  it('Compose Sequence uses the short shot strip, not the AE dock', () => {
+    const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'sequence' })
+    expect(insets.timelineHeight).toBe(SEQUENCE_HEIGHT)
+    expect(insets.bottom).toBe(GUTTER + SEQUENCE_HEIGHT + GUTTER)
+    expect(insets.leftWidth).toBe(0)
+    expect(insets.rightWidth).toBe(0)
+  })
+
+  it('Compose Timeline reserves the requested AE dock height', () => {
+    const insets = viewportInsets('compose', WINDOW, true, 900, TIMELINE_HEIGHT, {
+      composeDock: 'timeline',
     })
-  }
-
-  it('keeps the same free area regardless of the leftover panelTab arg', () => {
-    const design = viewportInsets('design', WINDOW, true)
-    const assistant = viewportInsets('assistant', WINDOW, true)
-    expect(design.right).toBe(assistant.right)
+    expect(insets.timelineHeight).toBe(TIMELINE_HEIGHT)
+    expect(insets.bottom).toBe(GUTTER + TIMELINE_HEIGHT + GUTTER)
   })
 
-  it('centres on the free area, not on the window', () => {
-    const insets = viewportInsets('design', WINDOW, true)
+  it('hides the compose dock while the bottom is not visible', () => {
+    expect(viewportInsets('compose', WINDOW, false, 900, 240, { composeDock: 'timeline' }).bottom).toBe(
+      GUTTER,
+    )
+  })
+
+  it('Visualize is full-bleed — Director floats instead of a right rail', () => {
+    const insets = viewportInsets('visualize', WINDOW, false)
+    expect(insets.rightWidth).toBe(0)
+    expect(insets.right).toBe(WINDOW - GUTTER)
+    expect(insets.leftWidth).toBe(0)
+    expect(insets.dockBottom).toBe(GUTTER + GUTTER)
+  })
+
+  it('centres on the free area, not on the window, when the outliner is open', () => {
+    const insets = viewportInsets('build', WINDOW, false, 900, 240, { showOutliner: true })
     expect(insets.centre).toBe(insets.left + (insets.right - insets.left) / 2)
-    // the old bug: centring on the window pushed the footer past the timeline
     expect(insets.centre).not.toBe(WINDOW / 2)
   })
 
-  it('reserves the timeline height only while the dock is up', () => {
-    expect(viewportInsets('design', WINDOW, true).bottom).toBe(GUTTER + TIMELINE_HEIGHT + GUTTER)
-    expect(viewportInsets('design', WINDOW, false).bottom).toBe(GUTTER)
-  })
-
-  it('keeps the default PiP offset inside the free area', () => {
-    const insets = viewportInsets('design', WINDOW, true)
-    // 344 is the shipped default: it must equal the minimum allowed `right`
-    expect(WINDOW - insets.right).toBe(344)
-  })
-
   it('reserves the top row, so pane chrome cannot land under the Toolbar', () => {
-    const insets = viewportInsets('design', WINDOW, true)
-    // the Toolbar sits at top-3 and is 38 px tall, over the area layer
+    const insets = viewportInsets('build', WINDOW, false)
     expect(insets.top).toBe(GUTTER + 38 + GUTTER)
-    // the split placed its controls at the pane corner + 6 px — measurably
-    // under the Toolbar, which made the only "close pane" button unclickable
     expect(insets.top).toBeGreaterThan(6)
   })
 
   it('describes the free area as a rect for overlay chrome', () => {
-    const insets = viewportInsets('design', WINDOW, true)
+    const insets = viewportInsets('compose', WINDOW, true, 873, 240, { composeDock: 'sequence' })
     const free = freeAreaRect(insets, 873)
     expect(free).toEqual({
       x: insets.left,
@@ -82,43 +83,43 @@ describe('viewportInsets', () => {
     expect(free.h).toBeGreaterThan(0)
   })
 
-  it('reserves room for the footer row above the timeline', () => {
-    const insets = viewportInsets('design', WINDOW, true)
-    // floating content (the PiP) must start above the footer, not on top of it
+  it('reserves room for the footer row and Director composer above the compose dock', () => {
+    const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'sequence' })
     expect(insets.contentBottom).toBeGreaterThan(insets.bottom + GUTTER)
-    // the shipped PiP default (192) sat inside the footer band — it must not pass
-    expect(insets.contentBottom).toBeGreaterThan(192)
+    expect(insets.contentBottom).toBe(insets.dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER)
   })
 
-  it('keeps a free canvas when the window is too narrow for max panel widths', () => {
-    const insets = viewportInsets('design', 820, true, 700)
-    expect(insets.leftWidth).toBeLessThan(LEFT_PANEL_MAX)
-    expect(insets.rightWidth).toBeLessThan(320)
+  it('keeps a free canvas in Visualize on a tight window', () => {
+    const insets = viewportInsets('visualize', 820, false, 700)
+    expect(insets.rightWidth).toBe(0)
     const free = freeAreaRect(insets, 700)
     expect(free.w).toBeGreaterThanOrEqual(200)
     expect(free.h).toBeGreaterThan(0)
   })
 
   it('shrinks the timeline on a short window so the viewport is not crushed', () => {
-    const tall = viewportInsets('design', WINDOW, true, 900)
-    const short = viewportInsets('design', WINDOW, true, 360)
+    const tall = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'timeline' })
+    const short = viewportInsets('compose', WINDOW, true, 360, 240, { composeDock: 'timeline' })
     expect(short.timelineHeight).toBeLessThan(tall.timelineHeight)
     expect(freeAreaRect(short, 360).h).toBeGreaterThan(80)
   })
 
   it('grows the dock when a taller height is requested', () => {
-    const compact = viewportInsets('design', WINDOW, true, 900, 168)
-    const taller = viewportInsets('design', WINDOW, true, 900, 320)
+    const compact = viewportInsets('compose', WINDOW, true, 900, 168, { composeDock: 'timeline' })
+    const taller = viewportInsets('compose', WINDOW, true, 900, 320, { composeDock: 'timeline' })
     expect(taller.timelineHeight).toBeGreaterThan(compact.timelineHeight)
     expect(taller.bottom).toBeGreaterThan(compact.bottom)
   })
 
-  it('keeps the toolbar to the right of the Projects/Editor/Board pill', () => {
-    const insets = viewportInsets('design', WINDOW, true)
-    const slot = toolbarSlot(insets)
-    expect(slot.left).toBe(insets.left + VIEW_SWITCHER_RESERVE + GUTTER)
-    expect(slot.left).toBeGreaterThan(insets.left + 200)
-    expect(slot.width).toBeGreaterThan(200)
-    expect(slot.left + slot.width).toBe(insets.right)
+  it('keeps the toolbar on the right of the free area', () => {
+    const insets = viewportInsets('build', WINDOW, false)
+    const slot = toolbarSlot(insets, WINDOW)
+    expect(slot.right).toBe(GUTTER)
+  })
+
+  it('keeps the toolbar on the right edge in Visualize', () => {
+    const insets = viewportInsets('visualize', WINDOW, false)
+    const slot = toolbarSlot(insets, WINDOW)
+    expect(slot.right).toBe(GUTTER)
   })
 })

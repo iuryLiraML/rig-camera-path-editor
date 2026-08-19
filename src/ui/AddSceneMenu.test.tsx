@@ -11,6 +11,7 @@ afterEach(cleanup)
 
 describe('add controls', () => {
   it('portals the toolbar add menu so overflow cannot clip shapes and import', () => {
+    useEditorStore.setState({ workspaceMode: 'compose' })
     const { container } = render(<Toolbar />)
     const toolbar = container.firstElementChild as HTMLElement
     const trigger = container.querySelector('button[title="Add a shape, path, or import a model"]')

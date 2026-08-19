@@ -201,9 +201,9 @@ export function makeDefaultKnotObject(
   return makeObject('Torus Knot', group, { bufferKey: null, ...options })
 }
 
-export type LiftKind = 'person' | 'prop'
+export type LiftKind = 'person' | 'prop' | 'generate' | 'remesh'
 
-export type PendingLift = { id: string; name: string; kind: LiftKind }
+export type PendingLift = { id: string; name: string; kind: LiftKind; objectId?: string }
 
 interface SceneState {
   objects: SceneObject[]
@@ -215,10 +215,11 @@ interface SceneState {
   lightIntensity: number
   onboardingDismissed: boolean
   notice: string | null
-  beginLift: (name: string, kind: LiftKind) => string
+  beginLift: (name: string, kind: LiftKind, objectId?: string) => string
   renameLift: (id: string, name: string) => void
   endLift: (id: string) => void
   addObject: (object: SceneObject) => void
+  replaceImportedRoot: (id: string, root: THREE.Object3D, clips: THREE.AnimationClip[]) => void
   addPrimitive: (kind: PrimitiveKind) => void
   updatePrimitiveParams: (id: string, params: Record<string, number>) => void
   removeObject: (id: string) => void
@@ -292,9 +293,9 @@ export const useSceneStore = create<SceneState>()(
         onboardingDismissed: false,
         notice: null,
 
-        beginLift: (name, kind) => {
+        beginLift: (name, kind, objectId) => {
           const id = `lift-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-          set((s) => ({ pendingLifts: [...s.pendingLifts, { id, name, kind }] }))
+          set((s) => ({ pendingLifts: [...s.pendingLifts, { id, name, kind, objectId }] }))
           return id
         },
         renameLift: (id, name) =>
@@ -304,6 +305,12 @@ export const useSceneStore = create<SceneState>()(
         endLift: (id) => set((s) => ({ pendingLifts: s.pendingLifts.filter((lift) => lift.id !== id) })),
 
         addObject: (object) => set((s) => ({ objects: [...s.objects, object] })),
+
+        replaceImportedRoot: (id, root, clips) =>
+          updateObject(id, (o) => {
+            applyClay(root, o.material)
+            return { root, clips, primitive: undefined }
+          }),
 
         addPrimitive: (kind) => {
           const object = makePrimitive(kind)

@@ -11,6 +11,8 @@ import {
   useLayoutStore,
 } from '../state/useLayoutStore'
 import { useEditorOnly } from '../lib/editorOnly'
+import { isPathEditing, isSceneEditing } from '../lib/workspaceChrome'
+import { useViewportInsets, useWindowSize } from '../ui/viewportInsets'
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
 import { SceneObjects } from './SceneObjects'
@@ -140,13 +142,15 @@ export function Viewport() {
   const lightIntensity = useSceneStore((s) => s.lightIntensity)
   const tool = useEditorStore((s) => s.tool)
   const playMode = useEditorStore((s) => s.playMode)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const cameraView = useEditorStore((s) => s.cameraView)
   const staticCamera = useRigStore((s) => s.cameraKind === 'static')
   const exportSize = useEditorStore((s) => s.exportSize)
   const viewMode = useEditorStore((s) => s.viewMode)
   const tech = isTechMode(viewMode)
-  const hasTimeline = !playMode
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
+  const insets = useViewportInsets()
+  const win = useWindowSize()
 
   const pointerDownAt = useRef<[number, number]>([0, 0])
 
@@ -202,7 +206,7 @@ export function Viewport() {
 
       <SceneObjects />
 
-      {tool === 'pen' && !playMode && !tech && <PenTool />}
+      {tool === 'pen' && isPathEditing(playMode, workspaceMode) && !tech && <PenTool />}
       <InactivePaths />
       <PathEditor />
       <CinemaCamera />
@@ -220,8 +224,14 @@ export function Viewport() {
 
       {showGrid && !playMode && !tech && <EditorGrid />}
 
-      {!playMode && !cameraView && singlePane && (
-        <GizmoHelper alignment="bottom-center" margin={[48, hasTimeline ? 296 : 110]}>
+      {!playMode && !cameraView && singlePane && isSceneEditing(playMode, workspaceMode) && (
+        <GizmoHelper
+          alignment="bottom-right"
+          margin={[
+            Math.max(48, win.w - insets.right + 16),
+            Math.max(72, insets.contentBottom),
+          ]}
+        >
           <GizmoViewport
             axisColors={['#f05a5a', '#59c05a', '#4a7dff']}
             labelColor="#ffffff"

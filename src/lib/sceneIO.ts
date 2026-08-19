@@ -17,14 +17,17 @@ import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { makeEmptyRigSnapshot, useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { idbDelete, idbGet, idbKeys, idbPut, STORES } from './idb'
-import { resetHistory } from './history'
+import { resetHistory, historyClock, historyIsDirty } from './history'
 import type { ModelKey } from './keyframes'
 import { prepareImportedRoot } from './prepareImport'
 import { VIEWPORT_BG_DEFAULT_TOP } from '../viewport/viewportBackground'
 
 /** legacy (pre-projects) localStorage key — still read for migration */
 export const LEGACY_META_KEY = 'rig-scene-objects'
-const HEAVY_TRIANGLES = 1_500_000
+/** toast + remesh offer */
+export const RETOPO_TRIANGLES = 80_000
+/** stronger FPS copy in the import warning */
+export const HEAVY_TRIANGLES = 1_500_000
 
 // ---------------------------------------------------------------------------
 // Import
@@ -47,7 +50,7 @@ export function parseGlbBuffer(buffer: ArrayBuffer) {
   return parseGLB(buffer)
 }
 
-function countTriangles(root: THREE.Object3D): number {
+export function countTriangles(root: THREE.Object3D): number {
   let total = 0
   root.traverse((child) => {
     if (child instanceof THREE.Mesh) {
@@ -62,11 +65,14 @@ function countTriangles(root: THREE.Object3D): number {
 export async function importModelBuffer(
   buffer: ArrayBuffer,
   name: string,
+  opts: { announce?: boolean } = {},
 ): Promise<{
   objectId: string
   objectName: string
   byteSize: number
+  triangles: number
 } | null> {
+  const announce = opts.announce ?? true
   const scene = useSceneStore.getState()
   scene.setImporting(1)
   try {
@@ -79,19 +85,28 @@ export async function importModelBuffer(
     useEditorStore.getState().select(`obj:${object.id}`)
 
     const triangles = countTriangles(root)
-    if (triangles > HEAVY_TRIANGLES) {
-      scene.showNotice(
-        `"${name}" is heavy (${(triangles / 1e6).toFixed(1)}M triangles) — expect low FPS`,
-      )
-    } else {
-      scene.showNotice(
-        clips.length ? `"${name}" imported (${clips.length} animation clips)` : `"${name}" imported`,
-      )
+    if (announce) {
+      if (triangles > HEAVY_TRIANGLES) {
+        scene.showNotice(
+          `"${name}" is heavy (${(triangles / 1e6).toFixed(1)}M triangles) — expect low FPS`,
+        )
+      } else if (triangles > RETOPO_TRIANGLES) {
+        scene.showNotice(
+          `"${name}" is dense (${Math.round(triangles / 1000)}k triangles) — Remesh from the object bar`,
+        )
+      } else {
+        scene.showNotice(
+          clips.length ? `"${name}" imported (${clips.length} animation clips)` : `"${name}" imported`,
+        )
+      }
     }
-    idbPut(STORES.buffers, buffer, object.id).catch((e) =>
-      console.error('Failed to persist model buffer', e),
-    )
-    return { objectId: object.id, objectName: object.name, byteSize: buffer.byteLength }
+    try {
+      await idbPut(STORES.buffers, buffer, object.id)
+    } catch (error) {
+      console.error('Failed to persist model buffer', error)
+      scene.showNotice(`"${name}" imported, but remesh needs a re-import`)
+    }
+    return { objectId: object.id, objectName: object.name, byteSize: buffer.byteLength, triangles }
   } catch (error) {
     console.error('Failed to import model', error)
     scene.showNotice('Could not read this file — use a self-contained .glb')
@@ -102,24 +117,115 @@ export async function importModelBuffer(
 }
 
 /** Imports a .glb/.gltf file as a new scene object and persists its buffer. */
-export async function importModelFile(file: File): Promise<{
+export async function importModelFile(
+  file: File,
+  opts: { announce?: boolean } = {},
+): Promise<{
   objectId: string
   objectName: string
   byteSize: number
+  triangles: number
 } | null> {
   const name = file.name.replace(/\.(glb|gltf)$/i, '')
-  return importModelBuffer(await file.arrayBuffer(), name)
+  return importModelBuffer(await file.arrayBuffer(), name, opts)
 }
 
-export function openImportDialog() {
-  const input = document.createElement('input')
-  input.type = 'file'
-  input.accept = '.glb,.gltf'
-  input.multiple = true
-  input.onchange = () => {
-    for (const file of input.files ?? []) void importModelFile(file)
+const meshRevisions: { objectId: string; buffer: ArrayBuffer; clock: number }[] = []
+
+export function objectTriangleCount(objectId: string): number {
+  const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
+  return object ? countTriangles(object.root) : 0
+}
+
+export function objectNeedsRetopo(objectId: string): boolean {
+  const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
+  return Boolean(object?.bufferKey) && objectTriangleCount(objectId) > RETOPO_TRIANGLES
+}
+
+export async function replaceImportedBuffer(
+  objectId: string,
+  buffer: ArrayBuffer,
+  opts: { recordUndo?: boolean } = {},
+): Promise<void> {
+  const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
+  if (!object?.bufferKey) throw new Error('Only imported models can be remeshed.')
+  const previous =
+    opts.recordUndo === false ? undefined : await idbGet<ArrayBuffer>(STORES.buffers, object.bufferKey)
+  const { scene: root, clips } = await parseGLB(buffer)
+  prepareImportedRoot(root)
+  normalizeModel(root)
+  useSceneStore.getState().replaceImportedRoot(objectId, root, clips)
+  await idbPut(STORES.buffers, buffer, object.bufferKey)
+  if (previous) meshRevisions.push({ objectId, buffer: previous, clock: historyClock() })
+}
+
+/** Restores the last remesh of `objectId` only when it is the latest edit. */
+export function undoLastMeshRevision(objectId?: string | null): boolean {
+  if (!objectId || historyIsDirty()) return false
+  const clock = historyClock()
+  for (let index = meshRevisions.length - 1; index >= 0; index--) {
+    const revision = meshRevisions[index]
+    if (revision.objectId !== objectId) continue
+    if (revision.clock < clock) return false
+    const live = useSceneStore.getState().objects.find((item) => item.id === objectId)
+    meshRevisions.splice(index, 1)
+    if (!live?.bufferKey) continue
+    void replaceImportedBuffer(revision.objectId, revision.buffer, { recordUndo: false }).catch(
+      (error) => {
+        meshRevisions.push(revision)
+        console.error('Failed to restore original mesh', error)
+        useSceneStore.getState().showNotice('Could not restore the original mesh')
+      },
+    )
+    return true
   }
-  input.click()
+  return false
+}
+
+export function pushMeshRevisionForTests(objectId: string, buffer: ArrayBuffer, clock = historyClock()) {
+  meshRevisions.push({ objectId, buffer, clock })
+}
+
+export function clearMeshRevisions() {
+  meshRevisions.length = 0
+}
+
+export const clearMeshRevisionsForTests = clearMeshRevisions
+
+export function openImportDialog() {
+  useEditorStore.getState().setShowImportModal(true)
+}
+
+export type DenseImport = { objectId: string; name: string; triangles: number }
+
+/** Imports .glb/.gltf files and returns those dense enough to offer remesh. */
+export async function importDroppedModels(files: File[]): Promise<DenseImport[]> {
+  const models = files.filter((file) => /\.(glb|gltf)$/i.test(file.name))
+  if (models.length === 0) {
+    useSceneStore.getState().showNotice('Unsupported file — drop a .glb or .gltf')
+    return []
+  }
+  const heavies: DenseImport[] = []
+  for (const file of models) {
+    const imported = await importModelFile(file, { announce: false })
+    if (!imported) continue
+    if (imported.triangles > RETOPO_TRIANGLES) {
+      heavies.push({
+        objectId: imported.objectId,
+        name: imported.objectName,
+        triangles: imported.triangles,
+      })
+    } else {
+      useSceneStore.getState().showNotice(`"${imported.objectName}" imported`)
+    }
+  }
+  return heavies
+}
+
+export function openDenseImportQueue(items: DenseImport[]) {
+  if (items.length === 0) return
+  useEditorStore.getState().setImportRetopoQueue(items)
+  useEditorStore.getState().setShowImportModal(true)
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +338,7 @@ export async function resetScene() {
   editor.select(null)
   editor.setTool('select')
   editor.setCameraView(false)
+  clearMeshRevisions()
   resetHistory()
   useSceneStore.getState().showNotice('Scene reset')
 }
