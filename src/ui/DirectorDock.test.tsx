@@ -20,6 +20,8 @@ beforeEach(() => {
     playMode: false,
     showImportModal: false,
     showAddDrawer: false,
+    composeDock: 'sequence',
+    timelineHeight: 240,
   })
 })
 
@@ -30,6 +32,8 @@ afterEach(() => {
     directorExpanded: false,
     showImportModal: false,
     showAddDrawer: false,
+    composeDock: 'sequence',
+    timelineHeight: 240,
   })
 })
 
@@ -95,6 +99,14 @@ describe('DirectorDock', () => {
     expect(root.style.bottom).toBe('12px')
     expect(root.style.height).toBe('148px')
     expect(root.style.top).toBe('')
+  })
+
+  it('matches the Timeline dock height when that tab is selected', () => {
+    useEditorStore.setState({ workspaceMode: 'compose', composeDock: 'timeline', timelineHeight: 240 })
+    const { container } = render(<DirectorDock />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.bottom).toBe('12px')
+    expect(root.style.height).toBe('240px')
   })
 
   it('grows the Compose transcript up the reserved column', () => {

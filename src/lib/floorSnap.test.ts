@@ -18,6 +18,8 @@ describe('floor-aware add_primitive', () => {
     expect(object!.transform.position[0]).toBeCloseTo(0, 5)
     expect(object!.transform.position[2]).toBeCloseTo(0, 5)
     expect(message).toContain(object!.id)
+    expect(message).toMatch(/floor_y=0/)
+    expect(message).toMatch(/center=\[/)
   })
 
   it('snaps pose_object Y so a 1.4-tall box does not float', async () => {
@@ -47,5 +49,18 @@ describe('floor-aware add_primitive', () => {
     expect(object.name).toBe('Floor')
     expect(object.primitive?.kind).toBe('plane')
     expect(objectWorldBox(object).min.y).toBeCloseTo(0, 2)
+  })
+
+  it('audits every floating object after a place tool', async () => {
+    await executeTool('add_primitive', { kind: 'box' })
+    const first = useSceneStore.getState().objects.at(-1)!
+    useSceneStore.getState().setTransformAll(first.id, {
+      ...first.transform,
+      position: [3, 4, 0],
+    })
+    const message = await executeTool('add_primitive', { kind: 'cylinder', role: 'prop' })
+    const firstAfter = useSceneStore.getState().objects.find((item) => item.id === first.id)!
+    expect(objectWorldBox(firstAfter).min.y).toBeCloseTo(0, 2)
+    expect(message).toMatch(/Snapped to floor/)
   })
 })

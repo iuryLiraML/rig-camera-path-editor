@@ -1,3 +1,4 @@
+import { OFF_FLOOR_Y, THROUGH_FLOOR_Y } from '../floorSnap'
 import { aabbFromCenterSize, distance, pathRadiusStats, pointInsideAabb, projectedFillPercent, type Aabb } from './framing'
 import { fillRangeForScale, minRadiusFactor, type JudgeBlame, type JudgeFailure, type JudgeReport, type ShotPlan } from './shotTypes'
 import type { Vec3 } from '../../state/useSceneStore'
@@ -41,14 +42,14 @@ export function judgeShot(input: JudgeInput): JudgeReport {
 
   const box = input.subject
   const floorY = box.min[1]
-  if (floorY > 0.55) {
+  if (floorY > OFF_FLOOR_Y) {
     failures.push({
       code: 'off_floor',
       message: `Subject sits at y=${floorY.toFixed(2)}; expected near the floor (y=0).`,
       blame: 'object',
     })
   }
-  if (floorY < -0.45) {
+  if (floorY < THROUGH_FLOOR_Y) {
     failures.push({
       code: 'through_floor',
       message: `Subject min y=${floorY.toFixed(2)} is below the floor.`,

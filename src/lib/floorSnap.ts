@@ -127,7 +127,7 @@ export function snapObjectToFloor(id: string): string | null {
   const delta = -box.min.y
   if (Math.abs(delta) < 1e-4) {
     const center = box.getCenter(new THREE.Vector3())
-    return `${object.name} feet_y=0 center=${formatVec3(center)}`
+    return `${object.name} floor_y=0 center=${formatVec3(center)}`
   }
   const next: Vec3 = [
     object.transform.position[0],
@@ -141,7 +141,7 @@ export function snapObjectToFloor(id: string): string | null {
   if (!snapped) return null
   const after = objectWorldBox(snapped)
   const center = after.getCenter(new THREE.Vector3())
-  return `${snapped.name} feet_y=${after.min.y.toFixed(2)} center=${formatVec3(center)}`
+  return `${snapped.name} floor_y=${after.min.y.toFixed(2)} center=${formatVec3(center)}`
 }
 
 export function placeOnFloor(id: string, xz: [number, number]): string | null {
