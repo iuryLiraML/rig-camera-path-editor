@@ -1,8 +1,16 @@
-import { type ObjectChannel } from './keyframes'
+import { evalVec3, type ObjectChannel } from './keyframes'
 import { objectChannelIsAnimated } from './keyAtPlayhead'
 import { requestPersistFlush } from './persistFlush'
 import { useRigStore, type StaticPose } from '../state/useRigStore'
 import { useSceneStore, type Transform } from '../state/useSceneStore'
+
+/** Free-camera pose at the playhead — authoring must start from this, not rest. */
+export function evaluatedStaticPose(rig = useRigStore.getState()): StaticPose {
+  return {
+    position: evalVec3(rig.t, rig.staticPosKeys, rig.staticPose.position, rig.ease),
+    rotation: evalVec3(rig.t, rig.staticRotKeys, rig.staticPose.rotation, rig.ease),
+  }
+}
 
 /** Once a transform channel has a track, later viewport/panel edits key the playhead. */
 export function autoKeyObjectChannels(objectId: string, channels: ObjectChannel[]) {
@@ -36,10 +44,14 @@ export function writeStaticPose(patch: Partial<StaticPose>) {
     rotation: patch.rotation ?? rig.staticPose.rotation,
   }
   rig.setStaticPose(patch)
+  let wrote = false
   if (patch.position && rig.staticPosKeys.length > 0) {
     rig.upsertStaticPosKey(rig.t, next.position)
+    wrote = true
   }
   if (patch.rotation && rig.staticRotKeys.length > 0) {
     rig.upsertStaticRotKey(rig.t, next.rotation)
+    wrote = true
   }
+  if (wrote) requestPersistFlush()
 }

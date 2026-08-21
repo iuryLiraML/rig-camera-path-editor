@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
-import { writeStaticPose } from '../../lib/autoKey'
+import { evaluatedStaticPose, writeStaticPose } from '../../lib/autoKey'
+import { useEditorStore } from '../../state/useEditorStore'
 import { useRigStore } from '../../state/useRigStore'
 import { applyFly, lookAtRotationDeg } from '../../lib/staticCamera'
 
@@ -15,8 +16,8 @@ const MAX_SPEED = 40
  * looking through the camera: WASD to move, Q/E down/up, Shift to sprint,
  * wheel to change speed. Right-drag looks only in Free — Target locks aim
  * to the look-at handle, so RMB never writes Euler that evaluateStaticPose
- * would ignore. Translation still follows the view. Writes go to
- * `staticPose`; CinemaCamera is a pure function of t.
+ * would ignore. Translation still follows the view. Writes start from the
+ * evaluated pose at `t`; CinemaCamera stays a pure function of t.
  */
 export function CameraFly() {
   const gl = useThree((s) => s.gl)
@@ -102,12 +103,14 @@ export function CameraFly() {
     if (forward === 0 && right === 0 && up === 0 && yawDelta === 0 && pitchDelta === 0) return
 
     const rig = useRigStore.getState()
+    if (rig.playing || useEditorStore.getState().playMode) return
+    const live = evaluatedStaticPose(rig)
     const aimLocked = rig.lookAtMode === 'target'
     const rotation = aimLocked
-      ? lookAtRotationDeg(rig.staticPose.position, rig.target)
-      : rig.staticPose.rotation
+      ? lookAtRotationDeg(live.position, rig.target)
+      : live.rotation
     const next = applyFly(
-      { position: rig.staticPose.position, rotation },
+      { position: live.position, rotation },
       {
         forward,
         right,

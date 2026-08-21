@@ -557,6 +557,10 @@ export function buildGraphChannels(input: {
   lookOffsetKeys: Vec3Key[]
   channelPlots: Record<'fov' | 'roll' | 'target' | 'lookOffset', ScalarPlot>
   tracking: boolean
+  staticPosKeys?: Vec3Key[]
+  staticRotKeys?: Vec3Key[]
+  staticPosPlot?: ScalarPlot
+  staticRotPlot?: ScalarPlot
 }): GraphChannel[] {
   const duration = input.duration
   const channels: GraphChannel[] = [
@@ -671,6 +675,42 @@ export function buildGraphChannels(input: {
       curve: plot.curve,
       range: plot.range,
       format,
+    })
+  }
+  if (input.staticPosKeys && input.staticPosKeys.length > 0 && input.staticPosPlot) {
+    channels.push({
+      id: 'staticPos',
+      label: 'Camera · Position',
+      color: '#60a5fa',
+      keys: input.staticPosKeys.map((k) => ({
+        id: k.id,
+        time: k.time,
+        title: `${(k.time * duration).toFixed(1)}s — Position`,
+        value: k.value[1],
+        ease: k.ease,
+        easeBezier: k.easeBezier,
+      })),
+      curve: input.staticPosPlot.curve,
+      range: input.staticPosPlot.range,
+      format: 'look',
+    })
+  }
+  if (input.staticRotKeys && input.staticRotKeys.length > 0 && input.staticRotPlot) {
+    channels.push({
+      id: 'staticRot',
+      label: 'Camera · Rotation',
+      color: '#60a5fa',
+      keys: input.staticRotKeys.map((k) => ({
+        id: k.id,
+        time: k.time,
+        title: `${(k.time * duration).toFixed(1)}s — Rotation`,
+        value: k.value[1],
+        ease: k.ease,
+        easeBezier: k.easeBezier,
+      })),
+      curve: input.staticRotPlot.curve,
+      range: input.staticRotPlot.range,
+      format: 'degrees',
     })
   }
   return channels

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { autoKeyObjectChannels, writeObjectTransform, writeStaticPose } from './autoKey'
+import { autoKeyObjectChannels, evaluatedStaticPose, writeObjectTransform, writeStaticPose } from './autoKey'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, identityTransform } from '../state/useSceneStore'
 
@@ -44,5 +44,19 @@ describe('auto-key', () => {
     writeStaticPose({ position: [5, 2, 3] })
     expect(useRigStore.getState().staticPosKeys.length).toBeGreaterThanOrEqual(2)
     expect(useRigStore.getState().staticPose.position).toEqual([5, 2, 3])
+  })
+
+  it('reads the Free-camera pose at t, not the rest pose', () => {
+    useRigStore.setState({
+      t: 1,
+      ease: 'linear',
+      staticPose: { position: [0, 0, 0], rotation: [0, 0, 0] },
+      staticPosKeys: [
+        { id: 'a', time: 0, value: [0, 0, 0] },
+        { id: 'b', time: 1, value: [10, 0, 0] },
+      ],
+      staticRotKeys: [],
+    })
+    expect(evaluatedStaticPose().position[0]).toBeCloseTo(10)
   })
 })

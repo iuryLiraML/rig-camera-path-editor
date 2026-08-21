@@ -57,6 +57,8 @@ describe('isKeyableShortcut', () => {
     expect(isKeyableShortcut('Delete')).toBe(true)
     expect(isKeyableShortcut('Backspace')).toBe(false)
     expect(isKeyableShortcut('w')).toBe(false)
+    expect(isKeyableShortcut('t')).toBe(false)
+    expect(isKeyableShortcut('?')).toBe(false)
   })
 })
 

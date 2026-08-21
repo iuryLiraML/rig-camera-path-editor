@@ -71,11 +71,19 @@ describe('saveActiveProject', () => {
     expect(useSaveStatusStore.getState().status).toBe('saved')
   })
 
-  it('does not spawn a project while sitting on the Projects home', async () => {
+  it('creates only one untitled project when two saves race', async () => {
+    await Promise.all([saveActiveProject(), saveActiveProject()])
+    expect([...memory.keys()]).toHaveLength(1)
+    expect(useProjectStore.getState().projectId).toBe([...memory.keys()][0])
+  })
+
+  it('keeps Saved on the Projects home and does not spawn a project', async () => {
     useEditorStore.setState({ appView: 'projects' })
+    useSaveStatusStore.setState({ status: 'dirty' })
     await saveActiveProject()
     expect(useProjectStore.getState().projectId).toBe('')
     expect(memory.size).toBe(0)
+    expect(useSaveStatusStore.getState().status).toBe('saved')
   })
 
   it('writes the existing id without creating another project', async () => {

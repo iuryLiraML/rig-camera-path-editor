@@ -209,7 +209,7 @@ export function Viewport() {
       <PathEditor />
       <CinemaCamera />
       {staticCamera && <CameraRig />}
-      {cameraView && staticCamera && <CameraFly />}
+      {cameraView && staticCamera && !playMode && <CameraFly />}
       <LookAtTarget />
       <CameraPreview />
       <PaneCompositor />

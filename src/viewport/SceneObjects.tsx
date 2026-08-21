@@ -49,9 +49,13 @@ export function sceneBounds(): THREE.Box3 | null {
 function ObjectGizmo({
   groupRef,
   onChange,
+  onDragStart,
+  onDragEnd,
 }: {
   groupRef: React.RefObject<THREE.Group | null>
   onChange: () => void
+  onDragStart: () => void
+  onDragEnd: () => void
 }) {
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
@@ -65,6 +69,8 @@ function ObjectGizmo({
       mode={gizmoMode}
       size={0.65}
       translationSnap={snapEnabled ? gridSize : undefined}
+      onMouseDown={onDragStart}
+      onMouseUp={onDragEnd}
       onObjectChange={onChange}
     />
   )
@@ -80,6 +86,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const [hovered, setHovered] = useState(false)
   const groupRef = useRef<THREE.Group>(null)
+  const gizmoDragging = useRef(false)
   const mixer = useMemo(() => new THREE.AnimationMixer(object.root), [object.root])
 
   // path this object rides (if attached); curve rebuilds when that path changes
@@ -121,15 +128,16 @@ function ObjectNode({ object }: { object: SceneObject }) {
     }
   }, [mixer, object.clips])
 
-  // store -> group (panel/undo edits); the gizmo mutates the group directly
+  // store -> group for rest-pose objects; keyed objects are driven in useFrame
   useEffect(() => {
+    if (object.keys.length > 0) return
     const g = groupRef.current
     if (!g) return
     const t = object.transform
     g.position.set(...t.position)
     g.rotation.set(t.rotation[0] * DEG, t.rotation[1] * DEG, t.rotation[2] * DEG)
     g.scale.set(...t.scale)
-  }, [object.transform])
+  }, [object.transform, object.keys.length])
 
   useFrame(() => {
     const rig = useRigStore.getState()
@@ -163,8 +171,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
     }
 
     if (object.keys.length === 0) return
-    // posing mode: the user is editing this object with the gizmo/panel
-    if (selected && !rig.playing) return
+    if (gizmoDragging.current || meshDrag.current) return
 
     const pose = evalModelTransform(rig.t, object.keys, rig.ease, object.transform)
     const g = groupRef.current
@@ -298,7 +305,16 @@ function ObjectNode({ object }: { object: SceneObject }) {
         <primitive object={object.root} />
       </group>
       {selected && tool === 'select' && editing && !tech && !follow && !locked && (
-        <ObjectGizmo groupRef={groupRef} onChange={syncTransform} />
+        <ObjectGizmo
+          groupRef={groupRef}
+          onChange={syncTransform}
+          onDragStart={() => {
+            gizmoDragging.current = true
+          }}
+          onDragEnd={() => {
+            gizmoDragging.current = false
+          }}
+        />
       )}
     </>
   )

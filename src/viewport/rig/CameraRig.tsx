@@ -8,7 +8,7 @@ import { evalObjectWorldTransform, resolveTrackTarget } from '../../lib/objectMo
 import { localPointToWorld } from '../../lib/pathSpace'
 import { lockOrbit, unlockOrbit } from '../../lib/orbitLock'
 import { truckOnGround } from '../../lib/planeDrag'
-import { writeStaticPose } from '../../lib/autoKey'
+import { evaluatedStaticPose, writeStaticPose } from '../../lib/autoKey'
 import { applyPoseToObject, eulerDegFromQuaternion, poseFromObject } from '../../lib/staticCamera'
 import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
@@ -148,7 +148,7 @@ export function CameraRig() {
   const beginDrag = (kind: DragKind, e: ThreeEvent<PointerEvent>, handle: Vec3) => {
     useEditorStore.getState().select(kind === 'target' ? 'target' : 'cinema-camera')
     useRigStore.getState().setPlaying(false)
-    const pose = useRigStore.getState().staticPose
+    const pose = evaluatedStaticPose()
     const startTarget = currentLookPoint()
     const plane = new THREE.Plane()
     if (kind === 'ground') {
@@ -261,7 +261,7 @@ export function CameraRig() {
           kind="ground"
           billboard={false}
           onPointerDown={(e) => {
-            const p = useRigStore.getState().staticPose.position
+            const p = evaluatedStaticPose().position
             beginDrag('ground', e, [p[0], 0, p[2]])
           }}
           onPointerMove={moveDrag}

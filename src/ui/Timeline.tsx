@@ -1352,6 +1352,10 @@ export function Timeline() {
               tracking: Boolean(
                 targetObjectId && objects.some((object) => object.id === targetObjectId),
               ),
+              staticPosKeys,
+              staticRotKeys,
+              staticPosPlot,
+              staticRotPlot,
             })}
             defaultEase={ease}
           />

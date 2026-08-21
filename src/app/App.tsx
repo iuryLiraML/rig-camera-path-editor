@@ -62,7 +62,7 @@ function useShortcuts() {
         return
       }
       if (isTextEditing()) return
-      if (applyHelpShortcut(e) || applyTimelineShortcut(e)) return
+      if (!isKeyableField() && (applyHelpShortcut(e) || applyTimelineShortcut(e))) return
       if (isKeyableField() && !isKeyableShortcut(e.key)) return
 
       // looking through a free camera: WASD/QE fly — don't steal them for gizmos

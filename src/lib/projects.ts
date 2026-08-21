@@ -93,6 +93,7 @@ function buildActiveRecord(id: string, createdAt: number): ProjectRecord {
 }
 
 const createdAtById = new Map<string, number>()
+let creatingUntitled: Promise<string | null> | null = null
 
 function restoreDirectorChat() {
   useAgentStore.getState().clearChat()
@@ -111,15 +112,16 @@ async function createUntitledFromCurrent(): Promise<string | null> {
   let cloudUpdatedAt: string | undefined
   if (isCloudFirst()) {
     const accessToken = useCloudAuthStore.getState().accessToken
-    if (!accessToken) return null
-    const created = await createCloudProject(accessToken, {
-      name,
-      workflowVersion: PROJECT_WORKFLOW_VERSION,
-      workflow: current.workflow,
-      editorState: {},
-    })
-    id = created.id
-    cloudUpdatedAt = created.updatedAt
+    if (accessToken) {
+      const created = await createCloudProject(accessToken, {
+        name,
+        workflowVersion: PROJECT_WORKFLOW_VERSION,
+        workflow: current.workflow,
+        editorState: {},
+      })
+      id = created.id
+      cloudUpdatedAt = created.updatedAt
+    }
   }
   createdAtById.set(id, Date.now())
   current.loadProject({
@@ -153,7 +155,11 @@ async function ensureActiveProjectId(createIfMissing: boolean): Promise<string |
   if (!createIfMissing) return null
   // Projects home with no open session — do not spawn an untitled on tab hide.
   if (useEditorStore.getState().appView === 'projects') return null
-  return createUntitledFromCurrent()
+  if (creatingUntitled) return creatingUntitled
+  creatingUntitled = createUntitledFromCurrent().finally(() => {
+    creatingUntitled = null
+  })
+  return creatingUntitled
 }
 
 /** Persists the active project (debounced by watchers, immediate on switch). */
@@ -163,7 +169,10 @@ export async function saveActiveProject(options?: { createIfMissing?: boolean })
   try {
     const projectId = await ensureActiveProjectId(createIfMissing)
     if (!projectId) {
-      useSaveStatusStore.getState().setStatus('saved')
+      // Projects home has nothing to persist. An editor session without an id
+      // failed to create — do not show Saved.
+      const idle = useEditorStore.getState().appView === 'projects'
+      useSaveStatusStore.getState().setStatus(idle ? 'saved' : 'dirty')
       return
     }
     const createdAt = createdAtById.get(projectId) ?? Date.now()
@@ -318,6 +327,7 @@ function applyRecord(record: ProjectRecord) {
     .getState()
     .loadOptions(record.cameraOptions, record.activeCameraOptionId, record.rig)
   localStorage.setItem(ACTIVE_KEY, record.id)
+  useSaveStatusStore.getState().setStatus('saved')
 }
 
 let watching = false
