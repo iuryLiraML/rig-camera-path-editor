@@ -104,8 +104,9 @@ describe('viewportPick', () => {
     expect(preferTaggedHits(tagHits(stacked))[0]?.id).toBe('obj:a')
   })
 
-  it('does not treat a lone spline hit as an orbit lock', () => {
+  it('does not treat a lone spline or pen-plane hit as an orbit lock', () => {
     expect(hasInteractivePick([hit('path-line', 'path:a', 1)])).toBe(false)
+    expect(hasInteractivePick([hit('pen', 'pen-plane', 1)])).toBe(false)
     expect(hasInteractivePick([hit('object', 'obj:a', 1)])).toBe(true)
   })
 
@@ -120,5 +121,21 @@ describe('viewportPick', () => {
     ])
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.object).toBe(object)
+  })
+
+  it('keeps the pen drawing plane in the filtered hit list', () => {
+    const filtered = filterViewportHits([hit('pen', 'pen-plane', 2)])
+    expect(filtered).toHaveLength(1)
+    expect(filtered[0]?.object.userData.pickId).toBe('pen-plane')
+  })
+
+  it('lets scene objects beat the pen plane when both are on the ray', () => {
+    const tagged = tagHits([
+      hit('pen', 'pen-plane', 1),
+      hit('object', 'obj:box', 1.05),
+    ])
+    const ordered = preferTaggedHits(tagged)
+    expect(ordered[0]?.id).toBe('obj:box')
+    expect(ordered.map((item) => item.id)).toContain('pen-plane')
   })
 })

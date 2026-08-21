@@ -1,6 +1,13 @@
 import type { Object3D } from 'three'
 
-export type PickKind = 'gizmo' | 'object' | 'camera' | 'target' | 'path-anchor' | 'path-line'
+export type PickKind =
+  | 'gizmo'
+  | 'object'
+  | 'camera'
+  | 'target'
+  | 'path-anchor'
+  | 'path-line'
+  | 'pen'
 
 const RANK: Record<PickKind, number> = {
   gizmo: 0,
@@ -9,6 +16,9 @@ const RANK: Record<PickKind, number> = {
   target: 2,
   'path-anchor': 3,
   'path-line': 4,
+  // Drawing plane is a last-resort hit so meshes/anchors still win; it must
+  // stay in the filtered list or R3F never delivers pen pointer events.
+  pen: 5,
 }
 
 export type TaggedHit<T> = {
@@ -170,7 +180,7 @@ export function filterViewportHits<T extends { object: Object3D; distance: numbe
   return preferTaggedHits(tagHits(hits)).map((item) => item.hit)
 }
 
-/** True when a left-click should hold orbit (not a fat spline miss). */
+/** True when a left-click should hold orbit (not a fat spline / pen-plane miss). */
 export function hasInteractivePick(hits: { object: Object3D; distance: number }[]): boolean {
-  return tagHits(hits).some((item) => item.kind !== 'path-line')
+  return tagHits(hits).some((item) => item.kind !== 'path-line' && item.kind !== 'pen')
 }
