@@ -71,7 +71,9 @@ import {
   TIMELINE_HEIGHT_DEFAULT,
   TIMELINE_HEIGHT_MAX,
   TIMELINE_MIN,
+  chromeBand,
   useViewportInsets,
+  useWindowSize,
 } from './viewportInsets'
 import { saveCurrentAsShot } from '../lib/projects'
 import { applyTogglePlayback } from '../lib/playback'
@@ -849,6 +851,8 @@ export function Timeline() {
   const timelineGraph = useEditorStore((s) => s.timelineGraph)
 
   const insets = useViewportInsets()
+  const win = useWindowSize()
+  const band = chromeBand(insets, win.w)
   const scrubbing = useRef(false)
   const rulerRef = useRef<HTMLDivElement>(null)
   const dockRef = useRef<HTMLDivElement>(null)
@@ -965,7 +969,7 @@ export function Timeline() {
     return (
       <div
         className="panel absolute z-20 flex items-center justify-between gap-4 px-3 py-3"
-        style={{ left: insets.left, width: insets.right - insets.left, bottom: GUTTER, height: insets.timelineHeight }}
+        style={{ left: band.left, width: band.width, bottom: GUTTER, height: insets.timelineHeight }}
       >
         <TimelineResizeHandle />
         <div className="min-w-0">
@@ -1017,7 +1021,7 @@ export function Timeline() {
       ref={dockRef}
       data-timeline-dock
       className="panel absolute z-20 flex flex-col px-3 py-2"
-      style={{ left: insets.left, width: insets.right - insets.left, bottom: GUTTER, height: insets.timelineHeight }}
+      style={{ left: band.left, width: band.width, bottom: GUTTER, height: insets.timelineHeight }}
       onWheel={(e) => applyWheelZoom(e)}
     >
       <TimelineResizeHandle />

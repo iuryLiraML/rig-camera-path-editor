@@ -36,7 +36,6 @@ import { AddObjectDrawer } from '../ui/AddObjectDrawer'
 import { ObjectBar } from '../ui/ObjectBar'
 import { NavLegend } from '../ui/NavLegend'
 import { ImportAssetsModal } from '../ui/ImportAssetsModal'
-import { ShotFrame } from '../ui/ShotFrame'
 import { CameraBar } from '../ui/CameraBar'
 import { CameraAdjustPanel } from '../ui/CameraAdjustPanel'
 import { SequenceStrip } from '../ui/SequenceStrip'
@@ -279,7 +278,6 @@ function EditorWorkspace() {
       {chrome.onboarding && <OnboardingCard />}
       {chrome.pip && <CameraPreviewFrame />}
       {chrome.cameraHud && <CameraRigHud />}
-      {chrome.shotFrame && <ShotFrame />}
       {chrome.cameraBar && !chrome.footer && <CameraBar />}
       {chrome.cameraBar && <CameraAdjustPanel />}
       {chrome.objectBar && <ObjectBar />}

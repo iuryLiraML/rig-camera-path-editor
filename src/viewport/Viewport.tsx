@@ -12,7 +12,7 @@ import {
 } from '../state/useLayoutStore'
 import { useEditorOnly } from '../lib/editorOnly'
 import { isPathEditing, isSceneEditing } from '../lib/workspaceChrome'
-import { GUTTER, useViewportInsets } from '../ui/viewportInsets'
+import { FOOTER_ROW_HEIGHT, GUTTER, useViewportInsets } from '../ui/viewportInsets'
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
 import { SceneObjects } from './SceneObjects'
@@ -228,7 +228,13 @@ export function Viewport() {
           alignment="bottom-left"
           margin={[
             Math.max(28, insets.left + 28),
-            Math.max(40, insets.bottom + GUTTER + 36),
+            Math.max(
+              40,
+              insets.bottom +
+                GUTTER +
+                (workspaceMode === 'compose' ? FOOTER_ROW_HEIGHT + GUTTER : 0) +
+                36,
+            ),
           ]}
         >
           <GizmoViewport

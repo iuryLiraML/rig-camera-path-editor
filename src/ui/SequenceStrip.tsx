@@ -3,20 +3,22 @@ import { loadShot, playAnimatic, saveCurrentAsShot } from '../lib/projects'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore, type Shot } from '../state/useProjectStore'
 import { CameraIcon, PlayIcon, PlusIcon } from './icons'
-import { GUTTER, useViewportInsets } from './viewportInsets'
+import { chromeBand, GUTTER, useViewportInsets, useWindowSize } from './viewportInsets'
 import { ComposeDockTabs } from './ComposeDockTabs'
 
 export function SequenceStrip() {
   const shots = useProjectStore((s) => s.shots)
   const insets = useViewportInsets()
+  const win = useWindowSize()
+  const band = chromeBand(insets, win.w)
   const ordered = [...shots].sort((a, b) => a.order - b.order)
 
   return (
     <div
       className="panel absolute z-20 flex flex-col overflow-hidden"
       style={{
-        left: insets.left,
-        width: insets.right - insets.left,
+        left: band.left,
+        width: band.width,
         bottom: GUTTER,
         height: insets.timelineHeight,
       }}

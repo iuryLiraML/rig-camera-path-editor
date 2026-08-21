@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  chromeBand,
   DIRECTOR_COMPOSER_HEIGHT,
   DIRECTOR_DOCK_WIDTH,
   directorDockSlot,
@@ -132,5 +133,14 @@ describe('viewportInsets', () => {
     const insets = viewportInsets('visualize', WINDOW, false)
     const slot = toolbarSlot(insets, WINDOW)
     expect(slot.right).toBe(GUTTER)
+  })
+
+  it('stops Compose docks before the Director column', () => {
+    const insets = viewportInsets('compose', WINDOW, true, 900, 148, { composeDock: 'sequence' })
+    const band = chromeBand(insets, WINDOW)
+    const dock = directorDockSlot(insets, WINDOW)
+    const dockLeft = WINDOW - dock.right - dock.width
+    expect(band.left + band.width).toBeLessThanOrEqual(dockLeft - GUTTER)
+    expect(band.width).toBeGreaterThan(400)
   })
 })

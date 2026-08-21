@@ -14,7 +14,7 @@ import {
 export const GUTTER = 12
 
 /** height of the floating footer row of pills (view modes, views, projection, split) */
-const FOOTER_ROW_HEIGHT = 32
+export const FOOTER_ROW_HEIGHT = 32
 /** collapsed Director composer — ObjectBar / PiP sit above this */
 export const DIRECTOR_COMPOSER_HEIGHT = 100
 /** floating Director column on the right of the free area */
@@ -51,6 +51,20 @@ export function directorDockSlot(
   const right = toolbarSlot(insets, windowWidth).right
   const width = Math.min(DIRECTOR_DOCK_WIDTH, Math.max(0, insets.right - insets.left))
   return { right, width }
+}
+
+/**
+ * Horizontal band for Compose docks (footer, sequence, timeline) so they stop
+ * at the Director column instead of running underneath it.
+ */
+export function chromeBand(
+  insets: ViewportInsets,
+  windowWidth: number,
+): { left: number; width: number } {
+  const dock = directorDockSlot(insets, windowWidth)
+  const dockLeft = windowWidth - dock.right - dock.width
+  const right = Math.min(insets.right, dockLeft - GUTTER)
+  return { left: insets.left, width: Math.max(0, right - insets.left) }
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { useEditorStore, type Projection, type QuickView, type ViewMode } from '../state/useEditorStore'
 import { detectPreset, leafList, useLayoutStore, type LayoutPreset } from '../state/useLayoutStore'
-import { GUTTER, useViewportInsets, useWindowSize } from './viewportInsets'
+import { chromeBand, GUTTER, useViewportInsets, useWindowSize } from './viewportInsets'
 
 const VIEWS: { value: QuickView; label: string }[] = [
   { value: 'front', label: 'Front' },
@@ -38,12 +38,13 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
   const paneCount = useLayoutStore((s) => leafList(s.root).length)
   const preset = useLayoutStore((s) => detectPreset(s.root))
   const win = useWindowSize()
+  const band = chromeBand(insets, win.w)
 
   if (cameraView) return null
 
   const free = {
-    x: insets.left,
-    w: Math.max(0, insets.right - insets.left),
+    x: band.left,
+    w: Math.max(0, band.width),
     y: insets.top,
     h: Math.max(0, win.h - insets.bottom - insets.top),
   }
@@ -56,8 +57,8 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
     <div
       className="pointer-events-none absolute z-20 flex flex-nowrap items-center gap-2"
       style={{
-        left: insets.left,
-        width: insets.right - insets.left,
+        left: band.left,
+        width: band.width,
         bottom: insets.bottom + GUTTER,
       }}
     >
