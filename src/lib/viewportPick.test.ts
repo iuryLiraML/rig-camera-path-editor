@@ -4,6 +4,7 @@ import {
   beginPickClick,
   filterViewportHits,
   hasInteractivePick,
+  penShouldPlace,
   pickKindOf,
   preferTaggedHits,
   resetPickCycle,
@@ -120,5 +121,14 @@ describe('viewportPick', () => {
     ])
     expect(filtered).toHaveLength(1)
     expect(filtered[0]?.object).toBe(object)
+  })
+
+  it('lets the pen place on empty space, meshes and the path stroke, but not on anchors', () => {
+    const plane = new THREE.Object3D()
+    expect(penShouldPlace([{ object: plane, distance: 1 }])).toBe(true)
+    expect(penShouldPlace([hit('object', 'obj:box', 1), hit('path-line', 'path:a', 1.1)])).toBe(true)
+    expect(penShouldPlace([hit('path-anchor', 'anchor:a', 0.4), hit('object', 'obj:box', 1)])).toBe(
+      false,
+    )
   })
 })

@@ -1,10 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Html, Line } from '@react-three/drei'
-import type { ThreeEvent } from '@react-three/fiber'
+import { useThree, type ThreeEvent } from '@react-three/fiber'
 import { useEditorStore } from '../../state/useEditorStore'
 import { usePathStore } from '../../state/usePathStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
+import { computeRects, paneAt, useLayoutStore } from '../../state/useLayoutStore'
 import {
   currentPathParentTransform,
   worldDirToPathLocal,
@@ -14,7 +15,10 @@ import {
 import { localPointToWorld } from '../../lib/pathSpace'
 import { constructionHeight, snapActive, snapToGridXZ } from '../../lib/penPlacement'
 import { useEditorOnly } from '../../lib/editorOnly'
+import { penShouldPlace } from '../../lib/viewportPick'
 import { objectGroups } from '../SceneObjects'
+import { cinemaCameraRef } from '../rig/CinemaCamera'
+import { isSpatialView, spatialCameras } from '../spatialViews'
 
 export function capturePointer(e: ThreeEvent<PointerEvent>) {
   try {
@@ -38,6 +42,36 @@ function pathScene(): PathSpaceScene {
 
 type Preview = { world: Vec3; surface: boolean }
 
+function ignoreRaycast() {
+  // Visual construction plane only — placement listens on the canvas.
+}
+
+function rayFromPointer(
+  e: PointerEvent,
+  el: HTMLCanvasElement,
+  editorCam: THREE.Camera,
+  raycaster: THREE.Raycaster,
+): THREE.Ray | null {
+  const rect = el.getBoundingClientRect()
+  const w = rect.width
+  const h = rect.height
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  if (x < 0 || y < 0 || x > w || y > h) return null
+  const leaf = paneAt(x, y, w, h)
+  const leaves = computeRects(useLayoutStore.getState().root, { x: 0, y: 0, w, h }).leaves
+  const pane = (leaf && leaves.get(leaf.id)) ?? { x: 0, y: 0, w, h }
+  const ndc = new THREE.Vector2(
+    ((x - pane.x) / Math.max(1, pane.w)) * 2 - 1,
+    -((y - pane.y) / Math.max(1, pane.h)) * 2 + 1,
+  )
+  let cam = editorCam
+  if (leaf && isSpatialView(leaf.view)) cam = spatialCameras[leaf.view]
+  else if (leaf?.view === 'camera' && cinemaCameraRef.current) cam = cinemaCameraRef.current
+  raycaster.setFromCamera(ndc, cam)
+  return raycaster.ray.clone()
+}
+
 /**
  * Pen tool with hybrid, depth-aware placement:
  *  - if a scene mesh is under the cursor, the point lands on that surface;
@@ -46,6 +80,10 @@ type Preview = { world: Vec3; surface: boolean }
  *  - snapping locks empty-space clicks to the XZ grid.
  * A ghost marker, a vertical drop line and a live XYZ readout show exactly
  * where the point will land before the click.
+ *
+ * Clicks are taken from the canvas, not the construction mesh: R3F's pick
+ * filter drops unmarked helpers, and an existing path stroke would steal the
+ * event so the pen looked broken.
  */
 export function PenTool() {
   const activeAnchors = usePathStore((s) =>
@@ -55,7 +93,13 @@ export function PenTool() {
   const [preview, setPreview] = useState<Preview | null>(null)
   const drag = useRef<{ id: string; origin: THREE.Vector3; planeY: number } | null>(null)
   const meshRef = useRef<THREE.Mesh>(null)
+  const offsetRef = useRef(0)
+  offsetRef.current = offset
   useEditorOnly(meshRef)
+
+  const gl = useThree((s) => s.gl)
+  const editorCam = useThree((s) => s.camera)
+  const scene = useThree((s) => s.scene)
 
   const raycaster = useMemo(() => new THREE.Raycaster(), [])
   const plane = useRef(new THREE.Plane())
@@ -74,82 +118,117 @@ export function PenTool() {
   const planeY = constructionHeight(base, offset)
 
   /** Resolve where a ray lands: scene surface first, else construction plane. */
-  const resolve = (e: { ray: THREE.Ray; ctrlKey: boolean }): Preview | null => {
-    raycaster.set(e.ray.origin, e.ray.direction)
+  const resolve = (ray: THREE.Ray, ctrlKey: boolean): Preview | null => {
+    raycaster.set(ray.origin, ray.direction)
     const meshes = [...objectGroups.values()]
     const hits = meshes.length ? raycaster.intersectObjects(meshes, true) : []
     if (hits.length > 0) {
       const p = hits[0].point
       return { world: [p.x, p.y, p.z], surface: true }
     }
-    plane.current.set(new THREE.Vector3(0, 1, 0), -planeY)
-    if (!e.ray.intersectPlane(plane.current, hitPt.current)) return null
-    let world: Vec3 = [hitPt.current.x, planeY, hitPt.current.z]
+    const y = constructionHeight(base, offsetRef.current)
+    plane.current.set(new THREE.Vector3(0, 1, 0), -y)
+    if (!ray.intersectPlane(plane.current, hitPt.current)) return null
+    let world: Vec3 = [hitPt.current.x, y, hitPt.current.z]
     const editor = useEditorStore.getState()
-    if (snapActive(editor.snapEnabled, e.ctrlKey)) world = snapToGridXZ(world, editor.gridSize)
+    if (snapActive(editor.snapEnabled, ctrlKey)) world = snapToGridXZ(world, editor.gridSize)
     return { world, surface: false }
   }
 
-  const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
-    if (e.button !== 0) return
-    e.stopPropagation()
-    const r = resolve(e)
-    if (!r) return
-    const path = usePathStore.getState()
-    const local = worldHitToPathLocal(r.world, path.activePathId, pathScene())
-    const id = path.addAnchor(local)
-    drag.current = { id, origin: new THREE.Vector3(...r.world), planeY: r.world[1] }
-    setOffset(0) // next point starts at the new anchor's height
-    capturePointer(e)
-  }
+  useEffect(() => {
+    const el = gl.domElement
 
-  const onPointerMove = (e: ThreeEvent<PointerEvent>) => {
-    if (!drag.current) {
-      setPreview(resolve(e))
-      return
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0) return
+      const ray = rayFromPointer(e, el, editorCam, raycaster)
+      if (!ray) return
+      raycaster.set(ray.origin, ray.direction)
+      const hits = raycaster.intersectObjects(scene.children, true)
+      if (!penShouldPlace(hits)) return
+      const r = resolve(ray, e.ctrlKey)
+      if (!r) return
+      e.preventDefault()
+      const path = usePathStore.getState()
+      const local = worldHitToPathLocal(r.world, path.activePathId, pathScene())
+      const id = path.addAnchor(local)
+      drag.current = { id, origin: new THREE.Vector3(...r.world), planeY: r.world[1] }
+      setOffset(0)
+      setPreview(null)
+      try {
+        el.setPointerCapture(e.pointerId)
+      } catch {
+        /* already captured */
+      }
     }
-    // dragging out a Bézier handle on the horizontal plane at the anchor
-    plane.current.set(new THREE.Vector3(0, 1, 0), -drag.current.planeY)
-    if (!e.ray.intersectPlane(plane.current, hitPt.current)) return
-    const out = hitPt.current.clone().sub(drag.current.origin)
-    if (out.length() > 0.05) {
-      const local = worldDirToPathLocal(
-        [out.x, out.y, out.z],
-        usePathStore.getState().activePathId,
-        pathScene(),
-      )
-      usePathStore.getState().setHandleOut(drag.current.id, local, true)
+
+    const onMove = (e: PointerEvent) => {
+      const ray = rayFromPointer(e, el, editorCam, raycaster)
+      if (!ray) {
+        if (!drag.current) setPreview(null)
+        return
+      }
+      if (!drag.current) {
+        setPreview(resolve(ray, e.ctrlKey))
+        return
+      }
+      plane.current.set(new THREE.Vector3(0, 1, 0), -drag.current.planeY)
+      if (!ray.intersectPlane(plane.current, hitPt.current)) return
+      const out = hitPt.current.clone().sub(drag.current.origin)
+      if (out.length() > 0.05) {
+        const local = worldDirToPathLocal(
+          [out.x, out.y, out.z],
+          usePathStore.getState().activePathId,
+          pathScene(),
+        )
+        usePathStore.getState().setHandleOut(drag.current.id, local, true)
+      }
     }
-  }
 
-  const onPointerUp = (e: ThreeEvent<PointerEvent>) => {
-    drag.current = null
-    releasePointer(e)
-  }
+    const onUp = (e: PointerEvent) => {
+      drag.current = null
+      try {
+        el.releasePointerCapture(e.pointerId)
+      } catch {
+        /* already released */
+      }
+    }
 
-  const onWheel = (e: ThreeEvent<WheelEvent>) => {
-    e.stopPropagation()
-    e.nativeEvent?.preventDefault?.()
-    const editor = useEditorStore.getState()
-    const step = snapActive(editor.snapEnabled, e.ctrlKey) ? editor.gridSize : 0.1
-    setOffset((o) => o + (e.deltaY < 0 ? step : -step))
-    setPreview(resolve(e))
-  }
+    const onWheel = (e: WheelEvent) => {
+      const ray = rayFromPointer(e as unknown as PointerEvent, el, editorCam, raycaster)
+      if (!ray) return
+      e.preventDefault()
+      const editor = useEditorStore.getState()
+      const step = snapActive(editor.snapEnabled, e.ctrlKey) ? editor.gridSize : 0.1
+      setOffset((o) => o + (e.deltaY < 0 ? step : -step))
+      setPreview(resolve(ray, e.ctrlKey))
+    }
+
+    el.addEventListener('pointerdown', onDown)
+    el.addEventListener('pointermove', onMove)
+    el.addEventListener('pointerup', onUp)
+    el.addEventListener('pointercancel', onUp)
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => {
+      el.removeEventListener('pointerdown', onDown)
+      el.removeEventListener('pointermove', onMove)
+      el.removeEventListener('pointerup', onUp)
+      el.removeEventListener('pointercancel', onUp)
+      el.removeEventListener('wheel', onWheel)
+    }
+    // resolve closes over base; re-bind when the last anchor height changes
+  }, [gl, editorCam, scene, raycaster, base])
 
   return (
     <>
-      <mesh
-        ref={meshRef}
-        rotation-x={-Math.PI / 2}
-        position-y={planeY}
-        onPointerDown={onPointerDown}
-        onPointerMove={onPointerMove}
-        onPointerUp={onPointerUp}
-        onPointerLeave={() => setPreview(null)}
-        onWheel={onWheel}
-      >
+      <mesh ref={meshRef} rotation-x={-Math.PI / 2} position-y={planeY} raycast={ignoreRaycast}>
         <planeGeometry args={[400, 400]} />
-        <meshBasicMaterial color="#3b82f6" transparent opacity={0.05} depthWrite={false} side={THREE.DoubleSide} />
+        <meshBasicMaterial
+          color="#3b82f6"
+          transparent
+          opacity={0.05}
+          depthWrite={false}
+          side={THREE.DoubleSide}
+        />
       </mesh>
       {preview && !drag.current && <PenGhost preview={preview} />}
     </>

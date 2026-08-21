@@ -174,3 +174,12 @@ export function filterViewportHits<T extends { object: Object3D; distance: numbe
 export function hasInteractivePick(hits: { object: Object3D; distance: number }[]): boolean {
   return tagHits(hits).some((item) => item.kind !== 'path-line')
 }
+
+/**
+ * Pen placement listens on the canvas, because `filterViewportHits` drops the
+ * unmarked construction plane and a fat path-line would steal the click.
+ * Path anchors still win so clicking the first point can close the loop.
+ */
+export function penShouldPlace(hits: { object: Object3D; distance: number }[]): boolean {
+  return !tagHits(hits).some((item) => item.kind === 'path-anchor')
+}

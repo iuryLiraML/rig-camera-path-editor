@@ -452,7 +452,9 @@ export function PathEditor() {
             color={ACCENT}
             lineWidth={2}
             depthTest={false}
+            {...(tool === 'pen' ? { raycast: ignoreRaycast } : {})}
             onDoubleClick={(e) => {
+              if (tool === 'pen') return
               e.stopPropagation()
               insertAt(e.point)
             }}
