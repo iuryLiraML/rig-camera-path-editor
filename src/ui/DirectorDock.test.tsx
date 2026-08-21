@@ -31,6 +31,7 @@ afterEach(() => {
     showImportModal: false,
     showAddDrawer: false,
   })
+  useAgentStore.setState({ serverKeys: NO_SERVER_KEYS, keys: { anthropic: '', kimi: '' } })
 })
 
 describe('DirectorDock', () => {
@@ -92,5 +93,18 @@ describe('DirectorDock', () => {
     const { getByTitle } = render(<DirectorDock />)
     fireEvent.click(getByTitle('Import a .glb or .gltf'))
     expect(useEditorStore.getState().showImportModal).toBe(true)
+  })
+
+  it('uses the site key without asking for Settings', () => {
+    useAgentStore.setState({
+      serverKeys: { anthropic: true, kimi: false, fal: false },
+      keys: { anthropic: '', kimi: '' },
+      provider: 'anthropic',
+    })
+    const { queryByText, getByTitle, getByText } = render(<DirectorDock />)
+    fireEvent.click(getByTitle('Expand chat'))
+    expect(queryByText('Open Settings')).toBeNull()
+    expect(queryByText('Optional personal key')).toBeNull()
+    expect(getByText('Ask the Director to block a shot.')).toBeTruthy()
   })
 })

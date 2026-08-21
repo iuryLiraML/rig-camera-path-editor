@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import {
   modelSupportsVision,
+  preferredProvider,
   PROVIDERS,
   type AgentMessage,
   type ProviderConfig,
@@ -146,7 +147,10 @@ export const useAgentStore = create<AgentState>()(
         syncFalSettings(get().falKey, samImageVersion)
         set({ samImageVersion })
       },
-      setServerKeys: (serverKeys) => set({ serverKeys }),
+      setServerKeys: (serverKeys) => {
+        const { provider, keys } = get()
+        set({ serverKeys, provider: preferredProvider(provider, keys, serverKeys) })
+      },
 
       hasKey: () => {
         const s = get()
@@ -187,7 +191,11 @@ export const useAgentStore = create<AgentState>()(
         // then routes the call through the same-origin /api proxy
         const apiKey = (keys[provider] ?? '').trim()
         if (!apiKey && !get().serverKeys[provider]) {
-          set({ error: `Add your ${PROVIDERS[provider].label} API key in Settings first.` })
+          set({
+            error: `No site key for ${PROVIDERS[provider].label}. Add ${
+              provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'KIMI_API_KEY'
+            } in Vercel Environment Variables and Redeploy, or paste a personal key in Settings.`,
+          })
           return
         }
         const modelId = (models[provider] ?? '').trim() || PROVIDERS[provider].defaultModel

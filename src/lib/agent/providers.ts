@@ -9,7 +9,9 @@
  * site key server-side (see api/_lib/agentApi.ts).
  */
 
-import { serverHasKey } from './serverKeys'
+import { serverHasKey, type ServerKeys } from './serverKeys'
+
+const PROVIDER_ORDER: ProviderKind[] = ['anthropic', 'kimi']
 
 export interface ToolDef {
   name: string
@@ -85,8 +87,29 @@ export function providerRequest(
 }
 
 /** Is there any way to reach this provider — a personal key or a site key? */
-export function providerUsable(kind: ProviderKind, apiKey: string): boolean {
-  return apiKey.trim().length > 0 || serverHasKey(kind)
+export function providerUsable(
+  kind: ProviderKind,
+  apiKey: string,
+  siteKey = serverHasKey(kind),
+): boolean {
+  return apiKey.trim().length > 0 || siteKey
+}
+
+/**
+ * Keep the current provider when it is usable; otherwise switch to the first
+ * vendor that has a personal key or a deployment site key. Avoids opening
+ * Settings just because the persisted provider has no key while another does.
+ */
+export function preferredProvider(
+  current: ProviderKind,
+  personalKeys: Record<ProviderKind, string>,
+  site: ServerKeys,
+): ProviderKind {
+  if (providerUsable(current, personalKeys[current] ?? '', site[current])) return current
+  for (const kind of PROVIDER_ORDER) {
+    if (providerUsable(kind, personalKeys[kind] ?? '', site[kind])) return kind
+  }
+  return current
 }
 
 /** Return models usable with the selected provider and account. */

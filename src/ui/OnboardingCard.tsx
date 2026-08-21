@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useCameraAnchorCount } from '../state/cameraPathLink'
 import { useSceneStore } from '../state/useSceneStore'
@@ -13,6 +14,9 @@ export function OnboardingCard() {
   const playMode = useEditorStore((s) => s.playMode)
   const tool = useEditorStore((s) => s.tool)
   const mode = useEditorStore((s) => s.workspaceMode)
+  const hasKey = useAgentStore(
+    (s) => (s.keys[s.provider] ?? '').trim().length > 0 || s.serverKeys[s.provider],
+  )
 
   if (dismissed || playMode) return null
 
@@ -33,9 +37,13 @@ export function OnboardingCard() {
     return (
       <Guide
         title="Describe the shot"
-        body="The Director builds the camera move from a prompt. Type in the bar at the bottom, then send. Edit Shot takes you back to Compose."
-        actionLabel="Open Settings"
-        onAction={() => useEditorStore.getState().setShowSettings(true)}
+        body={
+          hasKey
+            ? 'The Director builds the camera move from a prompt. Type in the bar on the right, then send. Edit Shot takes you back to Compose.'
+            : 'The Director uses the site key on this deployment (ANTHROPIC_API_KEY or KIMI_API_KEY in Vercel Environment Variables). A personal key in Settings is only an optional override.'
+        }
+        actionLabel={hasKey ? undefined : 'Open Settings'}
+        onAction={hasKey ? undefined : () => useEditorStore.getState().setShowSettings(true)}
       />
     )
   }
@@ -67,15 +75,15 @@ function Guide({
 }: {
   title: string
   body: string
-  actionLabel: string
-  onAction: () => void
+  actionLabel?: string
+  onAction?: () => void
   icon?: ReactNode
 }) {
   const insets = useViewportInsets()
   return (
     <div
-      className="panel absolute left-1/2 z-20 w-[420px] -translate-x-1/2 p-4"
-      style={{ bottom: insets.contentBottom }}
+      className="panel absolute z-20 w-[min(420px,calc(100%-24px))] -translate-x-1/2 p-4"
+      style={{ left: insets.centre, bottom: insets.contentBottom }}
     >
       <div className="flex items-start justify-between">
         <h2 className="text-sm font-semibold text-ink">{title}</h2>
@@ -88,14 +96,16 @@ function Guide({
         </button>
       </div>
       <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">{body}</p>
-      <button
-        type="button"
-        onClick={onAction}
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-panel-2 px-2 py-2 text-[12px] text-ink hover:bg-panel-3"
-      >
-        {icon}
-        {actionLabel}
-      </button>
+      {actionLabel && onAction ? (
+        <button
+          type="button"
+          onClick={onAction}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-panel-2 px-2 py-2 text-[12px] text-ink hover:bg-panel-3"
+        >
+          {icon}
+          {actionLabel}
+        </button>
+      ) : null}
     </div>
   )
 }

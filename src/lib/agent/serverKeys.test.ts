@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { providerRequest, providerUsable } from './providers'
+import { preferredProvider, providerRequest, providerUsable } from './providers'
 import { setServerKeysForTests } from './serverKeys'
 
 afterEach(() => setServerKeysForTests(null))
@@ -31,5 +31,28 @@ describe('providerUsable', () => {
     setServerKeysForTests({ anthropic: true, kimi: false, fal: false })
     expect(providerUsable('anthropic', '')).toBe(true)
     expect(providerUsable('kimi', '')).toBe(false)
+  })
+})
+
+describe('preferredProvider', () => {
+  const empty = { anthropic: '', kimi: '' }
+
+  it('keeps the current provider when it already has a site or personal key', () => {
+    expect(
+      preferredProvider('kimi', empty, { anthropic: true, kimi: true, fal: false }),
+    ).toBe('kimi')
+    expect(
+      preferredProvider('anthropic', { anthropic: 'sk-ant', kimi: '' }, {
+        anthropic: false,
+        kimi: true,
+        fal: false,
+      }),
+    ).toBe('anthropic')
+  })
+
+  it('switches to a provider that the deployment can actually serve', () => {
+    expect(
+      preferredProvider('anthropic', empty, { anthropic: false, kimi: true, fal: false }),
+    ).toBe('kimi')
   })
 })

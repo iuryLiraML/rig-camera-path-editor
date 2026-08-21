@@ -160,7 +160,7 @@ function HeavyStep({
             onClick={() => useEditorStore.getState().setShowSettings(true)}
             className="rounded-lg bg-panel-2 px-3 py-1.5 text-xs text-ink hover:bg-panel-3"
           >
-            Add Fal key in Settings
+            Add FAL_KEY on Vercel
           </button>
         )}
       </div>

@@ -125,14 +125,18 @@ export function DirectorDock() {
           {!hasKey ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center">
               <p className="text-[12px] leading-relaxed text-ink-dim">
-                The Director builds camera moves from a prompt. Add your API key to start.
+                The Director uses the site key on this deployment. None is configured for{' '}
+                {PROVIDERS[provider].label}. Add{' '}
+                {provider === 'anthropic' ? 'ANTHROPIC_API_KEY' : 'KIMI_API_KEY'} in the Vercel
+                project Environment Variables (Production and Preview), then Redeploy. A personal
+                key in Settings is only an optional override.
               </p>
               <button
                 type="button"
                 onClick={() => useEditorStore.getState().setShowSettings(true)}
                 className="rounded-md bg-accent px-3 py-1.5 text-[12px] font-medium text-white hover:bg-accent/85"
               >
-                Open Settings
+                Optional personal key
               </button>
             </div>
           ) : (

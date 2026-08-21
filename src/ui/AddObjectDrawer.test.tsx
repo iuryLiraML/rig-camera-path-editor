@@ -28,7 +28,7 @@ describe('AddObjectDrawer generate chip', () => {
   it('keeps From text / From image visible but disabled without a Fal key', () => {
     const { container, getByText } = render(<AddObjectDrawer />)
     fireEvent.click(getByText('Generate'))
-    expect(container.textContent).toContain('Add your Fal API key in Settings')
+    expect(container.textContent).toContain('Add FAL_KEY in Vercel Environment Variables')
     expect(container.textContent).toContain('From text')
     expect(container.textContent).toContain('From image')
     const fromText = Array.from(container.querySelectorAll('button')).find((button) =>

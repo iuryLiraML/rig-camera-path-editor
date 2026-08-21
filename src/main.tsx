@@ -40,11 +40,27 @@ function maybeGenerateRacingDroneCamerasFromQuery() {
   window.history.replaceState({}, '', next)
 }
 
+function whenAgentHydrated(): Promise<void> {
+  const persistApi = useAgentStore.persist
+  if (persistApi.hasHydrated()) return Promise.resolve()
+  return new Promise((resolve) => {
+    const unsub = persistApi.onFinishHydration(() => {
+      unsub()
+      resolve()
+    })
+  })
+}
+
+/** Site-key booleans after persist rehydration, so a saved provider cannot clobber the switch. */
+async function applySiteKeys() {
+  const [keys] = await Promise.all([loadServerKeys(), whenAgentHydrated()])
+  useAgentStore.getState().setServerKeys(keys)
+}
+
 const runtime = resolveRuntime()
 
 if (runtime === 'clay') {
-  // Which vendors have a shared site key on this deployment (booleans only).
-  void loadServerKeys().then((keys) => useAgentStore.getState().setServerKeys(keys))
+  void applySiteKeys()
 
   // Cloud session first so bootProjects can stay cloud-first when signed in.
   void useCloudAuthStore

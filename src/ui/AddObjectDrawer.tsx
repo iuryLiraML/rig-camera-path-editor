@@ -259,13 +259,16 @@ function GeneratePane({
     <div className="flex h-full flex-col gap-2">
       {!canFal && (
         <div className="flex items-center justify-between gap-2">
-          <p className="text-[11px] text-ink-dim">Add your Fal API key in Settings</p>
+          <p className="text-[11px] text-ink-dim">
+            Add FAL_KEY in Vercel Environment Variables, then Redeploy. A personal key in Settings
+            is optional.
+          </p>
           <button
             type="button"
             onClick={() => useEditorStore.getState().setShowSettings(true)}
             className="shrink-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink hover:bg-panel-3"
           >
-            Open Settings
+            Optional personal key
           </button>
         </div>
       )}
