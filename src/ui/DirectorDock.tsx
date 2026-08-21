@@ -77,7 +77,7 @@ export function DirectorDock() {
 
   return (
     <div
-      className="absolute z-30 flex min-h-0 flex-col"
+      className="panel absolute z-30 flex min-h-0 flex-col overflow-hidden"
       style={{
         right: dock.right,
         width: dock.width,
@@ -90,11 +90,7 @@ export function DirectorDock() {
       }}
     >
       {showTranscript && (
-        <div
-          className={`panel flex min-h-0 flex-1 flex-col overflow-hidden ${
-            composeRail ? 'mb-0 rounded-b-none' : 'mb-2'
-          }`}
-        >
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-3 py-2">
             <span className="text-[11px] font-medium text-ink">
               {generate ? 'Visualize' : 'Director'}
@@ -251,8 +247,8 @@ export function DirectorDock() {
       )}
 
       <div
-        className={`panel overflow-hidden p-2.5 focus-within:border-accent ${
-          composeRail ? 'shrink-0 rounded-t-none' : 'shrink-0 rounded-3xl'
+        className={`shrink-0 overflow-hidden p-2.5 ${
+          showTranscript ? 'border-t border-line/60' : ''
         }`}
       >
         <input

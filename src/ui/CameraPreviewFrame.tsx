@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { useCameraReady } from '../state/cameraPathLink'
 import { useEditorStore } from '../state/useEditorStore'
 import { leafList, useLayoutStore } from '../state/useLayoutStore'
@@ -17,7 +17,7 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
  * and the panels float on top, so clamping to the window alone let the PiP hide
  * behind them (and its drag handle with it).
  */
-function clampPipRect(
+export function clampPipRect(
   r: { right: number; bottom: number; fraction: number },
   insets: ViewportInsets,
 ) {
@@ -69,9 +69,9 @@ export function CameraPreviewFrame() {
     fraction: number
   } | null>(null)
 
-  // correct the stored position on mount and on resize, so a default or a
-  // value saved under a different layout cannot sit under the panels/footer
-  useEffect(() => {
+  // correct the stored position before paint so a default `right: 16` cannot
+  // sit under the Director rail for a frame
+  useLayoutEffect(() => {
     const onResize = () => {
       const r = useEditorStore.getState().pipRect
       const c = clampPipRect(r, insets)
@@ -82,7 +82,7 @@ export function CameraPreviewFrame() {
     onResize()
     window.addEventListener('resize', onResize)
     return () => window.removeEventListener('resize', onResize)
-  }, [insets.left, insets.right, insets.contentBottom])
+  }, [insets.left, insets.right, insets.rightWidth, insets.contentBottom])
 
   // in a split layout the panes replace the PiP's job
   if (!hasPath || playMode || !singlePane) return null

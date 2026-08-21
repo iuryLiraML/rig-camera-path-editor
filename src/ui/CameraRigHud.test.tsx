@@ -29,6 +29,8 @@ describe('CameraRigHud', () => {
     expect(container.textContent).not.toContain('orange rings')
     expect(container.textContent).not.toContain('Move')
     expect(container.textContent).not.toContain('Rotate')
+    const root = container.firstElementChild as HTMLElement
+    expect(Number.parseFloat(root.style.bottom)).toBeGreaterThan(12)
   })
 
   it('offers Show look-at when the aim handle is off', () => {

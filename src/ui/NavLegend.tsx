@@ -11,7 +11,7 @@ export function NavLegend() {
       className="pointer-events-none absolute z-20 flex flex-nowrap items-center gap-3 overflow-hidden text-[10px] text-ink-dim"
       style={{
         left: band.left,
-        width: band.width,
+        maxWidth: band.width,
         bottom: compose ? insets.contentBottom : GUTTER,
       }}
     >

@@ -96,9 +96,11 @@ describe('DirectorDock', () => {
     useEditorStore.setState({ workspaceMode: 'compose' })
     const { container, queryByTitle } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain('panel')
     expect(root.style.top).toBe('12px')
     expect(root.style.bottom).toBe('12px')
     expect(root.style.height).toBe('')
+    expect(container.querySelectorAll('.panel')).toHaveLength(1)
     expect(container.textContent).toContain('Director')
     expect(queryByTitle('Expand chat')).toBeNull()
     expect(queryByTitle('Collapse chat')).toBeNull()

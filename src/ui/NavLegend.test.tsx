@@ -24,6 +24,9 @@ describe('viewport home chrome', () => {
     expect(container.textContent).toContain('? shortcuts')
     expect(container.textContent).not.toContain('Open Timeline')
     expect(container.textContent).not.toContain('Key the focused property')
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.width).toBe('')
+    expect(Number.parseFloat(root.style.maxWidth)).toBeGreaterThan(0)
   })
 
   it('offers a toolbar button that requests a home framing', () => {
