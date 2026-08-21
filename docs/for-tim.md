@@ -1,18 +1,18 @@
-# Rig — notes for Tim
+# Notes for Tim
 
 Hi Tim,
 
-I wanted to send you a clear picture of Rig before we talk. This is not a spec, and it is not a request to start building anything yet. I would just like you to understand what the product is, what already works, where it is still rough, and three problems I would really value your help thinking through.
+I wanted to send you a clear picture of the app before we talk. This is not a spec, and it is not a request to start building anything yet. I would just like you to understand what the product is, what already works, where it is still rough, and three problems I would really value your help thinking through.
 
 If you read this and the structure feels wrong, I would rather hear that than a plan that follows my current assumptions.
 
-The public editor is here: [github.com/iuryliraml/rig-camera-path-editor](https://github.com/iuryliraml/rig-camera-path-editor). There is also a private cloud backend, but this repo is the app itself.
+The product does not have a name yet, so I am just calling it the app. The public editor is here: [github.com/iuryliraml/rig-camera-path-editor](https://github.com/iuryliraml/rig-camera-path-editor). There is also a private cloud backend, but this repo is the app itself.
 
 ---
 
-## What Rig is
+## What the app is
 
-Rig is a web editor for camera animation, aimed at people who are not 3D professionals.
+The app is a web editor for camera animation, aimed at people who are not 3D professionals.
 
 The loop we want is simple. You bring a 3D model (or lift a photo into a clay figure), you put a camera around it, you tune the move until it feels right, and you export a clean reference video. That video is meant to go into generative tools afterwards — as a motion and framing guide, not as the final look.
 
@@ -124,7 +124,7 @@ If you and I open the same machine, we see the same projects. If cloud login is 
 
 I do not need “add a login button.” The button exists. I need a model that a person can understand:
 
-- What does it mean to have an account in Rig?
+- What does it mean to have an account in the app?
 - How do we make sure my projects never appear in yours — including the 3D files and the shot thumbnails?
 - What happens if someone works without an account, or the internet is down? Local-first is a feature. I do not want the public editor to require a server just to move a camera.
 - Shared computers (an agency iMac, a family laptop): can I switch person without destroying the previous person’s local files, unless that is actually what we want?
