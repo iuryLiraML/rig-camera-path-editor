@@ -84,7 +84,9 @@ export function editorChrome(input: {
         projectChip: true,
         outliner: input.showOutliner,
         addDrawer: false,
-        objectBar: false,
+        // Pose keys live on the timeline; hiding the object bar here made the
+        // Transform diamonds disappear the moment the user left Build.
+        objectBar: true,
         timeline: input.composeDock === 'timeline',
         sequence: input.composeDock === 'sequence',
         composeTabs: true,

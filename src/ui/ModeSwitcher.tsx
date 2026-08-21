@@ -1,3 +1,4 @@
+import { startTransition } from 'react'
 import { useEditorStore, type WorkspaceMode } from '../state/useEditorStore'
 import { CubeIcon, ClapperIcon, WandIcon } from './icons'
 import { useViewportInsets } from './viewportInsets'
@@ -26,7 +27,7 @@ export function ModeSwitcher() {
             key={option.value}
             type="button"
             title={option.title}
-            onClick={() => setMode(option.value)}
+            onClick={() => startTransition(() => setMode(option.value))}
             className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] ${
               active ? 'bg-accent text-white' : 'text-ink-dim hover:text-ink'
             }`}

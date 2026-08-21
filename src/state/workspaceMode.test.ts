@@ -35,6 +35,27 @@ describe('workspaceMode', () => {
     expect(useEditorStore.getState().cameraPanel).toBe('closed')
   })
 
+  it('keeps the Transform panel when moving Build → Compose', () => {
+    useEditorStore.setState({
+      workspaceMode: 'build',
+      objectBarPanel: 'transform',
+      selection: 'obj:box-1',
+    })
+    useEditorStore.getState().setWorkspaceMode('compose')
+    expect(useEditorStore.getState().objectBarPanel).toBe('transform')
+  })
+
+  it('opens Transform when W/E/R is used on a selected object', () => {
+    useEditorStore.setState({
+      selection: 'obj:box-1',
+      objectBarPanel: 'none',
+      gizmoMode: 'translate',
+    })
+    useEditorStore.getState().setGizmoMode('rotate')
+    expect(useEditorStore.getState().objectBarPanel).toBe('transform')
+    expect(useEditorStore.getState().gizmoMode).toBe('rotate')
+  })
+
   it('opens the camera inspector when a cinema camera is picked in Compose', () => {
     useEditorStore.setState({ workspaceMode: 'compose', cameraPanel: 'closed' })
     useEditorStore.getState().select('cinema-camera')

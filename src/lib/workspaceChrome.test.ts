@@ -43,6 +43,7 @@ describe('editorChrome', () => {
     })
     expect(flags.sequence).toBe(true)
     expect(flags.timeline).toBe(false)
+    expect(flags.objectBar).toBe(true)
     expect(flags.shotFrame).toBe(false)
     expect(flags.directorDock).toBe(true)
   })

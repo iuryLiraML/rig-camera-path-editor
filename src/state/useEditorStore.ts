@@ -237,7 +237,13 @@ export const useEditorStore = create<EditorState>((set) => ({
   },
   selectKeyframe: (selectedKeyframe) => set({ selectedKeyframe }),
   selectTimelineKey: (selectedKeyframe, selection) => set({ selectedKeyframe, selection }),
-  setGizmoMode: (gizmoMode) => set({ gizmoMode }),
+  setGizmoMode: (gizmoMode) =>
+    set((s) => ({
+      gizmoMode,
+      // W / E / R is how Transform is invoked — open the numeric panel so the
+      // per-parameter keyframe diamonds are on screen, not only on ObjectBar Move.
+      objectBarPanel: s.selection?.startsWith('obj:') ? 'transform' : s.objectBarPanel,
+    })),
   setPlayMode: (playMode) => set({ playMode }),
   setCameraView: (cameraView) => set({ cameraView }),
   setRecording: (recording, kind = 'video') =>
@@ -269,7 +275,7 @@ export const useEditorStore = create<EditorState>((set) => ({
             ? 'select'
             : s.tool,
       showAddDrawer: workspaceMode === 'build' ? s.showAddDrawer : false,
-      objectBarPanel: workspaceMode === 'build' ? s.objectBarPanel : 'none',
+      objectBarPanel: workspaceMode === 'visualize' ? 'none' : s.objectBarPanel,
       showOutliner: workspaceMode === 'build' ? s.showOutliner : false,
       cameraPanel: workspaceMode === 'compose' ? s.cameraPanel : 'closed',
     })),

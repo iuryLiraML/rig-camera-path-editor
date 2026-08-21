@@ -1,4 +1,4 @@
-import { useEffect, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { useRigStore } from '../state/useRigStore'
@@ -184,6 +184,18 @@ function useShortcuts() {
   }, [])
 }
 
+/** Keep Compose docks mounted after the first visit so Build ↔ Compose does not freeze on remount. */
+function KeepMounted({ show, children }: { show: boolean; children: ReactNode }) {
+  const seen = useRef(show)
+  if (show) seen.current = true
+  if (!seen.current) return null
+  return (
+    <div hidden={!show} className={show ? undefined : 'pointer-events-none'}>
+      {children}
+    </div>
+  )
+}
+
 function EditorWorkspace() {
   const notice = useSceneStore((s) => s.notice)
   const importing = useSceneStore((s) => s.importing)
@@ -247,17 +259,29 @@ function EditorWorkspace() {
       )}
       {chrome.outliner && <LeftPanel />}
       {chrome.directorDock && <DirectorDock />}
-      {chrome.timeline && <Timeline />}
-      {chrome.sequence && <SequenceStrip />}
-      {chrome.footer && (
+      <KeepMounted show={chrome.timeline}>
+        <Timeline />
+      </KeepMounted>
+      <KeepMounted show={chrome.sequence}>
+        <SequenceStrip />
+      </KeepMounted>
+      <KeepMounted show={chrome.footer}>
         <ViewportFooter center={chrome.cameraBar ? <CameraBar embedded /> : null} />
-      )}
+      </KeepMounted>
       {chrome.navLegend && <NavLegend />}
       {chrome.onboarding && <OnboardingCard />}
-      {chrome.pip && <CameraPreviewFrame />}
-      {chrome.cameraHud && <CameraRigHud />}
-      {chrome.cameraBar && !chrome.footer && <CameraBar />}
-      {chrome.cameraBar && <CameraAdjustPanel />}
+      <KeepMounted show={chrome.pip}>
+        <CameraPreviewFrame />
+      </KeepMounted>
+      <KeepMounted show={chrome.cameraHud}>
+        <CameraRigHud />
+      </KeepMounted>
+      <KeepMounted show={chrome.cameraBar && !chrome.footer}>
+        <CameraBar />
+      </KeepMounted>
+      <KeepMounted show={chrome.cameraBar}>
+        <CameraAdjustPanel />
+      </KeepMounted>
       {chrome.objectBar && <ObjectBar />}
       {chrome.addDrawer && <AddObjectDrawer />}
       <ImportAssetsModal />

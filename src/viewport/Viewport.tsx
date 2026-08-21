@@ -227,13 +227,7 @@ export function Viewport() {
           alignment="bottom-left"
           margin={[
             Math.max(28, insets.left + 28),
-            Math.max(
-              40,
-              insets.bottom +
-                GUTTER +
-                (workspaceMode === 'compose' ? FOOTER_ROW_HEIGHT + GUTTER : 0) +
-                56,
-            ),
+            Math.max(40, insets.bottom + GUTTER + FOOTER_ROW_HEIGHT + GUTTER + 56),
           ]}
         >
           <GizmoViewport
