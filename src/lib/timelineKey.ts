@@ -1,4 +1,10 @@
-import { evalProgress, evalValue, evalVec3, keysForObjectChannel } from './keyframes'
+import {
+  evalProgress,
+  evalValue,
+  evalVec3,
+  keysForObjectChannel,
+  objectKeyChannel,
+} from './keyframes'
 import { useEditorStore, type SelectedTimelineKey } from '../state/useEditorStore'
 import { useRigStore, type RigChannel, type ScalarChannel } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
@@ -77,7 +83,19 @@ export function deleteSelectedTimelineKey(): boolean {
   if (sel.kind === 'rig') {
     useRigStore.getState().removeChannelKey(sel.channel, sel.id)
   } else {
-    useSceneStore.getState().removeObjectKey(sel.objectId, sel.id)
+    const channels = objectChannelsForFocus(editor.keyableFocus)
+    const object = useSceneStore.getState().objects.find((item) => item.id === sel.objectId)
+    const key = object?.keys.find((item) => item.id === sel.id)
+    const channel = channels.length === 1 ? channels[0] : undefined
+    if (
+      key &&
+      channel &&
+      (objectKeyChannel(key) === 'pose' || objectKeyChannel(key) === channel)
+    ) {
+      useSceneStore.getState().removeObjectKeysAtTime(sel.objectId, key.time, [channel])
+    } else {
+      useSceneStore.getState().removeObjectKey(sel.objectId, sel.id)
+    }
   }
   editor.selectKeyframe(null)
   return true

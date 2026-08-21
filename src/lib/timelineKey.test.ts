@@ -80,6 +80,30 @@ describe('deleteKeyframeAtPlayhead', () => {
     expect(useSceneStore.getState().objects[0].keys).toHaveLength(0)
   })
 
+  it('splits a selected pose key when Position is focused', () => {
+    useSceneStore.getState().addPrimitive('box')
+    const object = useSceneStore.getState().objects[0]
+    useSceneStore.setState({
+      objects: [
+        {
+          ...object,
+          keys: [{ id: 'legacy-pose', time: 0.4, transform: { ...object.transform } }],
+        },
+      ],
+    })
+    useEditorStore.setState({
+      selection: `obj:${object.id}`,
+      objectBarPanel: 'transform',
+      keyableFocus: 'objectPosition',
+      selectedKeyframe: { kind: 'object', objectId: object.id, id: 'legacy-pose' },
+    })
+    expect(deleteSelectedTimelineKey()).toBe(true)
+    expect(useSceneStore.getState().objects[0].keys.map((k) => k.channel).sort()).toEqual([
+      'rotation',
+      'scale',
+    ])
+  })
+
   it('removes only the focused transform channel at the playhead', () => {
     useSceneStore.getState().addPrimitive('box')
     const id = useSceneStore.getState().objects[0].id
