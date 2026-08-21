@@ -43,14 +43,17 @@ export function toolbarSlot(insets: ViewportInsets, windowWidth: number): { righ
   return { right: Math.max(GUTTER, windowWidth - insets.right) }
 }
 
-/** CSS `right` for the Director column — same edge the toolbar hugs. */
-export function directorDockSlot(
-  insets: ViewportInsets,
-  windowWidth: number,
-): { right: number; width: number } {
-  const right = toolbarSlot(insets, windowWidth).right
-  const width = Math.min(DIRECTOR_DOCK_WIDTH, Math.max(0, insets.right - insets.left))
-  return { right, width }
+/**
+ * CSS `right` for the Director column. Always hugs the window edge; Compose
+ * reserves `rightWidth` so the toolbar and docks sit to its left instead of
+ * painting on top of the chat.
+ */
+export function directorDockSlot(insets: ViewportInsets): { right: number; width: number } {
+  const width =
+    insets.rightWidth > 0
+      ? insets.rightWidth
+      : Math.min(DIRECTOR_DOCK_WIDTH, Math.max(0, insets.right - insets.left))
+  return { right: GUTTER, width }
 }
 
 /**
@@ -61,7 +64,7 @@ export function chromeBand(
   insets: ViewportInsets,
   windowWidth: number,
 ): { left: number; width: number } {
-  const dock = directorDockSlot(insets, windowWidth)
+  const dock = directorDockSlot(insets)
   const dockLeft = windowWidth - dock.right - dock.width
   const right = Math.min(insets.right, dockLeft - GUTTER)
   return { left: insets.left, width: Math.max(0, right - insets.left) }
@@ -93,6 +96,7 @@ export function chromeSizes(
       break
     case 'compose':
       leftWidth = input.showOutliner ? LEFT_PANEL_MAX : 0
+      rightWidth = DIRECTOR_DOCK_WIDTH
       if (input.timelineVisible) {
         timelineHeight =
           input.composeDock === 'sequence'

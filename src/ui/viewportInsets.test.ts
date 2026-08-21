@@ -36,7 +36,7 @@ describe('viewportInsets', () => {
     expect(insets.timelineHeight).toBe(SEQUENCE_HEIGHT)
     expect(insets.bottom).toBe(GUTTER + SEQUENCE_HEIGHT + GUTTER)
     expect(insets.leftWidth).toBe(0)
-    expect(insets.rightWidth).toBe(0)
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
   })
 
   it('Compose Timeline reserves the requested AE dock height', () => {
@@ -55,7 +55,7 @@ describe('viewportInsets', () => {
 
   it('pins the Director column to the right of the free area', () => {
     const insets = viewportInsets('build', WINDOW, false)
-    const slot = directorDockSlot(insets, WINDOW)
+    const slot = directorDockSlot(insets)
     expect(slot.right).toBe(GUTTER)
     expect(slot.width).toBe(DIRECTOR_DOCK_WIDTH)
     const dockLeft = WINDOW - slot.right - slot.width
@@ -138,9 +138,19 @@ describe('viewportInsets', () => {
   it('stops Compose docks before the Director column', () => {
     const insets = viewportInsets('compose', WINDOW, true, 900, 148, { composeDock: 'sequence' })
     const band = chromeBand(insets, WINDOW)
-    const dock = directorDockSlot(insets, WINDOW)
+    const dock = directorDockSlot(insets)
     const dockLeft = WINDOW - dock.right - dock.width
     expect(band.left + band.width).toBeLessThanOrEqual(dockLeft - GUTTER)
     expect(band.width).toBeGreaterThan(400)
+  })
+
+  it('keeps Compose toolbar and free area left of the Director column', () => {
+    const insets = viewportInsets('compose', WINDOW, true, 900, 148, { composeDock: 'sequence' })
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
+    const tools = toolbarSlot(insets, WINDOW)
+    const dock = directorDockSlot(insets)
+    const dockLeft = WINDOW - dock.right - dock.width
+    expect(WINDOW - tools.right).toBeLessThanOrEqual(dockLeft)
+    expect(insets.right).toBeLessThanOrEqual(dockLeft)
   })
 })

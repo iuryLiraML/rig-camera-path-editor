@@ -233,7 +233,7 @@ export function Viewport() {
               insets.bottom +
                 GUTTER +
                 (workspaceMode === 'compose' ? FOOTER_ROW_HEIGHT + GUTTER : 0) +
-                36,
+                56,
             ),
           ]}
         >

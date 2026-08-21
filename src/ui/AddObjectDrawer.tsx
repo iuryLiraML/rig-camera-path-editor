@@ -5,7 +5,7 @@ import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { CubeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
-import { GUTTER, directorDockSlot, useViewportInsets, useWindowSize } from './viewportInsets'
+import { GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
 
 type Chip = 'primitives' | 'assets' | 'generate'
 type GenerateMode = 'pick' | 'text' | 'image'
@@ -26,8 +26,7 @@ export function AddObjectDrawer() {
   const [prompt, setPrompt] = useState('')
   const [image, setImage] = useState<File | null>(null)
   const insets = useViewportInsets()
-  const win = useWindowSize()
-  const dock = directorDockSlot(insets, win.w)
+  const dock = directorDockSlot(insets)
   const q = query.trim().toLowerCase()
 
   const primitives = useMemo(

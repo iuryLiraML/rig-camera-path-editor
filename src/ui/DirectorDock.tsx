@@ -5,7 +5,7 @@ import { useProjectStore } from '../state/useProjectStore'
 import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
 import { PlusIcon, ImportIcon, ExpandIcon, ImageIcon } from './icons'
-import { directorDockSlot, useViewportInsets, useWindowSize } from './viewportInsets'
+import { directorDockSlot, useViewportInsets } from './viewportInsets'
 
 function ToolChip({ name }: { name: string }) {
   return (
@@ -41,8 +41,7 @@ export function DirectorDock() {
   const expanded = useEditorStore((s) => s.directorExpanded)
   const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
   const insets = useViewportInsets()
-  const win = useWindowSize()
-  const dock = directorDockSlot(insets, win.w)
+  const dock = directorDockSlot(insets)
   const [input, setInput] = useState('')
   const [showSkills, setShowSkills] = useState(false)
   const [pendingImage, setPendingImage] = useState<File | null>(null)

@@ -26,7 +26,7 @@ function clampPipRect(
   const w = r.fraction * vw
   const h = r.fraction * vh
   // `right`/`bottom` are distances from those window edges
-  const dock = directorDockSlot(insets, vw)
+  const dock = directorDockSlot(insets)
   const minRight = dock.right + dock.width + GUTTER
   const maxRight = Math.max(minRight, vw - insets.left - w)
   const maxBottom = Math.max(insets.contentBottom, vh - GUTTER - h)
