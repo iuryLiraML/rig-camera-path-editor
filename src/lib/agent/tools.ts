@@ -24,7 +24,6 @@ import { saveCurrentAsShot } from '../projects'
 import { objectGroups } from '../../viewport/SceneObjects'
 import { renderBridge } from '../renderBridge'
 import type { ExportAspect, ExportRes } from '../../state/useEditorStore'
-import type { PrimitiveKind } from '../primitiveGeometry'
 import {
   beginGeneratedCameraOption,
   getCameraOptionsSnapshot,
@@ -35,6 +34,13 @@ import { getLiftAttachment } from '../fal/attachment'
 import { liftAttachedStill } from '../fal/pipeline'
 import { readFalSettings } from '../fal/settings'
 import { importModelBuffer } from '../sceneIO'
+import {
+  asPrimitiveKind,
+  asPrimitiveRole,
+  configurePlacedPrimitive,
+  snapObjectToFloor,
+  snapSceneToFloor,
+} from '../floorSnap'
 
 const vec3 = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
 
@@ -248,7 +254,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'pose_object',
     description:
-      "Move, rotate, or scale a scene object. After a group photo lift, each Person N is its own id — pose them separately. Never pose a leftover primitive. Only include the parts you want to change. Cannot change a figure's body articulation; that pose comes from the photo.",
+      "Move, rotate, or scale a scene object. Position Y is feet on the floor unless lift=true — do not pass the AABB center Y. After a group photo lift, each Person N is its own id — pose them separately. Never pose a leftover primitive. Only include the parts you want to change. Cannot change a figure's body articulation; that pose comes from the photo.",
     input_schema: {
       type: 'object',
       properties: {
@@ -256,6 +262,10 @@ export const TOOL_DEFS: ToolDef[] = [
         position: vec3,
         rotation: { ...vec3, description: 'Euler XYZ in degrees' },
         scale: vec3,
+        lift: {
+          type: 'boolean',
+          description: 'If true, honor position Y and do not snap feet to the floor',
+        },
       },
       required: ['object_id'],
     },
@@ -310,12 +320,28 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'add_primitive',
     description:
-      'Add a basic clay shape to the scene (to build a set: pedestals, backdrops, blocking). Optionally place it.',
+      'Add a clay shape for set blocking (pedestals, walls, floors, props). Position is feet on the floor at y=0 — never pass half-height as Y. bounds.center in scene_state is not the pose origin. Use role=wall for a standing wall, role=floor for a ground plane.',
     input_schema: {
       type: 'object',
       properties: {
         kind: { type: 'string', enum: ['box', 'sphere', 'cylinder', 'cone', 'plane', 'torus'] },
-        position: { ...vec3, description: 'World position [x,y,z] (optional)' },
+        position: {
+          ...vec3,
+          description: 'World XZ (and Y only with lift=true). Default origin on the floor.',
+        },
+        size: {
+          ...vec3,
+          description: 'Width, height, depth in world units (optional)',
+        },
+        role: {
+          type: 'string',
+          enum: ['prop', 'wall', 'floor'],
+          description: 'wall stands on the floor; floor is a large ground plane; prop is a regular shape',
+        },
+        lift: {
+          type: 'boolean',
+          description: 'If true, honor position Y and do not snap feet to the floor',
+        },
       },
       required: ['kind'],
     },
@@ -663,12 +689,20 @@ const EXECUTORS: Record<string, Executor> = {
     const scene = useSceneStore.getState()
     const object = scene.objects.find((o) => o.id === input.object_id)
     if (!object) return `No object with id "${input.object_id}".`
+    const lift = input.lift === true
+    const position = input.position
+      ? lift
+        ? asVec3(input.position)
+        : ([asVec3(input.position)[0], object.transform.position[1], asVec3(input.position)[2]] as Vec3)
+      : object.transform.position
     scene.setTransformAll(object.id, {
-      position: input.position ? asVec3(input.position) : object.transform.position,
+      position,
       rotation: input.rotation ? asVec3(input.rotation) : object.transform.rotation,
       scale: input.scale ? asVec3(input.scale) : object.transform.scale,
     })
-    return `Posed "${object.name}".`
+    if (lift) return `Posed "${object.name}" (lifted).`
+    const note = snapObjectToFloor(object.id)
+    return `Posed "${object.name}"${note ? ` ${note}` : ''}.`
   },
 
   add_pose_keyframe: (input) => {
@@ -731,14 +765,23 @@ const EXECUTORS: Record<string, Executor> = {
   },
 
   add_primitive: (input) => {
-    const kind = input.kind as PrimitiveKind
+    const role = asPrimitiveRole(input.role)
+    const kind = role === 'floor' ? 'plane' : asPrimitiveKind(input.kind)
+    if (!kind) return 'add_primitive needs kind: box, sphere, cylinder, cone, plane, or torus.'
     const scene = useSceneStore.getState()
     scene.addPrimitive(kind)
     const object = useSceneStore.getState().objects.at(-1)
-    if (object && input.position) {
-      scene.setTransformAll(object.id, { ...object.transform, position: asVec3(input.position) })
-    }
-    return `Added a ${kind}${input.position ? ` at ${asVec3(input.position).join(',')}` : ''} (id ${object?.id}).`
+    if (!object) return `Added a ${kind}.`
+    const size = Array.isArray(input.size) ? asVec3(input.size) : undefined
+    const position = input.position ? asVec3(input.position) : undefined
+    return configurePlacedPrimitive({
+      id: object.id,
+      kind,
+      role,
+      size,
+      position,
+      lift: input.lift === true,
+    })
   },
 
   block_people_from_image: () => {
@@ -832,10 +875,21 @@ const EXECUTORS: Record<string, Executor> = {
   },
 }
 
+const PLACE_TOOLS = new Set([
+  'add_primitive',
+  'pose_object',
+  'generate_prop',
+  'block_people_from_image',
+])
+
 export async function executeTool(name: string, input: unknown): Promise<string> {
   const executor = EXECUTORS[name]
   if (!executor) return `Unknown tool "${name}".`
-  return executor((input ?? {}) as Record<string, unknown>)
+  const result = await executor((input ?? {}) as Record<string, unknown>)
+  const lift = Boolean((input as Record<string, unknown> | null)?.lift)
+  if (!PLACE_TOOLS.has(name) || lift) return result
+  const audit = snapSceneToFloor()
+  return audit ? `${result}\n${audit}` : result
 }
 
 /** Compact scene/rig state the agent receives with every user message. */

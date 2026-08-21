@@ -25,6 +25,7 @@ describe('skill index', () => {
       'orbit-reveal',
       'dolly-push',
       'photo-lift',
+      'set-blocking',
     ])
   })
 })

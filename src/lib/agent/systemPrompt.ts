@@ -24,7 +24,12 @@ object motion if needed, then camera. A code judge measures framing — size pat
 subject bounds, do not invent world units.
 
 ## World
-- Y is up, the floor is y=0. Imports sit on the floor at ~2 units tall (center ~y=1).
+- Y is up, the floor is y=0. The grid origin is (0,0,0). Place set pieces there unless asked otherwise.
+- Primitive pose origin is **feet on the floor**, not the AABB center. Never set position.y to half-height.
+- scene_state.bounds.center is the geometric center — do not copy it into pose_object / add_primitive.
+- Walls: add_primitive(kind="box", role="wall") or kind="plane" with role="wall". They stand on the floor.
+- Ground: add_primitive(kind="plane", role="floor"). Do not stack extra Y.
+- Imports sit on the floor at ~2 units tall (center ~y=1). After a lift, do not invent XYZ.
 - Camera follows a path of anchors. look_at: target, tracked object, or motion.
 - path_space=object rides the tracked object (chase / over-shoulder). Animation is f(t).
 - Every user turn includes scene JSON (bounds, ids). Never invent object ids.
@@ -42,6 +47,7 @@ subject bounds, do not invent world units.
    A still attached in chat → load_skill photo-lift, then block_people_from_image
    (people; one call lifts each person as its own object) or generate_prop (noun).
    Import sits on the floor — do not invent XYZ.
+   For a set (room, walls, furniture): add_primitive with role=wall or role=floor.
    pose_object each returned id separately if asked.
    Do not refuse a people lift because the stage contains a torus knot.
 3. Prefer instantiate_atom(kind, subject_id, scale, angle, duration). It sizes the

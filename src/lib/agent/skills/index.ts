@@ -189,12 +189,29 @@ The user attached a still in chat. Two tools, never one shared endpoint:
 After the tool returns object ids:
 - Each figure is already normalized (~2 units, y=0) and spaced on X. Do **not** invent XYZ unless the user asks to arrange them.
 - Call pose_object on **each returned id separately** if the user asks to move, rotate, or pose someone. Never pose leftover primitives.
+- pose_object position is feet on the floor. Do not copy bounds.center Y.
 - Body articulation is from the photo; pose_object cannot sit/stand/gesture a figure.
 - The 3D viewport / torus knot is the stage, not the still. Never refuse a lift because the stage already has a primitive.
 - Then build the camera move as usual (preset or path) and play_preview.
 
 Fail closed: if the tool says to add a Fal key or attach a photo, tell the user that
 in one sentence. Never claim a Generate tab or a visible segment tool exists.`,
+}
+
+const setBlocking: AgentSkill = {
+  name: 'set-blocking',
+  description:
+    'Place clay walls, floors, and props on the grid. Feet sit at y=0; origin is the scene center.',
+  body: `# Set blocking
+
+Build rooms and furniture with add_primitive — do not guess floating Y.
+
+- Floor is y=0. Primitive position is **feet**, not the mesh center. Never copy scene_state.bounds.center into Y.
+- Room walls: add_primitive(kind="box", role="wall") or kind="plane" with role="wall". They stand on the floor at the origin unless you pass XZ.
+- Ground plane: add_primitive(kind="plane", role="floor").
+- Furniture / pedestals: kind="box" (or cylinder) as a prop. Optional size [width, height, depth].
+- pose_object to slide on XZ. Only set lift=true when the user asks to hang something in the air.
+- Default placement is the grid origin (0,0,0) unless the user names a side (left/right/back).`,
 }
 
 export const AGENT_SKILLS: AgentSkill[] = [
@@ -207,6 +224,7 @@ export const AGENT_SKILLS: AgentSkill[] = [
   orbitReveal,
   dollyPush,
   photoLift,
+  setBlocking,
 ]
 
 export function getSkill(name: string): AgentSkill | undefined {
@@ -238,7 +256,7 @@ export function skillNameForPlan(plan: ShotPlan): string | null {
 export function skillBodiesForPlan(plan: ShotPlan, phase: 'object' | 'camera'): string {
   const names: string[] = []
   if (phase === 'object') {
-    names.push('photo-lift')
+    names.push('photo-lift', 'set-blocking')
   } else {
     names.push('shot-grammar')
     const match = skillNameForPlan(plan)
