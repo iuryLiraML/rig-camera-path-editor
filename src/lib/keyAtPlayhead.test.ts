@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { hasKeyAtTime, resolveKeyTargets } from './keyAtPlayhead'
+import { findKeyAtTime, hasKeyAtTime, resolveKeyTargets } from './keyAtPlayhead'
 import { KEY_MERGE_EPS } from './keyframes'
 
 describe('hasKeyAtTime', () => {
@@ -9,6 +9,15 @@ describe('hasKeyAtTime', () => {
 
   it('misses a key outside the merge window', () => {
     expect(hasKeyAtTime([{ time: 0.5 }], 0.5 + KEY_MERGE_EPS + 0.001)).toBe(false)
+  })
+
+  it('returns the matching key', () => {
+    const keys = [
+      { id: 'a', time: 0.1 },
+      { id: 'b', time: 0.5 },
+    ]
+    expect(findKeyAtTime(keys, 0.5)?.id).toBe('b')
+    expect(findKeyAtTime(keys, 0.9)).toBeUndefined()
   })
 })
 

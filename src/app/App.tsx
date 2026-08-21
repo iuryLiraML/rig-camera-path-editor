@@ -24,12 +24,16 @@ import { syncActiveProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
 import { redo, undo, historyIsDirty } from '../lib/history'
 import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
-import { deleteSelectedTimelineKey } from '../lib/timelineKey'
+import {
+  applyDeleteShortcut,
+  isKeyableField,
+  isKeyableShortcut,
+  isTextEditing,
+} from '../lib/editorShortcuts'
 import { applyTogglePlayback } from '../lib/playback'
 import { importDroppedModels, openDenseImportQueue, undoLastMeshRevision } from '../lib/sceneIO'
 import { useProjectStore } from '../state/useProjectStore'
 import { resolveWorkspace } from './resolveWorkspace'
-import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { ModeSwitcher } from '../ui/ModeSwitcher'
 import { ProjectChip } from '../ui/ProjectChip'
 import { AddObjectDrawer } from '../ui/AddObjectDrawer'
@@ -40,20 +44,11 @@ import { CameraBar } from '../ui/CameraBar'
 import { CameraAdjustPanel } from '../ui/CameraAdjustPanel'
 import { SequenceStrip } from '../ui/SequenceStrip'
 
-function isTyping() {
-  const el = document.activeElement
-  return el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement
-}
-
-function isKeyableField() {
-  const el = document.activeElement
-  return el instanceof HTMLInputElement && (el.type === 'number' || el.type === 'range')
-}
-
 function useShortcuts() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTyping() && !((e.key === 'i' || e.key === 'I') && isKeyableField())) return
+      if (isTextEditing()) return
+      if (isKeyableField() && !isKeyableShortcut(e.key)) return
       const editor = useEditorStore.getState()
       const rig = useRigStore.getState()
       const path = usePathStore.getState()
@@ -180,24 +175,7 @@ function useShortcuts() {
           break
         case 'Delete':
         case 'Backspace':
-          if (deleteSelectedTimelineKey()) {
-            e.preventDefault()
-          } else if (path.selectedAnchorIds.length > 0) {
-            path.removeAnchors(path.selectedAnchorIds)
-          } else if (editor.selection === 'cinema-camera' && !editor.playMode) {
-            // Delete removed objects and anchors but silently did nothing on a
-            // camera, which reinforced that cameras were undeletable
-            const cameras = useCameraOptionsStore.getState()
-            if (cameras.options.length > 1) {
-              cameras.removeOption(cameras.activeOptionId)
-              useSceneStore.getState().showNotice('Camera deleted')
-            } else {
-              useSceneStore.getState().showNotice('The last camera cannot be deleted')
-            }
-          } else if (editor.selection?.startsWith('obj:') && !editor.playMode) {
-            useSceneStore.getState().removeObject(editor.selection.slice(4))
-            editor.select(null)
-          }
+          if (applyDeleteShortcut(e.key)) e.preventDefault()
           break
       }
     }

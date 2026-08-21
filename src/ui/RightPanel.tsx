@@ -28,6 +28,7 @@ import { applyCameraPreset, PRESETS } from '../lib/presets'
 import { PRIMITIVE_DEFS } from '../lib/primitiveGeometry'
 import {
   ColorField,
+  KeyButton,
   meters,
   NumberInput,
   pct,
@@ -38,6 +39,7 @@ import {
   Slider,
   XYZInput,
 } from './primitives'
+import { PoseKeyButton } from './PoseKeyButton'
 import { SettingsIcon } from './icons'
 
 function PanelButton({
@@ -145,28 +147,6 @@ function EaseSelect({
 }
 
 /** the ◆ that pins the current value of a channel at the playhead */
-function KeyButton({
-  active,
-  onKey,
-  onClick,
-}: {
-  active: boolean
-  onKey?: boolean
-  onClick: () => void
-}) {
-  return (
-    <button
-      onClick={onClick}
-      title="Add a keyframe for this property at the playhead (I)"
-      className={`shrink-0 text-[11px] leading-none transition-colors ${
-        onKey ? 'text-[#3dd68c]' : active ? 'text-accent' : 'text-ink-dim hover:text-ink'
-      }`}
-    >
-      ◆
-    </button>
-  )
-}
-
 /**
  * Keyframes of one channel, each with the curve used to leave it. A channel with
  * no keys keeps its static value, so the first ◆ is what turns it into animation.
@@ -460,6 +440,7 @@ function ObjectSections({ objectId }: { objectId: string }) {
               onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
               onChange={(a, v) => scene.setTransform(object.id, 'position', a, v)}
             />
+            <PoseKeyButton objectId={object.id} />
           </Row>
         )}
         {!(following && object.follow?.align) && (
@@ -471,6 +452,7 @@ function ObjectSections({ objectId }: { objectId: string }) {
               onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
               onChange={(a, v) => scene.setTransform(object.id, 'rotation', a, v)}
             />
+            <PoseKeyButton objectId={object.id} />
           </Row>
         )}
         <Row label="Scale">
@@ -480,6 +462,7 @@ function ObjectSections({ objectId }: { objectId: string }) {
               onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
               onChange={(a, v) => scene.setTransform(object.id, 'scale', a, v)}
             />
+            <PoseKeyButton objectId={object.id} />
         </Row>
       </Section>
       <Section title="Material · Clay">

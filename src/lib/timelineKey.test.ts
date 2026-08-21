@@ -1,10 +1,22 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { deleteSelectedTimelineKey, insertChannelKeyAt } from './timelineKey'
+import {
+  deleteKeyframeAtPlayhead,
+  deleteSelectedTimelineKey,
+  insertChannelKeyAt,
+} from './timelineKey'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
+import { useSceneStore } from '../state/useSceneStore'
 
 beforeEach(() => {
-  useEditorStore.setState({ selectedKeyframe: null, selection: 'cinema-camera' })
+  useEditorStore.setState({
+    selectedKeyframe: null,
+    selection: 'cinema-camera',
+    keyableFocus: null,
+    objectBarPanel: 'none',
+    playMode: false,
+  })
+  useSceneStore.setState({ objects: [], pendingLifts: [] })
   useRigStore.setState({
     t: 0.4,
     fov: 45,
@@ -44,5 +56,40 @@ describe('deleteSelectedTimelineKey', () => {
 
   it('does nothing when no key is selected', () => {
     expect(deleteSelectedTimelineKey()).toBe(false)
+  })
+})
+
+describe('deleteKeyframeAtPlayhead', () => {
+  it('removes a focused camera channel key at the playhead', () => {
+    insertChannelKeyAt('fov', 0.4)
+    useEditorStore.setState({ keyableFocus: 'fov' })
+    expect(deleteKeyframeAtPlayhead()).toBe(true)
+    expect(useRigStore.getState().fovKeys).toHaveLength(0)
+  })
+
+  it('removes an object pose key when Transform is open', () => {
+    useSceneStore.getState().addPrimitive('box')
+    const id = useSceneStore.getState().objects[0].id
+    useSceneStore.getState().addObjectKey(id, 0.4)
+    useEditorStore.setState({
+      selection: `obj:${id}`,
+      objectBarPanel: 'transform',
+      keyableFocus: 'object',
+    })
+    expect(deleteKeyframeAtPlayhead()).toBe(true)
+    expect(useSceneStore.getState().objects[0].keys).toHaveLength(0)
+  })
+
+  it('leaves pose keys alone when Transform is closed and nothing is focused', () => {
+    useSceneStore.getState().addPrimitive('box')
+    const id = useSceneStore.getState().objects[0].id
+    useSceneStore.getState().addObjectKey(id, 0.4)
+    useEditorStore.setState({
+      selection: `obj:${id}`,
+      objectBarPanel: 'none',
+      keyableFocus: null,
+    })
+    expect(deleteKeyframeAtPlayhead()).toBe(false)
+    expect(useSceneStore.getState().objects[0].keys).toHaveLength(1)
   })
 })

@@ -1,15 +1,31 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { hasKeyAtTime } from '../lib/keyAtPlayhead'
 import { useEditorStore } from '../state/useEditorStore'
+import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../state/useSceneStore'
 import { LinkIcon } from './icons'
+import { PoseKeyButton } from './PoseKeyButton'
 import { XYZInput } from './primitives'
 
 export function TransformPopover({ objectId }: { objectId: string }) {
   const object = useSceneStore((s) => s.objects.find((o) => o.id === objectId))
+  const t = useRigStore((s) => s.t)
   const [uniform, setUniform] = useState(true)
+
+  useEffect(() => {
+    const editor = useEditorStore.getState()
+    editor.setKeyableFocus('object')
+    return () => {
+      if (useEditorStore.getState().keyableFocus === 'object') {
+        editor.setKeyableFocus(null)
+      }
+    }
+  }, [objectId])
+
   if (!object) return null
 
   const scene = useSceneStore.getState()
+  const keyed = hasKeyAtTime(object.keys, t)
   const setAxis = (part: 'position' | 'rotation' | 'scale', axis: 0 | 1 | 2, value: number) => {
     if (part === 'scale' && uniform) {
       const next: Vec3 = [value, value, value]
@@ -17,6 +33,10 @@ export function TransformPopover({ objectId }: { objectId: string }) {
       return
     }
     scene.setTransform(objectId, part, axis, value)
+  }
+
+  const markObjectKeyable = (on: boolean) => {
+    if (on) useEditorStore.getState().setKeyableFocus('object')
   }
 
   return (
@@ -31,16 +51,20 @@ export function TransformPopover({ objectId }: { objectId: string }) {
           ×
         </button>
       </div>
-      <Row label="Position">
+      <Row label="Position" keyframe={<PoseKeyButton objectId={objectId} />}>
         <XYZInput
           value={object.transform.position}
+          keyed={keyed}
+          onFocusChange={markObjectKeyable}
           onChange={(axis, value) => setAxis('position', axis, value)}
         />
       </Row>
-      <Row label="Rotation">
+      <Row label="Rotation" keyframe={<PoseKeyButton objectId={objectId} />}>
         <XYZInput
           value={object.transform.rotation}
           step={1}
+          keyed={keyed}
+          onFocusChange={markObjectKeyable}
           onChange={(axis, value) => setAxis('rotation', axis, value)}
         />
       </Row>
@@ -56,9 +80,12 @@ export function TransformPopover({ objectId }: { objectId: string }) {
             <LinkIcon size={12} />
           </button>
         }
+        keyframe={<PoseKeyButton objectId={objectId} />}
       >
         <XYZInput
           value={object.transform.scale}
+          keyed={keyed}
+          onFocusChange={markObjectKeyable}
           onChange={(axis, value) => setAxis('scale', axis, value)}
         />
       </Row>
@@ -69,10 +96,12 @@ export function TransformPopover({ objectId }: { objectId: string }) {
 function Row({
   label,
   extra,
+  keyframe,
   children,
 }: {
   label: string
   extra?: ReactNode
+  keyframe?: ReactNode
   children: ReactNode
 }) {
   return (
@@ -80,6 +109,7 @@ function Row({
       <span className="w-16 shrink-0 text-[11px] text-ink-dim">{label}</span>
       {extra}
       <div className="min-w-0 flex-1">{children}</div>
+      {keyframe}
     </div>
   )
 }

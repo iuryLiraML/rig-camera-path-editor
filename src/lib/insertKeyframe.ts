@@ -1,5 +1,5 @@
-import { resolveKeyTargets, type KeyableFocus } from './keyAtPlayhead'
-import { insertChannelKeyAt } from './timelineKey'
+import { findKeyAtTime, resolveKeyTargets, type KeyableFocus } from './keyAtPlayhead'
+import { insertChannelKeyAt, selectRigKeyAtTime } from './timelineKey'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
@@ -37,11 +37,18 @@ export function insertKeyframeAtPlayhead() {
       return
     }
     useSceneStore.getState().addObjectKey(id, rig.t)
+    const next = useSceneStore.getState().objects.find((item) => item.id === id)
+    const key = next ? findKeyAtTime(next.keys, rig.t) : undefined
+    if (key) {
+      editor.selectTimelineKey({ kind: 'object', objectId: id, id: key.id }, `obj:${id}`)
+    }
     useSceneStore.getState().showNotice('Pose keyframe set')
     return
   }
 
   for (const channel of channels) insertChannelKeyAt(channel, rig.t)
+  const last = channels[channels.length - 1]
+  if (last) selectRigKeyAtTime(last, rig.t)
 
   const label = channels.length === 1 ? channels[0] : `${channels.length} channels`
   useSceneStore.getState().showNotice(`Keyframe set (${label})`)

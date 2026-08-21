@@ -1,11 +1,19 @@
 import { KEY_MERGE_EPS } from './keyframes'
 
+export function findKeyAtTime<T extends { time: number }>(
+  keys: T[],
+  t: number,
+  eps = KEY_MERGE_EPS,
+): T | undefined {
+  return keys.find((key) => Math.abs(key.time - t) < eps)
+}
+
 export function hasKeyAtTime(
   keys: { time: number }[],
   t: number,
   eps = KEY_MERGE_EPS,
 ): boolean {
-  return keys.some((key) => Math.abs(key.time - t) < eps)
+  return findKeyAtTime(keys, t, eps) !== undefined
 }
 
 export const KEY_CHANNELS = [

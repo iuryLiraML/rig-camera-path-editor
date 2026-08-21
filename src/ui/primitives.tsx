@@ -54,6 +54,34 @@ export function Segmented<T extends string>({
 
 export const KEYED_GREEN = '#3dd68c'
 
+/** Diamond used next to a keyable property. Filled green when a key sits on the playhead. */
+export function KeyButton({
+  active,
+  onKey,
+  onClick,
+  title = 'Add a keyframe for this property at the playhead (I)',
+}: {
+  active: boolean
+  onKey?: boolean
+  onClick: () => void
+  title?: string
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      aria-pressed={!!onKey}
+      className={`shrink-0 text-[11px] leading-none transition-colors ${
+        onKey ? 'text-[#3dd68c]' : active ? 'text-accent' : 'text-ink-dim hover:text-ink'
+      }`}
+    >
+      ◆
+    </button>
+  )
+}
+
 export function NumberInput({
   value,
   onChange,
