@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { isOrbitLocked } from '../lib/orbitLock'
+import { DEFAULT_HOME_DIST } from '../lib/orbitHome'
 import type { PaneView } from '../state/useLayoutStore'
 import { sceneBounds } from './SceneObjects'
 
@@ -77,10 +78,9 @@ export function frameSpatialCamera(view: SpatialView, aspect: number) {
 /** Aim a spatial camera at the world origin, keeping its front/top/right axis. */
 export function homeSpatialCamera(view: SpatialView) {
   const cam = spatialCameras[view]
-  const dist = Math.max(2, cam.position.distanceTo(spatialTargets[view]))
   _dir.set(...VIEW_DIRS[view]).normalize()
   spatialTargets[view].set(0, 0, 0)
-  cam.position.copy(spatialTargets[view]).addScaledVector(_dir, dist)
+  cam.position.copy(spatialTargets[view]).addScaledVector(_dir, DEFAULT_HOME_DIST)
   cam.up.set(0, 1, 0)
   cam.lookAt(spatialTargets[view])
   cam.updateProjectionMatrix()

@@ -77,7 +77,7 @@ export function EditorCamera() {
     controls.update()
   }, [frameRequest, controls, fallbackCam, projection])
 
-  // H — look at the world origin, keeping the current distance and direction
+  // H — look at the world origin at the default framing distance
   useEffect(() => {
     if (homeRequest === 0 || !controls) return
     const view = pointerView.current
@@ -89,6 +89,11 @@ export function EditorCamera() {
     }
     const camera = editorCam()
     aimOrbitAtWorldOrigin(camera.position, controls.target)
+    if ((camera as THREE.OrthographicCamera).isOrthographicCamera) {
+      const ortho = camera as THREE.OrthographicCamera
+      ortho.zoom = ORTHO_DEFAULT_ZOOM
+      ortho.updateProjectionMatrix()
+    }
     controls.update()
   }, [homeRequest, controls, fallbackCam, projection])
 
