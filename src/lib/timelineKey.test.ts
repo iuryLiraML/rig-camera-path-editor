@@ -80,6 +80,21 @@ describe('deleteKeyframeAtPlayhead', () => {
     expect(useSceneStore.getState().objects[0].keys).toHaveLength(0)
   })
 
+  it('removes only the focused transform channel at the playhead', () => {
+    useSceneStore.getState().addPrimitive('box')
+    const id = useSceneStore.getState().objects[0].id
+    useSceneStore.getState().addObjectKey(id, 0.4)
+    useEditorStore.setState({
+      selection: `obj:${id}`,
+      objectBarPanel: 'transform',
+      keyableFocus: 'objectPosition',
+    })
+    expect(useSceneStore.getState().objects[0].keys).toHaveLength(3)
+    expect(deleteKeyframeAtPlayhead()).toBe(true)
+    const leftover = useSceneStore.getState().objects[0].keys
+    expect(leftover.map((k) => k.channel).sort()).toEqual(['rotation', 'scale'])
+  })
+
   it('leaves pose keys alone when Transform is closed and nothing is focused', () => {
     useSceneStore.getState().addPrimitive('box')
     const id = useSceneStore.getState().objects[0].id
@@ -90,6 +105,6 @@ describe('deleteKeyframeAtPlayhead', () => {
       keyableFocus: null,
     })
     expect(deleteKeyframeAtPlayhead()).toBe(false)
-    expect(useSceneStore.getState().objects[0].keys).toHaveLength(1)
+    expect(useSceneStore.getState().objects[0].keys).toHaveLength(3)
   })
 })

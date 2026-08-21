@@ -64,7 +64,7 @@ export function evalObjectWorldTransform(
     }
   }
   if (object.keys.length > 0) {
-    const pose = evalModelTransform(clamped, object.keys, ease)
+    const pose = evalModelTransform(clamped, object.keys, ease, object.transform)
     if (pose) return pose
   }
   return object.transform

@@ -26,6 +26,7 @@ describe('resolveKeyTargets', () => {
     expect(resolveKeyTargets('fov', 'cinema-camera', ['progress', 'fov'])).toEqual({
       channels: ['fov'],
       object: false,
+      objectChannels: [],
     })
   })
 
@@ -33,6 +34,7 @@ describe('resolveKeyTargets', () => {
     expect(resolveKeyTargets('intensity', 'cinema-camera', ['fov'])).toEqual({
       channels: ['intensity'],
       object: false,
+      objectChannels: [],
     })
   })
 
@@ -40,6 +42,7 @@ describe('resolveKeyTargets', () => {
     expect(resolveKeyTargets('ampPos', 'cinema-camera', ['intensity'])).toEqual({
       channels: ['ampPos'],
       object: false,
+      objectChannels: [],
     })
   })
 
@@ -47,13 +50,23 @@ describe('resolveKeyTargets', () => {
     expect(resolveKeyTargets('fadeIn', 'cinema-camera', ['intensity'])).toEqual({
       channels: ['fadeIn'],
       object: false,
+      objectChannels: [],
     })
   })
 
-  it('keys the object pose when an object is selected', () => {
+  it('keys all transform channels when an object is selected', () => {
     expect(resolveKeyTargets(null, 'obj:box-1', ['fov'])).toEqual({
       channels: [],
       object: true,
+      objectChannels: ['position', 'rotation', 'scale'],
+    })
+  })
+
+  it('keys only position when Position is focused', () => {
+    expect(resolveKeyTargets('objectPosition', 'obj:box-1', ['fov'])).toEqual({
+      channels: [],
+      object: true,
+      objectChannels: ['position'],
     })
   })
 
@@ -61,6 +74,7 @@ describe('resolveKeyTargets', () => {
     expect(resolveKeyTargets(null, 'cinema-camera', ['fov', 'roll'])).toEqual({
       channels: ['fov', 'roll'],
       object: false,
+      objectChannels: [],
     })
   })
 
@@ -68,6 +82,7 @@ describe('resolveKeyTargets', () => {
     expect(resolveKeyTargets(null, 'camera-path', [])).toEqual({
       channels: ['progress'],
       object: false,
+      objectChannels: [],
     })
   })
 })

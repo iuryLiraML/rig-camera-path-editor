@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { evalProgress, evalValue, evalVec3, type ProgressKey, type ValueKey } from './keyframes'
+import {
+  evalModelTransform,
+  evalProgress,
+  evalValue,
+  evalVec3,
+  spliceObjectKeysAtTime,
+  type ModelKey,
+  type ProgressKey,
+  type ValueKey,
+} from './keyframes'
 import { applyEase } from './easing'
-import type { Vec3 } from '../state/useSceneStore'
+import { identityTransform, type Vec3 } from '../state/useSceneStore'
 
 const key = (time: number, value: number, ease?: ValueKey['ease']): ValueKey => ({
   id: `k${time}`,
@@ -92,5 +101,62 @@ describe('evalVec3', () => {
       { id: 'b', time: 1, value: [10, 20, 30] as Vec3 },
     ]
     expect(evalVec3(0.5, keys, [0, 0, 0], 'linear')).toEqual([5, 10, 15])
+  })
+})
+
+const pose = (
+  id: string,
+  time: number,
+  patch: Partial<typeof identityTransform> = {},
+  channel?: ModelKey['channel'],
+): ModelKey => ({
+  id,
+  time,
+  channel,
+  transform: { ...identityTransform, ...patch },
+})
+
+describe('evalModelTransform', () => {
+  it('still interpolates legacy full-pose keys', () => {
+    const keys = [
+      pose('k0', 0, { position: [0, 0, 0] }),
+      pose('k1', 1, { position: [4, 0, 0] }),
+    ]
+    const result = evalModelTransform(0.5, keys, 'linear', identityTransform)!
+    expect(result.position[0]).toBeCloseTo(2, 5)
+  })
+
+  it('interpolates position independently of rotation and scale', () => {
+    const keys: ModelKey[] = [
+      pose('p0', 0, { position: [0, 0, 0] }, 'position'),
+      pose('p1', 1, { position: [10, 0, 0] }, 'position'),
+      pose('r0', 0, { rotation: [0, 0, 0] }, 'rotation'),
+      pose('r1', 1, { rotation: [0, 90, 0] }, 'rotation'),
+    ]
+    const mid = evalModelTransform(0.5, keys, 'linear', identityTransform)!
+    expect(mid.position[0]).toBeCloseTo(5, 5)
+    expect(mid.rotation[1]).toBeCloseTo(45, 4)
+    expect(mid.scale).toEqual([1, 1, 1])
+  })
+
+  it('holds static rotation when only position is keyed', () => {
+    const fallback = { ...identityTransform, rotation: [0, 30, 0] as Vec3 }
+    const keys: ModelKey[] = [
+      pose('p0', 0, { position: [0, 0, 0] }, 'position'),
+      pose('p1', 1, { position: [8, 0, 0] }, 'position'),
+    ]
+    const mid = evalModelTransform(0.5, keys, 'linear', fallback)!
+    expect(mid.position[0]).toBeCloseTo(4, 5)
+    expect(mid.rotation[1]).toBeCloseTo(30, 5)
+  })
+})
+
+describe('spliceObjectKeysAtTime', () => {
+  it('splits a legacy pose key so Delete on position keeps rotation and scale', () => {
+    const keys: ModelKey[] = [pose('legacy', 0.4, { position: [1, 0, 0] })]
+    let n = 0
+    const next = spliceObjectKeysAtTime(keys, 0.4, ['position'], () => `n${n++}`)
+    expect(next.map((k) => k.channel).sort()).toEqual(['rotation', 'scale'])
+    expect(next.every((k) => k.time === 0.4)).toBe(true)
   })
 })

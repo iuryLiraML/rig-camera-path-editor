@@ -1,18 +1,30 @@
 import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
-import { hasKeyAtTime } from '../lib/keyAtPlayhead'
+import {
+  focusForObjectChannel,
+  hasObjectChannelKeyAtTime,
+  objectChannelIsAnimated,
+} from '../lib/keyAtPlayhead'
+import { OBJECT_CHANNEL_LABELS, type ObjectChannel } from '../lib/keyframes'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { KeyButton } from './primitives'
 
-export function PoseKeyButton({ objectId }: { objectId: string }) {
+export function PoseKeyButton({
+  objectId,
+  channel,
+}: {
+  objectId: string
+  channel: ObjectChannel
+}) {
   const t = useRigStore((s) => s.t)
   const object = useSceneStore((s) => s.objects.find((item) => item.id === objectId))
-  const keyed = object ? hasKeyAtTime(object.keys, t) : false
-  const active = (object?.keys.length ?? 0) > 0
+  const keyed = object ? hasObjectChannelKeyAtTime(object.keys, channel, t) : false
+  const active = object ? objectChannelIsAnimated(object.keys, channel) : false
+  const label = OBJECT_CHANNEL_LABELS[channel]
   const title = keyed
-    ? 'Pose keyframe at the playhead (I to set, Delete to remove)'
-    : 'Add a pose keyframe at the playhead (I)'
+    ? `${label} keyframe at the playhead (I to set, Delete to remove)`
+    : `Add a ${label.toLowerCase()} keyframe at the playhead (I)`
 
   return (
     <KeyButton
@@ -22,7 +34,7 @@ export function PoseKeyButton({ objectId }: { objectId: string }) {
       onClick={() => {
         const editor = useEditorStore.getState()
         if (editor.selection !== `obj:${objectId}`) editor.select(`obj:${objectId}`)
-        editor.setKeyableFocus('object')
+        editor.setKeyableFocus(focusForObjectChannel(channel))
         insertKeyframeAtPlayhead()
       }}
     />

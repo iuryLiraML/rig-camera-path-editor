@@ -72,4 +72,32 @@ describe('evalObjectWorldPosition', () => {
     )
     expect(pose.rotation[1]).toBeCloseTo(45, 4)
   })
+
+  it('mixes channel keys so position moves while rotation holds', () => {
+    const pose = evalObjectWorldTransform(
+      0.5,
+      {
+        transform: { ...identityTransform, rotation: [0, 15, 0] },
+        keys: [
+          {
+            id: 'p0',
+            time: 0,
+            channel: 'position',
+            transform: { ...identityTransform, position: [0, 0, 0] },
+          },
+          {
+            id: 'p1',
+            time: 1,
+            channel: 'position',
+            transform: { ...identityTransform, position: [6, 0, 0] },
+          },
+        ],
+      },
+      null,
+      'linear',
+    )
+    expect(pose.position[0]).toBeCloseTo(3, 5)
+    expect(pose.rotation[1]).toBeCloseTo(15, 5)
+    expect(pose.scale).toEqual([1, 1, 1])
+  })
 })

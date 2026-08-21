@@ -1,5 +1,11 @@
-import { findKeyAtTime, resolveKeyTargets, type KeyableFocus } from './keyAtPlayhead'
+import {
+  findKeyAtTime,
+  objectChannelsForFocus,
+  resolveKeyTargets,
+  type KeyableFocus,
+} from './keyAtPlayhead'
 import { insertChannelKeyAt, selectRigKeyAtTime } from './timelineKey'
+import { keysForObjectChannel, OBJECT_CHANNEL_LABELS } from './keyframes'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
@@ -24,7 +30,7 @@ export function insertKeyframeAtPlayhead() {
     ] as const
   ).filter((channel): channel is NonNullable<typeof channel> => channel !== null)
 
-  const { channels, object } = resolveKeyTargets(
+  const { channels, object, objectChannels } = resolveKeyTargets(
     editor.keyableFocus,
     editor.selection,
     [...animated],
@@ -36,13 +42,21 @@ export function insertKeyframeAtPlayhead() {
       useSceneStore.getState().showNotice('Select an object to key')
       return
     }
-    useSceneStore.getState().addObjectKey(id, rig.t)
+    const targets = objectChannels.length > 0 ? objectChannels : objectChannelsForFocus(editor.keyableFocus)
+    const scene = useSceneStore.getState()
+    for (const channel of targets) scene.addObjectKey(id, rig.t, channel)
     const next = useSceneStore.getState().objects.find((item) => item.id === id)
-    const key = next ? findKeyAtTime(next.keys, rig.t) : undefined
+    const selectChannel = targets.length === 1 ? targets[0] : undefined
+    const key =
+      next && selectChannel
+        ? findKeyAtTime(keysForObjectChannel(next.keys, selectChannel), rig.t)
+        : undefined
     if (key) {
       editor.selectTimelineKey({ kind: 'object', objectId: id, id: key.id }, `obj:${id}`)
     }
-    useSceneStore.getState().showNotice('Pose keyframe set')
+    const label =
+      targets.length === 1 ? OBJECT_CHANNEL_LABELS[targets[0]] : 'Pose'
+    useSceneStore.getState().showNotice(`${label} keyframe set`)
     return
   }
 
