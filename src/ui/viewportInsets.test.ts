@@ -4,6 +4,7 @@ import {
   DIRECTOR_COMPOSER_HEIGHT,
   DIRECTOR_DOCK_WIDTH,
   directorDockSlot,
+  FOOTER_ROW_HEIGHT,
   freeAreaRect,
   GUTTER,
   LEFT_PANEL_MAX,
@@ -95,10 +96,11 @@ describe('viewportInsets', () => {
     expect(free.h).toBeGreaterThan(0)
   })
 
-  it('reserves room for the footer row and Director composer above the compose dock', () => {
+  it('sits Compose Director in the timeline row, with PiP above the footer pills', () => {
     const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'sequence' })
-    expect(insets.contentBottom).toBeGreaterThan(insets.bottom + GUTTER)
-    expect(insets.contentBottom).toBe(insets.dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER)
+    expect(insets.dockBottom).toBe(GUTTER)
+    expect(insets.contentBottom).toBe(insets.bottom + FOOTER_ROW_HEIGHT + GUTTER + GUTTER)
+    expect(insets.contentBottom).toBeGreaterThan(insets.bottom)
   })
 
   it('keeps a free canvas in Visualize on a tight window', () => {
@@ -152,5 +154,11 @@ describe('viewportInsets', () => {
     const dockLeft = WINDOW - dock.right - dock.width
     expect(WINDOW - tools.right).toBeLessThanOrEqual(dockLeft)
     expect(insets.right).toBeLessThanOrEqual(dockLeft)
+  })
+
+  it('Build still floats the composer above the canvas bottom', () => {
+    const insets = viewportInsets('build', WINDOW, false)
+    expect(insets.dockBottom).toBe(GUTTER + GUTTER)
+    expect(insets.contentBottom).toBe(insets.dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER)
   })
 })

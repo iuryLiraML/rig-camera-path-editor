@@ -5,7 +5,7 @@ import { useProjectStore } from '../state/useProjectStore'
 import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
 import { PlusIcon, ImportIcon, ExpandIcon, ImageIcon } from './icons'
-import { directorDockSlot, useViewportInsets } from './viewportInsets'
+import { directorDockSlot, GUTTER, useViewportInsets } from './viewportInsets'
 
 function ToolChip({ name }: { name: string }) {
   return (
@@ -23,7 +23,7 @@ const PLACEHOLDER: Record<'build' | 'compose' | 'visualize', string> = {
   visualize: 'Describe the shot to generate…',
 }
 
-/** Floating Director composer — same bar on Build, Compose, and Visualize. */
+/** Director composer — docked beside Sequence/Timeline in Compose, floating elsewhere. */
 export function DirectorDock() {
   const chat = useAgentStore((s) => s.chat)
   const status = useAgentStore((s) => s.status)
@@ -47,6 +47,7 @@ export function DirectorDock() {
   const [pendingImage, setPendingImage] = useState<File | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const generate = workspaceMode === 'visualize'
+  const composeDocked = workspaceMode === 'compose'
 
   useEffect(() => {
     const node = scrollRef.current
@@ -78,13 +79,18 @@ export function DirectorDock() {
       className="absolute z-30 flex min-h-0 flex-col"
       style={{
         right: dock.right,
-        bottom: insets.dockBottom,
+        bottom: composeDocked ? GUTTER : insets.dockBottom,
         width: dock.width,
+        ...(composeDocked && !expanded ? { height: insets.timelineHeight } : {}),
         ...(expanded ? { top: insets.top } : {}),
       }}
     >
       {expanded && (
-        <div className="panel mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div
+          className={`panel flex min-h-0 flex-1 flex-col overflow-hidden ${
+            composeDocked ? 'mb-0 rounded-b-none' : 'mb-2'
+          }`}
+        >
           <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-3 py-2">
             <span className="text-[11px] font-medium text-ink">
               {generate ? 'Visualize' : 'Director'}
@@ -238,7 +244,15 @@ export function DirectorDock() {
         </div>
       )}
 
-      <div className="panel shrink-0 overflow-hidden rounded-3xl p-2.5 focus-within:border-accent">
+      <div
+        className={`panel overflow-hidden p-2.5 focus-within:border-accent ${
+          composeDocked
+            ? expanded
+              ? 'shrink-0 rounded-t-none'
+              : 'flex min-h-0 flex-1 flex-col'
+            : 'shrink-0 rounded-3xl'
+        }`}
+      >
         <input
           id="director-attach-photo"
           type="file"

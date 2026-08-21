@@ -88,6 +88,24 @@ describe('DirectorDock', () => {
     expect(getByTitle('Attach a reference photo')).toBeTruthy()
   })
 
+  it('docks the Compose composer into the timeline row', () => {
+    useEditorStore.setState({ workspaceMode: 'compose' })
+    const { container } = render(<DirectorDock />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.bottom).toBe('12px')
+    expect(root.style.height).toBe('148px')
+    expect(root.style.top).toBe('')
+  })
+
+  it('grows the Compose transcript up the reserved column', () => {
+    useEditorStore.setState({ workspaceMode: 'compose', directorExpanded: true })
+    const { container } = render(<DirectorDock />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.bottom).toBe('12px')
+    expect(root.style.top).toBeTruthy()
+    expect(root.style.height).toBe('')
+  })
+
   it('opens the import modal from the composer', () => {
     const { getByTitle } = render(<DirectorDock />)
     fireEvent.click(getByTitle('Import a .glb or .gltf'))

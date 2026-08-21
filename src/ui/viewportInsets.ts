@@ -161,10 +161,14 @@ export interface ViewportInsets {
   centre: number
   /**
    * First free y from the bottom for floating content that must clear the
-   * timeline dock, the footer pill row, and the Director composer.
+   * timeline dock and the footer pill row (Compose) or the floating composer
+   * (Build / Visualize).
    */
   contentBottom: number
-  /** Distance from the window bottom to the Director composer. */
+  /**
+   * Distance from the window bottom to the Director composer. Compose docks
+   * the composer in the timeline row (`GUTTER`); Build / Visualize float it.
+   */
   dockBottom: number
   leftWidth: number
   rightWidth: number
@@ -190,7 +194,11 @@ export function viewportInsets(
   const right = windowWidth - (rightWidth > 0 ? GUTTER + rightWidth + GUTTER : GUTTER)
   const bottom = timelineVisible && timelineHeight > 0 ? GUTTER + timelineHeight + GUTTER : GUTTER
   const footerBand = mode === 'compose' && timelineVisible ? FOOTER_ROW_HEIGHT + GUTTER : 0
-  const dockBottom = bottom + GUTTER + footerBand
+  const composeDocked = mode === 'compose' && timelineVisible
+  const dockBottom = composeDocked ? GUTTER : bottom + GUTTER + footerBand
+  const contentBottom = composeDocked
+    ? bottom + footerBand + GUTTER
+    : dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER
   return {
     left,
     top: GUTTER + TOP_ROW_HEIGHT + GUTTER,
@@ -198,7 +206,7 @@ export function viewportInsets(
     bottom,
     centre: left + (right - left) / 2,
     dockBottom,
-    contentBottom: dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER,
+    contentBottom,
     leftWidth,
     rightWidth,
     timelineHeight,
