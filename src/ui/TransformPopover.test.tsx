@@ -31,18 +31,21 @@ afterEach(() => {
 describe('TransformPopover', () => {
   it('puts a keyframe diamond on Position, Rotation and Scale', () => {
     const objectId = useSceneStore.getState().objects[0].id
-    const { getAllByRole } = render(<TransformPopover objectId={objectId} />)
-    const diamonds = getAllByRole('button', { name: /pose keyframe/i })
-    expect(diamonds).toHaveLength(3)
+    const { getByRole } = render(<TransformPopover objectId={objectId} />)
+    expect(getByRole('button', { name: /position keyframe/i })).toBeTruthy()
+    expect(getByRole('button', { name: /rotation keyframe/i })).toBeTruthy()
+    expect(getByRole('button', { name: /scale keyframe/i })).toBeTruthy()
   })
 
-  it('adds a pose key at the playhead when a diamond is clicked', () => {
+  it('keys only position when the Position diamond is clicked', () => {
     const objectId = useSceneStore.getState().objects[0].id
-    const { getAllByRole } = render(<TransformPopover objectId={objectId} />)
-    fireEvent.click(getAllByRole('button', { name: /pose keyframe/i })[0])
+    const { getByRole } = render(<TransformPopover objectId={objectId} />)
+    fireEvent.click(getByRole('button', { name: /position keyframe/i }))
     const object = useSceneStore.getState().objects[0]
     expect(object.keys).toHaveLength(1)
+    expect(object.keys[0].channel).toBe('position')
     expect(object.keys[0].time).toBeCloseTo(0.25, 5)
+    expect(useEditorStore.getState().keyableFocus).toBe('objectPosition')
     expect(useEditorStore.getState().selectedKeyframe).toEqual({
       kind: 'object',
       objectId,
@@ -50,7 +53,15 @@ describe('TransformPopover', () => {
     })
   })
 
-  it('marks Transform as keyable so I / Delete target the pose', () => {
+  it('does not create rotation or scale keys from the Position diamond', () => {
+    const objectId = useSceneStore.getState().objects[0].id
+    const { getByRole } = render(<TransformPopover objectId={objectId} />)
+    fireEvent.click(getByRole('button', { name: /position keyframe/i }))
+    const channels = useSceneStore.getState().objects[0].keys.map((k) => k.channel)
+    expect(channels).toEqual(['position'])
+  })
+
+  it('marks Transform as keyable so I keys all three when no row is focused', () => {
     const objectId = useSceneStore.getState().objects[0].id
     render(<TransformPopover objectId={objectId} />)
     expect(useEditorStore.getState().keyableFocus).toBe('object')

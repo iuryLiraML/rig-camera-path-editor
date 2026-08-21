@@ -1,5 +1,6 @@
 import {
   createContext,
+  Fragment,
   useContext,
   useEffect,
   useMemo,
@@ -17,7 +18,7 @@ import {
 } from '../lib/intervalSpacing'
 import { useRigStore, type RigChannel } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
-import { useSceneStore } from '../state/useSceneStore'
+import { useSceneStore, type Transform } from '../state/useSceneStore'
 import {
   evalModelTransform,
   evalProgress,
@@ -25,7 +26,12 @@ import {
   evalVec3,
   KEY_MERGE_EPS,
   keyOutgoingBezier,
+  keysForObjectChannel,
+  OBJECT_CHANNEL_LABELS,
+  OBJECT_CHANNELS,
+  objectKeyChannel,
   type ModelKey,
+  type ObjectChannel,
   type ProgressKey,
 } from '../lib/keyframes'
 import { easeGroups, type EaseKind } from '../lib/easing'
@@ -800,19 +806,22 @@ function applyProgressSpacing(id: string, side: 'in' | 'out', weight: number) {
   applyChannelSpacing('progress', keyId, side, weight)
 }
 
-/** how far an object has moved from its first keyframed pose, normalized */
-function objectPoseCurve(keys: ModelKey[], ease: EaseKind): number[] | undefined {
-  if (keys.length < 2) return undefined
-  const first = [...keys].sort((a, b) => a.time - b.time)[0].transform.position
+/** how far an object channel has moved from its first keyframed value, normalized */
+function objectChannelCurve(
+  keys: ModelKey[],
+  channel: ObjectChannel,
+  fallback: Transform,
+  ease: EaseKind,
+): number[] | undefined {
+  const used = keysForObjectChannel(keys, channel)
+  if (used.length < 2) return undefined
+  const first = [...used].sort((a, b) => a.time - b.time)[0].transform[channel]
   return normalizeSamples(
     sampleOverTime((time) => {
-      const pose = evalModelTransform(time, keys, ease)
+      const pose = evalModelTransform(time, keys, ease, fallback)
       if (!pose) return 0
-      return Math.hypot(
-        pose.position[0] - first[0],
-        pose.position[1] - first[1],
-        pose.position[2] - first[2],
-      )
+      const value = pose[channel]
+      return Math.hypot(value[0] - first[0], value[1] - first[1], value[2] - first[2])
     }),
   )
 }
@@ -1439,62 +1448,118 @@ export function Timeline() {
             )
           })}
           {objects.map((object) => {
-            const poseCurve = objectPoseCurve(object.keys, ease)
             const followName = object.follow
               ? object.follow.pathId === CAMERA_PATH_ID
                 ? 'Camera Path'
                 : (paths.find((p) => p.id === object.follow!.pathId)?.name ?? 'path')
               : undefined
+            if (followName) {
+              return (
+                <Track
+                  key={object.id}
+                  trackId={`object-${object.id}`}
+                  label={object.name}
+                  selectId={`obj:${object.id}`}
+                  color="#7c5cff"
+                  note={`follows ${followName}`}
+                  keys={[]}
+                  onMove={() => {}}
+                  onDelete={() => {}}
+                  onAdd={() => {}}
+                  addTitle=""
+                  defaultEase={ease}
+                />
+              )
+            }
+            const channels = object.keys.length === 0 ? null : OBJECT_CHANNELS
+            if (!channels) {
+              return (
+                <Track
+                  key={object.id}
+                  trackId={`object-${object.id}`}
+                  label={object.name}
+                  selectId={`obj:${object.id}`}
+                  color="#7c5cff"
+                  keys={[]}
+                  onMove={() => {}}
+                  onDelete={() => {}}
+                  onAdd={() => scene.addObjectKey(object.id, useRigStore.getState().t)}
+                  onAddAt={(time) => scene.addObjectKey(object.id, time)}
+                  addTitle="Save the current pose at the playhead"
+                  selectedId={
+                    selectedKeyframe?.kind === 'object' && selectedKeyframe.objectId === object.id
+                      ? selectedKeyframe.id
+                      : null
+                  }
+                  onSelectKey={(id) =>
+                    useEditorStore.getState().selectTimelineKey(
+                      { kind: 'object', objectId: object.id, id },
+                      `obj:${object.id}`,
+                    )
+                  }
+                  defaultEase={ease}
+                />
+              )
+            }
             return (
-              <Track
-                key={object.id}
-                trackId={`object-${object.id}`}
-                label={object.name}
-                selectId={`obj:${object.id}`}
-                color="#7c5cff"
-                note={followName ? `follows ${followName}` : undefined}
-                keys={object.keys.map((k) => ({
-                  id: k.id,
-                  time: k.time,
-                  title: `${(k.time * duration).toFixed(1)}s — pose`,
-                  ease: k.ease,
-                  easeBezier: k.easeBezier,
-                  easeIn: k.easeIn,
-                  easeOut: k.easeOut,
-                }))}
-                onMove={(keyId, time) => scene.updateObjectKeyTime(object.id, keyId, time)}
-                onDelete={(keyId) => {
-                  scene.removeObjectKey(object.id, keyId)
-                  useEditorStore.getState().selectKeyframe(null)
-                }}
-                onAdd={() => scene.addObjectKey(object.id, useRigStore.getState().t)}
-                onAddAt={(time) => scene.addObjectKey(object.id, time)}
-                addTitle="Save the current pose at the playhead"
-                curve={poseCurve}
-                onBezier={(id, bezier) =>
-                  useSceneStore.getState().setObjectKeyBezier(object.id, id, bezier)
-                }
-                onSpacing={(id, side, w) =>
-                  useSceneStore.getState().setObjectKeySpacing(
-                    object.id,
-                    id,
-                    side === 'out' ? { easeOut: w } : { easeIn: w },
-                    useEditorStore.getState().easingLinked,
-                  )
-                }
-                selectedId={
-                  selectedKeyframe?.kind === 'object' && selectedKeyframe.objectId === object.id
-                    ? selectedKeyframe.id
-                    : null
-                }
-                onSelectKey={(id) =>
-                  useEditorStore.getState().selectTimelineKey(
-                    { kind: 'object', objectId: object.id, id },
-                    `obj:${object.id}`,
-                  )
-                }
-                defaultEase={ease}
-              />
+              <Fragment key={object.id}>
+                {channels.map((channel) => {
+              const laneKeys = keysForObjectChannel(object.keys, channel)
+              const label = OBJECT_CHANNEL_LABELS[channel]
+              return (
+                <Track
+                  key={`${object.id}-${channel}`}
+                  trackId={`object-${object.id}-${channel}`}
+                  label={`${object.name} · ${label}`}
+                  selectId={`obj:${object.id}`}
+                  color="#7c5cff"
+                  keys={laneKeys.map((k) => ({
+                    id: k.id,
+                    time: k.time,
+                    title: `${(k.time * duration).toFixed(1)}s — ${
+                      objectKeyChannel(k) === 'pose' ? 'pose' : label
+                    }`,
+                    ease: k.ease,
+                    easeBezier: k.easeBezier,
+                    easeIn: k.easeIn,
+                    easeOut: k.easeOut,
+                  }))}
+                  onMove={(keyId, time) => scene.updateObjectKeyTime(object.id, keyId, time)}
+                  onDelete={(keyId) => {
+                    scene.removeObjectKey(object.id, keyId, channel)
+                    useEditorStore.getState().selectKeyframe(null)
+                  }}
+                  onAdd={() => scene.addObjectKey(object.id, useRigStore.getState().t, channel)}
+                  onAddAt={(time) => scene.addObjectKey(object.id, time, channel)}
+                  addTitle={`Add a ${label.toLowerCase()} keyframe at the playhead`}
+                  curve={objectChannelCurve(object.keys, channel, object.transform, ease)}
+                  onBezier={(id, bezier) =>
+                    useSceneStore.getState().setObjectKeyBezier(object.id, id, bezier)
+                  }
+                  onSpacing={(id, side, w) =>
+                    useSceneStore.getState().setObjectKeySpacing(
+                      object.id,
+                      id,
+                      side === 'out' ? { easeOut: w } : { easeIn: w },
+                      useEditorStore.getState().easingLinked,
+                    )
+                  }
+                  selectedId={
+                    selectedKeyframe?.kind === 'object' && selectedKeyframe.objectId === object.id
+                      ? selectedKeyframe.id
+                      : null
+                  }
+                  onSelectKey={(id) =>
+                    useEditorStore.getState().selectTimelineKey(
+                      { kind: 'object', objectId: object.id, id },
+                      `obj:${object.id}`,
+                    )
+                  }
+                  defaultEase={ease}
+                />
+              )
+                })}
+              </Fragment>
             )
           })}
         </div>

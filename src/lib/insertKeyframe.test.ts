@@ -78,13 +78,30 @@ describe('insertKeyframeAtPlayhead', () => {
     expect(keys[0].value[1]).toBeCloseTo(1.2, 5)
   })
 
-  it('writes a pose key when an object is selected', () => {
+  it('writes all transform channels when an object is selected', () => {
     useSceneStore.getState().addPrimitive('box')
     const id = useSceneStore.getState().objects[0].id
     useEditorStore.setState({ keyableFocus: null, selection: `obj:${id}` })
     insertKeyframeAtPlayhead()
     const object = useSceneStore.getState().objects[0]
+    expect(object.keys).toHaveLength(3)
+    expect(object.keys.map((k) => k.channel).sort()).toEqual(['position', 'rotation', 'scale'])
+    expect(object.keys[0].time).toBeCloseTo(0.4, 5)
+    expect(useEditorStore.getState().selectedKeyframe).toBeNull()
+  })
+
+  it.each([
+    ['objectPosition', 'position'],
+    ['objectRotation', 'rotation'],
+    ['objectScale', 'scale'],
+  ] as const)('writes only %s when that Transform row is focused', (focus, channel) => {
+    useSceneStore.getState().addPrimitive('box')
+    const id = useSceneStore.getState().objects[0].id
+    useEditorStore.setState({ keyableFocus: focus, selection: `obj:${id}` })
+    insertKeyframeAtPlayhead()
+    const object = useSceneStore.getState().objects[0]
     expect(object.keys).toHaveLength(1)
+    expect(object.keys[0].channel).toBe(channel)
     expect(object.keys[0].time).toBeCloseTo(0.4, 5)
     expect(useEditorStore.getState().selectedKeyframe).toEqual({
       kind: 'object',

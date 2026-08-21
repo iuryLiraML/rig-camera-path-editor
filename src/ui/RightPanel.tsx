@@ -18,10 +18,21 @@ import {
   useCameraAnchorCount,
   useCameraPath,
 } from '../state/cameraPathLink'
-import { evalProgress, evalValue, evalVec3, type ValueKey } from '../lib/keyframes'
+import {
+  OBJECT_CHANNEL_LABELS,
+  evalProgress,
+  evalValue,
+  evalVec3,
+  objectKeyChannel,
+  type ValueKey,
+} from '../lib/keyframes'
 import { evalObjectWorldPosition, resolveTrackTarget } from '../lib/objectMotion'
 import { setCameraPathSpace, setTrackObjectId } from '../lib/pathSpaceBind'
-import { hasKeyAtTime } from '../lib/keyAtPlayhead'
+import {
+  focusForObjectChannel,
+  hasKeyAtTime,
+  hasObjectChannelKeyAtTime,
+} from '../lib/keyAtPlayhead'
 import { easeGroups, easeDef, type EaseKind } from '../lib/easing'
 import { exportDimensions } from '../lib/recorder'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
@@ -384,10 +395,14 @@ function ObjectSections({ objectId }: { objectId: string }) {
             />
           </div>
           <KeyList
-            items={sortedKeys.map((k) => ({
-              id: k.id,
-              label: `${(k.time * duration).toFixed(1)}s — pose`,
-            }))}
+            items={sortedKeys.map((k) => {
+              const channel = objectKeyChannel(k)
+              const name = channel === 'pose' ? 'pose' : OBJECT_CHANNEL_LABELS[channel].toLowerCase()
+              return {
+                id: k.id,
+                label: `${(k.time * duration).toFixed(1)}s — ${name}`,
+              }
+            })}
             onRemove={(keyId) => scene.removeObjectKey(object.id, keyId)}
           />
           {object.keys.length > 0 && (
@@ -436,11 +451,13 @@ function ObjectSections({ objectId }: { objectId: string }) {
           <Row label="Position">
             <XYZInput
               value={object.transform.position}
-              keyed={hasKeyAtTime(object.keys, t)}
-              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
+              keyed={hasObjectChannelKeyAtTime(object.keys, 'position', t)}
+              onFocusChange={(on) =>
+                useEditorStore.getState().setKeyableFocus(on ? focusForObjectChannel('position') : null)
+              }
               onChange={(a, v) => scene.setTransform(object.id, 'position', a, v)}
             />
-            <PoseKeyButton objectId={object.id} />
+            <PoseKeyButton objectId={object.id} channel="position" />
           </Row>
         )}
         {!(following && object.follow?.align) && (
@@ -448,21 +465,25 @@ function ObjectSections({ objectId }: { objectId: string }) {
             <XYZInput
               value={object.transform.rotation}
               step={1}
-              keyed={hasKeyAtTime(object.keys, t)}
-              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
+              keyed={hasObjectChannelKeyAtTime(object.keys, 'rotation', t)}
+              onFocusChange={(on) =>
+                useEditorStore.getState().setKeyableFocus(on ? focusForObjectChannel('rotation') : null)
+              }
               onChange={(a, v) => scene.setTransform(object.id, 'rotation', a, v)}
             />
-            <PoseKeyButton objectId={object.id} />
+            <PoseKeyButton objectId={object.id} channel="rotation" />
           </Row>
         )}
         <Row label="Scale">
             <XYZInput
               value={object.transform.scale}
-              keyed={hasKeyAtTime(object.keys, t)}
-              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'object' : null)}
+              keyed={hasObjectChannelKeyAtTime(object.keys, 'scale', t)}
+              onFocusChange={(on) =>
+                useEditorStore.getState().setKeyableFocus(on ? focusForObjectChannel('scale') : null)
+              }
               onChange={(a, v) => scene.setTransform(object.id, 'scale', a, v)}
             />
-            <PoseKeyButton objectId={object.id} />
+            <PoseKeyButton objectId={object.id} channel="scale" />
         </Row>
       </Section>
       <Section title="Material · Clay">

@@ -1,5 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { hasKeyAtTime } from '../lib/keyAtPlayhead'
+import {
+  focusForObjectChannel,
+  hasObjectChannelKeyAtTime,
+  isObjectKeyFocus,
+} from '../lib/keyAtPlayhead'
+import { type ObjectChannel } from '../lib/keyframes'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../state/useSceneStore'
@@ -16,7 +21,7 @@ export function TransformPopover({ objectId }: { objectId: string }) {
     const editor = useEditorStore.getState()
     editor.setKeyableFocus('object')
     return () => {
-      if (useEditorStore.getState().keyableFocus === 'object') {
+      if (isObjectKeyFocus(useEditorStore.getState().keyableFocus)) {
         editor.setKeyableFocus(null)
       }
     }
@@ -25,8 +30,7 @@ export function TransformPopover({ objectId }: { objectId: string }) {
   if (!object) return null
 
   const scene = useSceneStore.getState()
-  const keyed = hasKeyAtTime(object.keys, t)
-  const setAxis = (part: 'position' | 'rotation' | 'scale', axis: 0 | 1 | 2, value: number) => {
+  const setAxis = (part: ObjectChannel, axis: 0 | 1 | 2, value: number) => {
     if (part === 'scale' && uniform) {
       const next: Vec3 = [value, value, value]
       scene.setTransformAll(objectId, { ...object.transform, scale: next })
@@ -35,8 +39,8 @@ export function TransformPopover({ objectId }: { objectId: string }) {
     scene.setTransform(objectId, part, axis, value)
   }
 
-  const markObjectKeyable = (on: boolean) => {
-    if (on) useEditorStore.getState().setKeyableFocus('object')
+  const markChannel = (channel: ObjectChannel) => (on: boolean) => {
+    useEditorStore.getState().setKeyableFocus(on ? focusForObjectChannel(channel) : 'object')
   }
 
   return (
@@ -51,20 +55,20 @@ export function TransformPopover({ objectId }: { objectId: string }) {
           ×
         </button>
       </div>
-      <Row label="Position" keyframe={<PoseKeyButton objectId={objectId} />}>
+      <Row label="Position" keyframe={<PoseKeyButton objectId={objectId} channel="position" />}>
         <XYZInput
           value={object.transform.position}
-          keyed={keyed}
-          onFocusChange={markObjectKeyable}
+          keyed={hasObjectChannelKeyAtTime(object.keys, 'position', t)}
+          onFocusChange={markChannel('position')}
           onChange={(axis, value) => setAxis('position', axis, value)}
         />
       </Row>
-      <Row label="Rotation" keyframe={<PoseKeyButton objectId={objectId} />}>
+      <Row label="Rotation" keyframe={<PoseKeyButton objectId={objectId} channel="rotation" />}>
         <XYZInput
           value={object.transform.rotation}
           step={1}
-          keyed={keyed}
-          onFocusChange={markObjectKeyable}
+          keyed={hasObjectChannelKeyAtTime(object.keys, 'rotation', t)}
+          onFocusChange={markChannel('rotation')}
           onChange={(axis, value) => setAxis('rotation', axis, value)}
         />
       </Row>
@@ -80,12 +84,12 @@ export function TransformPopover({ objectId }: { objectId: string }) {
             <LinkIcon size={12} />
           </button>
         }
-        keyframe={<PoseKeyButton objectId={objectId} />}
+        keyframe={<PoseKeyButton objectId={objectId} channel="scale" />}
       >
         <XYZInput
           value={object.transform.scale}
-          keyed={keyed}
-          onFocusChange={markObjectKeyable}
+          keyed={hasObjectChannelKeyAtTime(object.keys, 'scale', t)}
+          onFocusChange={markChannel('scale')}
           onChange={(axis, value) => setAxis('scale', axis, value)}
         />
       </Row>

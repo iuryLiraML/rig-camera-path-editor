@@ -86,7 +86,7 @@ describe('applyDeleteShortcut', () => {
       keyableFocus: 'object',
     })
     insertKeyframeAtPlayhead()
-    expect(useSceneStore.getState().objects[0].keys).toHaveLength(1)
+    expect(useSceneStore.getState().objects[0].keys).toHaveLength(3)
 
     expect(applyDeleteShortcut('Delete', { keyableField: false })).toBe(true)
     expect(useSceneStore.getState().objects[0].keys).toHaveLength(0)

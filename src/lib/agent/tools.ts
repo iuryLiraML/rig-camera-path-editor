@@ -5,6 +5,7 @@ import { useRigStore } from '../../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../../state/usePathStore'
 import { cameraPath, cameraReady } from '../../state/cameraPathLink'
 import { defaultFollow, useSceneStore, type Vec3 } from '../../state/useSceneStore'
+import { OBJECT_CHANNELS } from '../keyframes'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useProjectStore } from '../../state/useProjectStore'
 import { applyCameraPreset } from '../presets'
@@ -272,21 +273,30 @@ export const TOOL_DEFS: ToolDef[] = [
   },
   {
     name: 'add_pose_keyframe',
-    description: "Save the object's CURRENT pose as a keyframe at a time (0..1). Pose first with pose_object, then keyframe.",
+    description:
+      "Save the object's CURRENT transform as keyframes at a time (0..1). Pose first with pose_object, then keyframe. Omit channel to key Position, Rotation and Scale; pass channel to key one parameter.",
     input_schema: {
       type: 'object',
-      properties: { object_id: { type: 'string' }, time: { type: 'number' } },
+      properties: {
+        object_id: { type: 'string' },
+        time: { type: 'number' },
+        channel: {
+          type: 'string',
+          enum: ['position', 'rotation', 'scale'],
+          description: 'If set, key only this Transform parameter',
+        },
+      },
       required: ['object_id', 'time'],
     },
   },
   {
     name: 'apply_spin',
-    description: 'Give an object a full 360-degree Y turn over the whole timeline (replaces its pose keyframes).',
+    description: 'Give an object a full 360-degree Y turn over the whole timeline (replaces its transform keyframes with rotation keys).',
     input_schema: { type: 'object', properties: { object_id: { type: 'string' } }, required: ['object_id'] },
   },
   {
     name: 'clear_object_animation',
-    description: 'Remove all pose keyframes from an object.',
+    description: 'Remove all transform keyframes from an object.',
     input_schema: { type: 'object', properties: { object_id: { type: 'string' } }, required: ['object_id'] },
   },
   {
@@ -709,8 +719,14 @@ const EXECUTORS: Record<string, Executor> = {
     const scene = useSceneStore.getState()
     const object = scene.objects.find((o) => o.id === input.object_id)
     if (!object) return `No object with id "${input.object_id}".`
-    scene.addObjectKey(object.id, Math.min(1, Math.max(0, Number(input.time) || 0)))
-    return `Keyframed "${object.name}" at t=${input.time}.`
+    const time = Math.min(1, Math.max(0, Number(input.time) || 0))
+    const channel = OBJECT_CHANNELS.find((item) => item === input.channel)
+    if (channel) {
+      scene.addObjectKey(object.id, time, channel)
+      return `Keyframed ${channel} on "${object.name}" at t=${input.time}.`
+    }
+    scene.addObjectKey(object.id, time)
+    return `Keyframed "${object.name}" (position, rotation, scale) at t=${input.time}.`
   },
 
   apply_spin: (input) => {

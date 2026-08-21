@@ -2,7 +2,14 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import * as THREE from 'three'
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { KEY_MERGE_EPS, type ModelKey } from '../lib/keyframes'
+import {
+  cloneTransform,
+  KEY_MERGE_EPS,
+  OBJECT_CHANNELS,
+  spliceObjectKeysAtTime,
+  type ModelKey,
+  type ObjectChannel,
+} from '../lib/keyframes'
 import type { EaseKind } from '../lib/easing'
 import { clamp01 } from '../lib/intervalSpacing'
 import {
@@ -228,7 +235,7 @@ interface SceneState {
   setImporting: (delta: number) => void
   setTransform: (id: string, part: keyof Transform, axis: 0 | 1 | 2, value: number) => void
   setTransformAll: (id: string, transform: Transform) => void
-  addObjectKey: (id: string, time: number) => void
+  addObjectKey: (id: string, time: number, channel?: ObjectChannel) => void
   updateObjectKeyTime: (id: string, keyId: string, time: number) => void
   setObjectKeyEase: (id: string, keyId: string, ease: EaseKind) => void
   setObjectKeyBezier: (
@@ -244,7 +251,8 @@ interface SceneState {
   ) => void
   clearObjectKeySpacing: (id: string, keyId: string) => void
   clearAllObjectSpacing: () => void
-  removeObjectKey: (id: string, keyId: string) => void
+  removeObjectKey: (id: string, keyId: string, channel?: ObjectChannel) => void
+  removeObjectKeysAtTime: (id: string, time: number, channels: ObjectChannel[]) => void
   clearObjectKeys: (id: string) => void
   applySpinPreset: (id: string) => void
   setPlayClips: (id: string, on: boolean) => void
@@ -388,14 +396,25 @@ export const useSceneStore = create<SceneState>()(
 
         setTransformAll: (id, transform) => updateObject(id, () => ({ transform })),
 
-        addObjectKey: (id, time) =>
+        addObjectKey: (id, time, channel) =>
           updateObject(id, (o) => {
-            const key: ModelKey = { id: makeSceneId('mkey'), time, transform: o.transform }
-            const existing = o.keys.find((k) => Math.abs(k.time - time) < KEY_MERGE_EPS)
-            if (existing) {
-              return { keys: o.keys.map((k) => (k.id === existing.id ? { ...key, id: k.id } : k)) }
+            const channels: ObjectChannel[] = channel ? [channel] : [...OBJECT_CHANNELS]
+            let keys = o.keys
+            for (const ch of channels) {
+              const key: ModelKey = {
+                id: makeSceneId('mkey'),
+                time,
+                channel: ch,
+                transform: cloneTransform(o.transform),
+              }
+              const existing = keys.find(
+                (k) => Math.abs(k.time - time) < KEY_MERGE_EPS && k.channel === ch,
+              )
+              keys = existing
+                ? keys.map((k) => (k.id === existing.id ? { ...key, id: k.id } : k))
+                : [...keys, key]
             }
-            return { keys: [...o.keys, key] }
+            return { keys }
           }),
 
         updateObjectKeyTime: (id, keyId, time) =>
@@ -467,8 +486,22 @@ export const useSceneStore = create<SceneState>()(
             })),
           })),
 
-        removeObjectKey: (id, keyId) =>
-          updateObject(id, (o) => ({ keys: o.keys.filter((k) => k.id !== keyId) })),
+        removeObjectKey: (id, keyId, channel) =>
+          updateObject(id, (o) => {
+            const key = o.keys.find((item) => item.id === keyId)
+            if (!key) return {}
+            if (channel && (key.channel ?? 'pose') === 'pose') {
+              return {
+                keys: spliceObjectKeysAtTime(o.keys, key.time, [channel], () => makeSceneId('mkey')),
+              }
+            }
+            return { keys: o.keys.filter((k) => k.id !== keyId) }
+          }),
+
+        removeObjectKeysAtTime: (id, time, channels) =>
+          updateObject(id, (o) => ({
+            keys: spliceObjectKeysAtTime(o.keys, time, channels, () => makeSceneId('mkey')),
+          })),
 
         clearObjectKeys: (id) => updateObject(id, () => ({ keys: [] })),
 
@@ -478,8 +511,9 @@ export const useSceneStore = create<SceneState>()(
             keys: [0, 0.25, 0.5, 0.75, 1].map((time, i) => ({
               id: makeSceneId('mkey'),
               time,
+              channel: 'rotation' as const,
               transform: {
-                ...o.transform,
+                ...cloneTransform(o.transform),
                 rotation: [
                   o.transform.rotation[0],
                   o.transform.rotation[1] + i * 90,

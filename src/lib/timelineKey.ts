@@ -1,9 +1,14 @@
-import { evalProgress, evalValue, evalVec3 } from './keyframes'
+import { evalProgress, evalValue, evalVec3, keysForObjectChannel } from './keyframes'
 import { useEditorStore, type SelectedTimelineKey } from '../state/useEditorStore'
 import { useRigStore, type RigChannel, type ScalarChannel } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { type EaseKind } from './easing'
-import { findKeyAtTime } from './keyAtPlayhead'
+import {
+  findKeyAtTime,
+  isKeyChannel,
+  isObjectKeyFocus,
+  objectChannelsForFocus,
+} from './keyAtPlayhead'
 
 export type { SelectedTimelineKey }
 
@@ -79,9 +84,26 @@ export function deleteSelectedTimelineKey(): boolean {
 }
 
 function poseKeyable(editor: ReturnType<typeof useEditorStore.getState>): boolean {
-  if (editor.keyableFocus === 'object') return true
+  if (isObjectKeyFocus(editor.keyableFocus)) return true
   if (!editor.selection?.startsWith('obj:')) return false
   return editor.objectBarPanel === 'transform' || editor.objectBarPanel === 'properties'
+}
+
+function deleteObjectChannelsAtPlayhead(): boolean {
+  const editor = useEditorStore.getState()
+  const rig = useRigStore.getState()
+  const id = editor.selection?.startsWith('obj:') ? editor.selection.slice(4) : null
+  if (!id) return false
+  const object = useSceneStore.getState().objects.find((item) => item.id === id)
+  if (!object) return false
+  const channels = objectChannelsForFocus(editor.keyableFocus)
+  const hadKey = channels.some((channel) =>
+    Boolean(findKeyAtTime(keysForObjectChannel(object.keys, channel), rig.t)),
+  )
+  if (!hadKey) return false
+  useSceneStore.getState().removeObjectKeysAtTime(id, rig.t, channels)
+  editor.selectKeyframe(null)
+  return true
 }
 
 /** Remove the key on the playhead for the focused property / open Transform panel. */
@@ -90,7 +112,12 @@ export function deleteKeyframeAtPlayhead(): boolean {
   const rig = useRigStore.getState()
   const focus = editor.keyableFocus
 
-  if (focus && focus !== 'object') {
+  if (isObjectKeyFocus(focus) || poseKeyable(editor)) {
+    if (deleteObjectChannelsAtPlayhead()) return true
+    if (isObjectKeyFocus(focus)) return false
+  }
+
+  if (isKeyChannel(focus)) {
     const field = channelField(focus)
     const keys = rig[field] as { id: string; time: number }[]
     const key = findKeyAtTime(keys, rig.t)
@@ -100,16 +127,7 @@ export function deleteKeyframeAtPlayhead(): boolean {
     return true
   }
 
-  if (!poseKeyable(editor)) return false
-  const id = editor.selection?.startsWith('obj:') ? editor.selection.slice(4) : null
-  if (!id) return false
-  const object = useSceneStore.getState().objects.find((item) => item.id === id)
-  if (!object) return false
-  const key = findKeyAtTime(object.keys, rig.t)
-  if (!key) return false
-  useSceneStore.getState().removeObjectKey(id, key.id)
-  editor.selectKeyframe(null)
-  return true
+  return false
 }
 
 export function selectRigKeyAtTime(channel: RigChannel, time: number) {
