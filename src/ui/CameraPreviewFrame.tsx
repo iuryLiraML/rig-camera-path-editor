@@ -3,7 +3,7 @@ import { useCameraReady } from '../state/cameraPathLink'
 import { useEditorStore } from '../state/useEditorStore'
 import { leafList, useLayoutStore } from '../state/useLayoutStore'
 import { exportDimensions } from '../lib/recorder'
-import { GUTTER, useViewportInsets, type ViewportInsets } from './viewportInsets'
+import { GUTTER, directorDockSlot, useViewportInsets, type ViewportInsets } from './viewportInsets'
 import { CameraIcon } from './icons'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 
@@ -26,7 +26,8 @@ function clampPipRect(
   const w = r.fraction * vw
   const h = r.fraction * vh
   // `right`/`bottom` are distances from those window edges
-  const minRight = vw - insets.right
+  const dock = directorDockSlot(insets, vw)
+  const minRight = dock.right + dock.width + GUTTER
   const maxRight = Math.max(minRight, vw - insets.left - w)
   const maxBottom = Math.max(insets.contentBottom, vh - GUTTER - h)
   return {

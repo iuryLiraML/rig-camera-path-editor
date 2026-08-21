@@ -12,7 +12,7 @@ import {
 } from '../state/useLayoutStore'
 import { useEditorOnly } from '../lib/editorOnly'
 import { isPathEditing, isSceneEditing } from '../lib/workspaceChrome'
-import { useViewportInsets, useWindowSize } from '../ui/viewportInsets'
+import { directorDockSlot, useViewportInsets, useWindowSize } from '../ui/viewportInsets'
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
 import { SceneObjects } from './SceneObjects'
@@ -151,6 +151,7 @@ export function Viewport() {
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
   const insets = useViewportInsets()
   const win = useWindowSize()
+  const dock = directorDockSlot(insets, win.w)
 
   const pointerDownAt = useRef<[number, number]>([0, 0])
 
@@ -228,7 +229,7 @@ export function Viewport() {
         <GizmoHelper
           alignment="bottom-right"
           margin={[
-            Math.max(48, win.w - insets.right + 16),
+            Math.max(48, dock.right + dock.width + 16),
             Math.max(72, insets.contentBottom),
           ]}
         >

@@ -5,7 +5,7 @@ import { useProjectStore } from '../state/useProjectStore'
 import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
 import { PlusIcon, ImportIcon, ExpandIcon, ImageIcon } from './icons'
-import { useViewportInsets } from './viewportInsets'
+import { directorDockSlot, useViewportInsets, useWindowSize } from './viewportInsets'
 
 function ToolChip({ name }: { name: string }) {
   return (
@@ -41,6 +41,8 @@ export function DirectorDock() {
   const expanded = useEditorStore((s) => s.directorExpanded)
   const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
   const insets = useViewportInsets()
+  const win = useWindowSize()
+  const dock = directorDockSlot(insets, win.w)
   const [input, setInput] = useState('')
   const [showSkills, setShowSkills] = useState(false)
   const [pendingImage, setPendingImage] = useState<File | null>(null)
@@ -74,11 +76,16 @@ export function DirectorDock() {
 
   return (
     <div
-      className="absolute z-30 flex w-[min(520px,calc(100%-24px))] -translate-x-1/2 flex-col"
-      style={{ left: insets.centre, bottom: insets.dockBottom }}
+      className="absolute z-30 flex min-h-0 flex-col"
+      style={{
+        right: dock.right,
+        bottom: insets.dockBottom,
+        width: dock.width,
+        ...(expanded ? { top: insets.top } : {}),
+      }}
     >
       {expanded && (
-        <div className="panel mb-2 flex max-h-[min(42vh,360px)] min-h-0 flex-col overflow-hidden">
+        <div className="panel mb-2 flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-3 py-2">
             <span className="text-[11px] font-medium text-ink">
               {generate ? 'Visualize' : 'Director'}
@@ -232,7 +239,7 @@ export function DirectorDock() {
         </div>
       )}
 
-      <div className="panel overflow-hidden rounded-3xl p-2.5 focus-within:border-accent">
+      <div className="panel shrink-0 overflow-hidden rounded-3xl p-2.5 focus-within:border-accent">
         <input
           id="director-attach-photo"
           type="file"

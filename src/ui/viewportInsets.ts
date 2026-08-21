@@ -17,6 +17,8 @@ export const GUTTER = 12
 const FOOTER_ROW_HEIGHT = 32
 /** collapsed Director composer — ObjectBar / PiP sit above this */
 export const DIRECTOR_COMPOSER_HEIGHT = 100
+/** floating Director column on the right of the free area */
+export const DIRECTOR_DOCK_WIDTH = 360
 /** height of the top row (Toolbar / ModeSwitcher / ProjectChip), both at top-3 */
 export const TOP_ROW_HEIGHT = 38
 
@@ -39,6 +41,16 @@ export const MIN_FREE_HEIGHT = 140
  */
 export function toolbarSlot(insets: ViewportInsets, windowWidth: number): { right: number } {
   return { right: Math.max(GUTTER, windowWidth - insets.right) }
+}
+
+/** CSS `right` for the Director column — same edge the toolbar hugs. */
+export function directorDockSlot(
+  insets: ViewportInsets,
+  windowWidth: number,
+): { right: number; width: number } {
+  const right = toolbarSlot(insets, windowWidth).right
+  const width = Math.min(DIRECTOR_DOCK_WIDTH, Math.max(0, insets.right - insets.left))
+  return { right, width }
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))

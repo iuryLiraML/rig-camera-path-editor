@@ -56,6 +56,17 @@ describe('DirectorDock', () => {
     expect(useEditorStore.getState().directorExpanded).toBe(true)
     expect(container.textContent).toContain('Director')
     expect(container.textContent?.toLowerCase()).not.toContain('remaining')
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.top).toBeTruthy()
+  })
+
+  it('pins the composer to the right of the viewport, not the centre', () => {
+    const { container } = render(<DirectorDock />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.className).not.toContain('-translate-x-1/2')
+    expect(root.style.right).toBeTruthy()
+    expect(root.style.left).toBe('')
+    expect(Number.parseFloat(root.style.width)).toBeGreaterThan(0)
   })
 
   it('groups Add, Import and attach on the Build composer', () => {

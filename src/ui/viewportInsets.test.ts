@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
   DIRECTOR_COMPOSER_HEIGHT,
+  DIRECTOR_DOCK_WIDTH,
+  directorDockSlot,
   freeAreaRect,
   GUTTER,
   LEFT_PANEL_MAX,
@@ -50,7 +52,16 @@ describe('viewportInsets', () => {
     )
   })
 
-  it('Visualize is full-bleed — Director floats instead of a right rail', () => {
+  it('pins the Director column to the right of the free area', () => {
+    const insets = viewportInsets('build', WINDOW, false)
+    const slot = directorDockSlot(insets, WINDOW)
+    expect(slot.right).toBe(GUTTER)
+    expect(slot.width).toBe(DIRECTOR_DOCK_WIDTH)
+    const dockLeft = WINDOW - slot.right - slot.width
+    expect(dockLeft).toBeGreaterThan(insets.centre)
+  })
+
+  it('Visualize is full-bleed — Director floats on the right instead of a reserved rail', () => {
     const insets = viewportInsets('visualize', WINDOW, false)
     expect(insets.rightWidth).toBe(0)
     expect(insets.right).toBe(WINDOW - GUTTER)

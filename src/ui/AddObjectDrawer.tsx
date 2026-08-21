@@ -5,7 +5,7 @@ import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { CubeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
-import { useViewportInsets, useWindowSize } from './viewportInsets'
+import { GUTTER, directorDockSlot, useViewportInsets, useWindowSize } from './viewportInsets'
 
 type Chip = 'primitives' | 'assets' | 'generate'
 type GenerateMode = 'pick' | 'text' | 'image'
@@ -27,6 +27,7 @@ export function AddObjectDrawer() {
   const [image, setImage] = useState<File | null>(null)
   const insets = useViewportInsets()
   const win = useWindowSize()
+  const dock = directorDockSlot(insets, win.w)
   const q = query.trim().toLowerCase()
 
   const primitives = useMemo(
@@ -41,7 +42,7 @@ export function AddObjectDrawer() {
       className="panel absolute z-30 flex flex-col overflow-hidden"
       style={{
         left: insets.left,
-        right: win.w - insets.right,
+        right: dock.right + dock.width + GUTTER,
         bottom: insets.contentBottom,
         height: 280,
       }}
