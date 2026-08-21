@@ -54,7 +54,7 @@ export function CameraRigHud() {
       className="pointer-events-auto absolute z-20 flex flex-col items-start gap-1.5"
       style={{
         left: insets.left + GUTTER,
-        bottom: cameraView ? insets.bottom + GUTTER : insets.contentBottom,
+        bottom: cameraView ? insets.bottom + GUTTER : insets.contentBottom + 28,
       }}
     >
       {cameraView ? (

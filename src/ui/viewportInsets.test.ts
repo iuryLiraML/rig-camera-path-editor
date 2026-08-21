@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   chromeBand,
+  clampPipRect,
   DIRECTOR_COMPOSER_HEIGHT,
   DIRECTOR_DOCK_WIDTH,
   directorDockSlot,
@@ -96,7 +97,7 @@ describe('viewportInsets', () => {
     expect(free.h).toBeGreaterThan(0)
   })
 
-  it('sits Compose Director in the timeline row, with PiP above the footer pills', () => {
+  it('sits PiP above the footer pills in Compose', () => {
     const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'sequence' })
     expect(insets.dockBottom).toBe(GUTTER)
     expect(insets.contentBottom).toBe(insets.bottom + FOOTER_ROW_HEIGHT + GUTTER + GUTTER)
@@ -160,5 +161,19 @@ describe('viewportInsets', () => {
     const insets = viewportInsets('build', WINDOW, false)
     expect(insets.dockBottom).toBe(GUTTER + GUTTER)
     expect(insets.contentBottom).toBe(insets.dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER)
+  })
+
+  it('lifts a hydrated PiP off the Director rail and the Compose timeline', () => {
+    const vw = 1440
+    const vh = 900
+    const insets = viewportInsets('compose', vw, true, vh, 240, {
+      composeDock: 'timeline',
+      showOutliner: true,
+    })
+    const clamped = clampPipRect({ right: 16, bottom: 192, fraction: 0.22 }, insets, vw, vh)
+    expect(clamped.right).toBeGreaterThanOrEqual(GUTTER + DIRECTOR_DOCK_WIDTH + GUTTER)
+    expect(clamped.bottom).toBeGreaterThanOrEqual(insets.contentBottom)
+    const again = clampPipRect(clamped, insets, vw, vh)
+    expect(again).toEqual(clamped)
   })
 })

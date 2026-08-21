@@ -2,11 +2,14 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { useEditorStore } from '../state/useEditorStore'
+import { useRigStore } from '../state/useRigStore'
 import { NavLegend } from './NavLegend'
 import { Toolbar } from './Toolbar'
 
 afterEach(() => {
   cleanup()
+  useEditorStore.setState({ workspaceMode: 'build' })
+  useRigStore.setState({ cameraKind: 'path' })
 })
 
 describe('viewport home chrome', () => {
@@ -14,6 +17,26 @@ describe('viewport home chrome', () => {
     const { container } = render(<NavLegend />)
     expect(container.textContent).toContain('Origin · H')
     expect(container.textContent).toContain('? shortcuts')
+  })
+
+  it('keeps the Compose legend to orbit chrome, not the full shortcut sheet', () => {
+    useEditorStore.setState({ workspaceMode: 'compose' })
+    useRigStore.setState({ cameraKind: 'path' })
+    const { container } = render(<NavLegend />)
+    expect(container.textContent).toContain('Orbit · LMB')
+    expect(container.textContent).toContain('? shortcuts')
+    expect(container.textContent).not.toContain('Open Timeline')
+    expect(container.textContent).not.toContain('Key the focused property')
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.width).toBe('')
+    expect(Number.parseFloat(root.style.maxWidth)).toBeGreaterThan(0)
+  })
+
+  it('hides the Compose legend while the free-camera HUD is showing', () => {
+    useEditorStore.setState({ workspaceMode: 'compose' })
+    useRigStore.setState({ cameraKind: 'static' })
+    const { container } = render(<NavLegend />)
+    expect(container.textContent).toBe('')
   })
 
   it('offers a toolbar button that requests a home framing', () => {

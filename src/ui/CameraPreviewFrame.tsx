@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react'
+import { useLayoutEffect, useRef } from 'react'
 import { useCameraReady } from '../state/cameraPathLink'
 import { useEditorStore } from '../state/useEditorStore'
 import { leafList, useLayoutStore } from '../state/useLayoutStore'
 import { exportDimensions } from '../lib/recorder'
-import { GUTTER, directorDockSlot, useViewportInsets, type ViewportInsets } from './viewportInsets'
+import { clampPipRect, useViewportInsets } from './viewportInsets'
 import { CameraIcon } from './icons'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 
@@ -11,31 +11,6 @@ const MIN_FRACTION = 0.12
 const MAX_FRACTION = 0.5
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
-
-/**
- * Keep the PiP inside the free viewport area: the canvas spans the whole window
- * and the panels float on top, so clamping to the window alone let the PiP hide
- * behind them (and its drag handle with it).
- */
-function clampPipRect(
-  r: { right: number; bottom: number; fraction: number },
-  insets: ViewportInsets,
-) {
-  const vw = window.innerWidth
-  const vh = window.innerHeight
-  const w = r.fraction * vw
-  const h = r.fraction * vh
-  // `right`/`bottom` are distances from those window edges
-  const dock = directorDockSlot(insets)
-  const minRight = dock.right + dock.width + GUTTER
-  const maxRight = Math.max(minRight, vw - insets.left - w)
-  const maxBottom = Math.max(insets.contentBottom, vh - GUTTER - h)
-  return {
-    ...r,
-    right: clamp(r.right, minRight, maxRight),
-    bottom: clamp(r.bottom, insets.contentBottom, maxBottom),
-  }
-}
 
 /**
  * HTML frame around the picture-in-picture region. The pixels themselves are
@@ -55,6 +30,7 @@ export function CameraPreviewFrame() {
   const hasPath = useCameraReady()
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
   const insets = useViewportInsets()
+  const displayRect = clampPipRect(pipRect, insets, window.innerWidth, window.innerHeight)
   const activeCameraName = useCameraOptionsStore(
     (s) => s.options.find((option) => option.id === s.activeOptionId)?.name ?? 'Camera',
   )
@@ -69,20 +45,17 @@ export function CameraPreviewFrame() {
     fraction: number
   } | null>(null)
 
-  // correct the stored position on mount and on resize, so a default or a
-  // value saved under a different layout cannot sit under the panels/footer
-  useEffect(() => {
-    const onResize = () => {
-      const r = useEditorStore.getState().pipRect
-      const c = clampPipRect(r, insets)
-      if (c.right !== r.right || c.bottom !== r.bottom) {
-        useEditorStore.getState().setPipRect(c)
-      }
+  // Reclamp when chrome changes *or* when a project hydrate restores an old
+  // pipRect that would sit under the Director / timeline.
+  useLayoutEffect(() => {
+    if (
+      displayRect.right === pipRect.right &&
+      displayRect.bottom === pipRect.bottom
+    ) {
+      return
     }
-    onResize()
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
-  }, [insets.left, insets.right, insets.contentBottom])
+    useEditorStore.getState().setPipRect(displayRect)
+  }, [displayRect.right, displayRect.bottom, pipRect.right, pipRect.bottom])
 
   // in a split layout the panes replace the PiP's job
   if (!hasPath || playMode || !singlePane) return null
@@ -94,7 +67,7 @@ export function CameraPreviewFrame() {
           onClick={() => useEditorStore.getState().setCameraView(false)}
           title="Back to the editor camera (Esc)"
           className="panel absolute z-20 flex items-center gap-2 px-3 py-2 text-[11px] text-ink hover:text-white"
-          style={{ right: pipRect.right, bottom: pipRect.bottom }}
+          style={{ right: displayRect.right, bottom: displayRect.bottom }}
         >
           <CameraIcon />
           Exit {activeCameraName}
@@ -111,7 +84,7 @@ export function CameraPreviewFrame() {
         onClick={() => setShowPreview(true)}
         title="Show the camera view"
         className="panel absolute z-20 flex items-center gap-2 px-3 py-2 text-[11px] text-ink-dim hover:text-ink"
-        style={{ right: pipRect.right, bottom: pipRect.bottom }}
+        style={{ right: displayRect.right, bottom: displayRect.bottom }}
       >
         <CameraIcon />
         {activeCameraName}
@@ -130,11 +103,18 @@ export function CameraPreviewFrame() {
     if (d.mode === 'move') {
       useEditorStore
         .getState()
-        .setPipRect(clampPipRect({ ...pipRect, right: d.right - ddx, bottom: d.bottom - ddy }, insets))
+        .setPipRect(
+          clampPipRect(
+            { ...pipRect, right: d.right - ddx, bottom: d.bottom - ddy },
+            insets,
+            vw,
+            vh,
+          ),
+        )
     } else {
       // bottom-left grip: dragging left/up grows the square (anchored bottom-right)
       const fraction = clamp(d.fraction - ddx / vw, MIN_FRACTION, MAX_FRACTION)
-      useEditorStore.getState().setPipRect({ ...pipRect, fraction })
+      useEditorStore.getState().setPipRect(clampPipRect({ ...pipRect, fraction }, insets, vw, vh))
     }
   }
 
@@ -168,10 +148,10 @@ export function CameraPreviewFrame() {
     <div
       className="pointer-events-none absolute z-20 overflow-hidden rounded-md border border-line shadow-lg"
       style={{
-        right: pipRect.right,
-        bottom: pipRect.bottom,
-        width: `${pipRect.fraction * 100}%`,
-        height: `${pipRect.fraction * 100}%`,
+        right: displayRect.right,
+        bottom: displayRect.bottom,
+        width: `${displayRect.fraction * 100}%`,
+        height: `${displayRect.fraction * 100}%`,
       }}
     >
       {!cameraView && (

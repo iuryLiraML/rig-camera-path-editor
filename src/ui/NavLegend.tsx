@@ -1,26 +1,29 @@
-import { SHORTCUT_ROWS } from '../lib/editorShortcuts'
+import { chromeBand, GUTTER, useViewportInsets, useWindowSize } from './viewportInsets'
 import { useEditorStore } from '../state/useEditorStore'
-import { GUTTER, useViewportInsets } from './viewportInsets'
+import { useRigStore } from '../state/useRigStore'
 
 export function NavLegend() {
   const insets = useViewportInsets()
   const compose = useEditorStore((s) => s.workspaceMode === 'compose')
+  const staticCam = useRigStore((s) => s.cameraKind === 'static')
+  const win = useWindowSize()
+  const band = chromeBand(insets, win.w)
+  // Free-camera HUD occupies this band in Compose; keep the legend for path cameras.
+  if (compose && staticCam) return null
   return (
     <div
-      className="pointer-events-none absolute z-20 flex flex-wrap items-center gap-3 text-[10px] text-ink-dim"
-      style={{ left: insets.left, bottom: insets.bottom + GUTTER, right: insets.right }}
+      className="pointer-events-none absolute z-20 flex flex-nowrap items-center gap-3 overflow-hidden text-[10px] text-ink-dim"
+      style={{
+        left: band.left,
+        maxWidth: band.width,
+        bottom: compose ? insets.contentBottom : GUTTER,
+      }}
     >
       <span>Orbit · LMB</span>
       <span>Pan · RMB / MMB</span>
       <span>Zoom · Scroll</span>
       <span>Frame · F</span>
       <span>Origin · H</span>
-      {compose &&
-        SHORTCUT_ROWS.slice(0, 6).map((row) => (
-          <span key={row.keys}>
-            {row.action.split(' (')[0]} · {row.keys}
-          </span>
-        ))}
       <button
         type="button"
         title="Keyboard shortcuts (?)"

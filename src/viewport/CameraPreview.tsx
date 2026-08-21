@@ -7,6 +7,20 @@ import { editorOnlySet } from '../lib/editorOnly'
 import { cinemaCameraRef } from './rig/CinemaCamera'
 import { editorCameraRef } from './EditorCamera'
 import { renderOutline, renderSceneRegion } from './RenderPasses'
+import { clampPipRect, viewportInsets } from '../ui/viewportInsets'
+
+function placedPip(size: { width: number; height: number }) {
+  const editor = useEditorStore.getState()
+  const insets = viewportInsets(
+    editor.workspaceMode,
+    size.width,
+    !editor.playMode && editor.workspaceMode === 'compose',
+    size.height,
+    editor.timelineHeight,
+    { composeDock: editor.composeDock, showOutliner: editor.showOutliner },
+  )
+  return clampPipRect(editor.pipRect, insets, size.width, size.height)
+}
 
 /**
  * Renders the cinema-camera picture-in-picture into a scissored corner of the
@@ -48,7 +62,7 @@ export function CameraPreview() {
       // (the cinema body would be hidden in the main viewport)
       const editorCam = editorCameraRef.current
       if (!editor.showPreview || !editorCam) return
-      const pip = editor.pipRect
+      const pip = placedPip(size)
       const pw = Math.round(size.width * pip.fraction)
       const ph = Math.round(size.height * pip.fraction)
       const x = size.width - pw - pip.right
@@ -66,7 +80,7 @@ export function CameraPreview() {
     }
     if (!editor.showPreview || !cam || !cameraReady()) return
 
-    const pip = editor.pipRect
+    const pip = placedPip(size)
     const pw = Math.round(size.width * pip.fraction)
     const ph = Math.round(size.height * pip.fraction)
     const x = size.width - pw - pip.right

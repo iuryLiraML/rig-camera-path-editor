@@ -36,7 +36,7 @@ import {
   type ObjectChannel,
   type ProgressKey,
 } from '../lib/keyframes'
-import { easeGroups, type EaseKind } from '../lib/easing'
+import { type EaseKind } from '../lib/easing'
 import {
   clampChannelValue,
   normalizeInRange,
@@ -70,6 +70,7 @@ import {
   type TimeView,
 } from '../lib/timeView'
 import { CAMERA_CHANNELS, FX_PARAM_CHANNELS } from './cameraChannels'
+import { EasePicker } from './EasePicker'
 import { GraphEditor, buildGraphChannels } from './GraphEditor'
 import { Slider, XYZInput } from './primitives'
 import { normalizeSamples, sampleOverTime, TrackCurve } from './TrackCurve'
@@ -1130,7 +1131,7 @@ export function Timeline() {
     >
       <TimelineResizeHandle />
       {/* transport: tabs | play+timecode | loop/easing/graph — Add a Shot stays at the end */}
-      <div className="flex items-center gap-3 pb-1.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-1.5">
         <ComposeDockTabs />
         <span className="h-4 w-px shrink-0 bg-line" aria-hidden />
         <div className="flex items-center gap-1.5">
@@ -1245,23 +1246,11 @@ export function Timeline() {
         {selectedKeyframe && (
           <label className="flex items-center gap-1 text-[10px] text-ink-dim">
             Curve
-            <select
-              data-key-ease
+            <EasePicker
               value={selectedKeyEase() ?? ease}
-              onChange={(e) => setSelectedKeyEase(e.target.value as EaseKind)}
+              onChange={setSelectedKeyEase}
               title="Animation curve leaving the selected key"
-              className="max-w-[9rem] rounded-md bg-panel-2 px-1.5 py-0.5 text-[11px] text-ink outline-none"
-            >
-              {easeGroups().map((group) => (
-                <optgroup key={group.group} label={group.group}>
-                  {group.items.map((item) => (
-                    <option key={item.kind} value={item.kind}>
-                      {item.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            />
           </label>
         )}
         <div className="ml-auto flex min-w-0 items-center gap-2">
