@@ -166,8 +166,8 @@ export interface ViewportInsets {
    */
   contentBottom: number
   /**
-   * Distance from the window bottom to the Director composer. Compose docks
-   * the composer in the timeline row (`GUTTER`); Build / Visualize float it.
+   * Distance from the window bottom to the floating Director composer in
+   * Build / Visualize. Compose uses a full-height right rail (`GUTTER` top and bottom).
    */
   dockBottom: number
   leftWidth: number

@@ -7,6 +7,7 @@ import { Toolbar } from './Toolbar'
 
 afterEach(() => {
   cleanup()
+  useEditorStore.setState({ workspaceMode: 'build' })
 })
 
 describe('viewport home chrome', () => {
@@ -14,6 +15,15 @@ describe('viewport home chrome', () => {
     const { container } = render(<NavLegend />)
     expect(container.textContent).toContain('Origin · H')
     expect(container.textContent).toContain('? shortcuts')
+  })
+
+  it('keeps the Compose legend to orbit chrome, not the full shortcut sheet', () => {
+    useEditorStore.setState({ workspaceMode: 'compose' })
+    const { container } = render(<NavLegend />)
+    expect(container.textContent).toContain('Orbit · LMB')
+    expect(container.textContent).toContain('? shortcuts')
+    expect(container.textContent).not.toContain('Open Timeline')
+    expect(container.textContent).not.toContain('Key the focused property')
   })
 
   it('offers a toolbar button that requests a home framing', () => {

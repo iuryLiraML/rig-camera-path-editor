@@ -96,7 +96,7 @@ describe('viewportInsets', () => {
     expect(free.h).toBeGreaterThan(0)
   })
 
-  it('sits Compose Director in the timeline row, with PiP above the footer pills', () => {
+  it('sits PiP above the footer pills in Compose', () => {
     const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'sequence' })
     expect(insets.dockBottom).toBe(GUTTER)
     expect(insets.contentBottom).toBe(insets.bottom + FOOTER_ROW_HEIGHT + GUTTER + GUTTER)

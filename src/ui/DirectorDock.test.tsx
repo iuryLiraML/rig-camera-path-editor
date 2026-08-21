@@ -92,29 +92,24 @@ describe('DirectorDock', () => {
     expect(getByTitle('Attach a reference photo')).toBeTruthy()
   })
 
-  it('docks the Compose composer into the timeline row', () => {
+  it('fills the Compose right rail from the top gutter to the bottom', () => {
     useEditorStore.setState({ workspaceMode: 'compose' })
-    const { container } = render(<DirectorDock />)
+    const { container, queryByTitle } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
+    expect(root.style.top).toBe('12px')
     expect(root.style.bottom).toBe('12px')
-    expect(root.style.height).toBe('148px')
-    expect(root.style.top).toBe('')
+    expect(root.style.height).toBe('')
+    expect(container.textContent).toContain('Director')
+    expect(queryByTitle('Expand chat')).toBeNull()
+    expect(queryByTitle('Collapse chat')).toBeNull()
   })
 
-  it('matches the Timeline dock height when that tab is selected', () => {
+  it('keeps the full-height rail when the Timeline tab is selected', () => {
     useEditorStore.setState({ workspaceMode: 'compose', composeDock: 'timeline', timelineHeight: 240 })
     const { container } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
+    expect(root.style.top).toBe('12px')
     expect(root.style.bottom).toBe('12px')
-    expect(root.style.height).toBe('240px')
-  })
-
-  it('grows the Compose transcript up the reserved column', () => {
-    useEditorStore.setState({ workspaceMode: 'compose', directorExpanded: true })
-    const { container } = render(<DirectorDock />)
-    const root = container.firstElementChild as HTMLElement
-    expect(root.style.bottom).toBe('12px')
-    expect(root.style.top).toBeTruthy()
     expect(root.style.height).toBe('')
   })
 

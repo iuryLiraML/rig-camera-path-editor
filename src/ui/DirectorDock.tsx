@@ -23,7 +23,7 @@ const PLACEHOLDER: Record<'build' | 'compose' | 'visualize', string> = {
   visualize: 'Describe the shot to generate…',
 }
 
-/** Director composer — docked beside Sequence/Timeline in Compose, floating elsewhere. */
+/** Director composer — full-height right rail in Compose, floating elsewhere. */
 export function DirectorDock() {
   const chat = useAgentStore((s) => s.chat)
   const status = useAgentStore((s) => s.status)
@@ -47,7 +47,8 @@ export function DirectorDock() {
   const [pendingImage, setPendingImage] = useState<File | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const generate = workspaceMode === 'visualize'
-  const composeDocked = workspaceMode === 'compose'
+  const composeRail = workspaceMode === 'compose'
+  const showTranscript = composeRail || expanded
 
   useEffect(() => {
     const node = scrollRef.current
@@ -79,16 +80,19 @@ export function DirectorDock() {
       className="absolute z-30 flex min-h-0 flex-col"
       style={{
         right: dock.right,
-        bottom: composeDocked ? GUTTER : insets.dockBottom,
         width: dock.width,
-        ...(composeDocked && !expanded ? { height: insets.timelineHeight } : {}),
-        ...(expanded ? { top: insets.top } : {}),
+        ...(composeRail
+          ? { top: GUTTER, bottom: GUTTER }
+          : {
+              bottom: insets.dockBottom,
+              ...(expanded ? { top: insets.top } : {}),
+            }),
       }}
     >
-      {expanded && (
+      {showTranscript && (
         <div
           className={`panel flex min-h-0 flex-1 flex-col overflow-hidden ${
-            composeDocked ? 'mb-0 rounded-b-none' : 'mb-2'
+            composeRail ? 'mb-0 rounded-b-none' : 'mb-2'
           }`}
         >
           <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-3 py-2">
@@ -117,14 +121,16 @@ export function DirectorDock() {
                 New
               </button>
             )}
-            <button
-              type="button"
-              title="Collapse chat"
-              onClick={() => useEditorStore.getState().setDirectorExpanded(false)}
-              className={`rounded-md px-1.5 py-0.5 text-[13px] text-ink-dim hover:text-ink ${generate || chat.length > 0 ? '' : 'ml-auto'}`}
-            >
-              ×
-            </button>
+            {!composeRail && (
+              <button
+                type="button"
+                title="Collapse chat"
+                onClick={() => useEditorStore.getState().setDirectorExpanded(false)}
+                className={`rounded-md px-1.5 py-0.5 text-[13px] text-ink-dim hover:text-ink ${generate || chat.length > 0 ? '' : 'ml-auto'}`}
+              >
+                ×
+              </button>
+            )}
           </div>
 
           {!hasKey ? (
@@ -246,11 +252,7 @@ export function DirectorDock() {
 
       <div
         className={`panel overflow-hidden p-2.5 focus-within:border-accent ${
-          composeDocked
-            ? expanded
-              ? 'shrink-0 rounded-t-none'
-              : 'flex min-h-0 flex-1 flex-col'
-            : 'shrink-0 rounded-3xl'
+          composeRail ? 'shrink-0 rounded-t-none' : 'shrink-0 rounded-3xl'
         }`}
       >
         <input
@@ -281,14 +283,16 @@ export function DirectorDock() {
             placeholder={PLACEHOLDER[workspaceMode]}
             className="min-h-[40px] w-full resize-none bg-transparent text-[12px] leading-relaxed text-ink outline-none placeholder:text-ink-dim"
           />
-          <button
-            type="button"
-            title={expanded ? 'Collapse chat' : 'Expand chat'}
-            onClick={() => useEditorStore.getState().setDirectorExpanded(!expanded)}
-            className="mt-0.5 shrink-0 rounded-md p-1 text-ink-dim hover:bg-panel-2 hover:text-ink"
-          >
-            <ExpandIcon size={13} />
-          </button>
+          {!composeRail && (
+            <button
+              type="button"
+              title={expanded ? 'Collapse chat' : 'Expand chat'}
+              onClick={() => useEditorStore.getState().setDirectorExpanded(!expanded)}
+              className="mt-0.5 shrink-0 rounded-md p-1 text-ink-dim hover:bg-panel-2 hover:text-ink"
+            >
+              <ExpandIcon size={13} />
+            </button>
+          )}
         </div>
         {(pendingImage || liftPhotoName) && (
           <div className="mt-1 truncate px-0.5 text-[10px] text-ink-dim">
