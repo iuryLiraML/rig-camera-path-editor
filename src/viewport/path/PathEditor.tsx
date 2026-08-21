@@ -105,6 +105,7 @@ function AnchorGizmo({ anchor, isFirst }: { anchor: PathAnchor; isFirst: boolean
       ref={ref}
       position={anchor.position}
       userData={{ pickKind: 'path-anchor', pickId: `anchor:${anchor.id}` }}
+      frustumCulled={false}
       onPointerDown={(e) => {
         if (e.button !== 0) return
         // while drawing, clicking the first anchor closes the loop
@@ -155,6 +156,7 @@ function HandleGizmo({ anchor, which }: { anchor: PathAnchor; which: 'in' | 'out
         ref={ref}
         position={tip}
         userData={{ pickKind: 'path-anchor', pickId: `handle:${anchor.id}:${which}` }}
+        frustumCulled={false}
         onPointerDown={(e) => {
           if (e.button !== 0) return
           usePathStore.getState().selectAnchor(anchor.id)

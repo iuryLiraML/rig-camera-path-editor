@@ -16,7 +16,7 @@ import {
   CameraIcon,
   CubeIcon,
   ImportIcon,
-  MenuIcon,
+  DotsIcon,
   PenIcon,
   PlusIcon,
   SearchIcon,
@@ -24,7 +24,7 @@ import {
   TargetIcon,
   TrashIcon,
 } from './icons'
-import { GUTTER, useViewportInsets } from './viewportInsets'
+import { GUTTER, TOP_ROW_HEIGHT, useViewportInsets } from './viewportInsets'
 
 function TreeItem({
   id,
@@ -368,7 +368,7 @@ function menuCoords(button: HTMLElement) {
   return { top: r.bottom + 6, left: Math.max(8, left) }
 }
 
-function ProjectMenu() {
+export function ProjectMenu() {
   const [open, setOpen] = useState(false)
   const [confirming, setConfirming] = useState<'reset' | 'delete' | null>(null)
   const [coords, setCoords] = useState({ top: 0, left: 0 })
@@ -417,7 +417,7 @@ function ProjectMenu() {
           setConfirming(null)
         }}
       >
-        <MenuIcon />
+        <DotsIcon size={14} />
       </button>
       {open &&
         createPortal(
@@ -512,18 +512,6 @@ function ProjectMenu() {
   )
 }
 
-function ProjectNameInput() {
-  const name = useProjectStore((s) => s.name)
-  return (
-    <input
-      value={name}
-      onChange={(e) => useProjectStore.getState().setName(e.target.value)}
-      className="w-full min-w-0 truncate bg-transparent text-xs font-medium text-ink outline-none"
-      title="Project name"
-    />
-  )
-}
-
 export function LeftPanel() {
   const objects = useSceneStore((s) => s.objects)
   const pendingLifts = useSceneStore((s) => s.pendingLifts)
@@ -550,31 +538,15 @@ export function LeftPanel() {
 
   return (
     <div
-      className="panel absolute z-20 flex flex-col overflow-hidden"
+      className="panel absolute z-20 flex flex-col overflow-hidden rounded-t-none border-t-0"
       style={{
         left: GUTTER,
-        top: GUTTER,
+        top: GUTTER + TOP_ROW_HEIGHT,
         bottom: GUTTER,
         width: insets.leftWidth || 280,
       }}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      <div className="flex items-center justify-between gap-2 border-b border-line/60 px-3 py-2">
-        <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">Project</span>
-        <div className="flex min-w-0 flex-1 items-center justify-end gap-1">
-          <ProjectNameInput />
-          <ProjectMenu />
-          <button
-            type="button"
-            title="Close outliner"
-            onClick={() => useEditorStore.getState().setShowOutliner(false)}
-            className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-dim hover:bg-panel-2 hover:text-ink"
-          >
-            ×
-          </button>
-        </div>
-      </div>
-
       <div className="px-2 pt-2">
         <div className="flex items-center gap-2 rounded-md bg-panel-2 px-2 py-1.5">
           <SearchIcon className="shrink-0 text-ink-dim" />

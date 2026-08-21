@@ -5,7 +5,7 @@ import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { CubeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
-import { GUTTER, useViewportInsets, useWindowSize } from './viewportInsets'
+import { useViewportInsets, useWindowSize } from './viewportInsets'
 
 type Chip = 'primitives' | 'assets' | 'generate'
 type GenerateMode = 'pick' | 'text' | 'image'
@@ -42,7 +42,7 @@ export function AddObjectDrawer() {
       style={{
         left: insets.left,
         right: win.w - insets.right,
-        bottom: GUTTER,
+        bottom: insets.contentBottom,
         height: 280,
       }}
     >

@@ -1,15 +1,19 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
-import { LeftPanel } from './LeftPanel'
+import { useEditorStore } from '../state/useEditorStore'
+import { ProjectChip } from './ProjectChip'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useEditorStore.setState({ workspaceMode: 'build', showOutliner: false })
+})
 
 describe('project menu', () => {
-  it('portals onto document.body so the sidebar overflow cannot clip labels', () => {
-    const { container } = render(<LeftPanel />)
-    const sidebar = container.firstElementChild as HTMLElement
-    expect(sidebar.className).toContain('overflow-hidden')
+  it('portals onto document.body so the chip cannot clip labels', () => {
+    useEditorStore.setState({ workspaceMode: 'build', showOutliner: true })
+    const { container } = render(<ProjectChip />)
+    const chip = container.firstElementChild as HTMLElement
 
     const trigger = container.querySelector('button[title="Project menu"]')
     expect(trigger).not.toBeNull()
@@ -21,7 +25,7 @@ describe('project menu', () => {
         (button) => button.textContent === label,
       )
       expect(item, label).toBeTruthy()
-      expect(sidebar.contains(item!), label).toBe(false)
+      expect(chip.contains(item!), label).toBe(false)
     }
   })
 })

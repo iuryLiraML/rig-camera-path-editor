@@ -1,19 +1,25 @@
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { ListIcon } from './icons'
-import { useViewportInsets } from './viewportInsets'
+import { ProjectMenu } from './LeftPanel'
+import { GUTTER, LEFT_PANEL_MAX } from './viewportInsets'
 
 export function ProjectChip() {
   const name = useProjectStore((s) => s.name)
   const showOutliner = useEditorStore((s) => s.showOutliner)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
-  const insets = useViewportInsets()
   const canToggleOutliner = workspaceMode !== 'visualize'
 
   return (
     <div
-      className="panel absolute top-3 z-40 flex max-w-[240px] items-center gap-1.5 px-2 py-1"
-      style={{ left: insets.left }}
+      className={`panel absolute z-40 flex items-center gap-1.5 px-2 py-1 ${
+        showOutliner ? 'rounded-b-none border-b-0' : 'max-w-[240px]'
+      }`}
+      style={{
+        top: GUTTER,
+        left: GUTTER,
+        width: showOutliner ? LEFT_PANEL_MAX : undefined,
+      }}
     >
       {canToggleOutliner && (
         <>
@@ -45,6 +51,19 @@ export function ProjectChip() {
         className="min-w-0 flex-1 truncate bg-transparent text-[11px] font-medium text-ink outline-none"
         title="Project name"
       />
+      {showOutliner && (
+        <>
+          <ProjectMenu />
+          <button
+            type="button"
+            title="Close outliner"
+            onClick={() => useEditorStore.getState().setShowOutliner(false)}
+            className="rounded-md px-1.5 py-0.5 text-[13px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+          >
+            ×
+          </button>
+        </>
+      )}
     </div>
   )
 }

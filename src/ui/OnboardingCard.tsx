@@ -21,7 +21,7 @@ export function OnboardingCard() {
     return (
       <Guide
         title="Add something to look at"
-        body="Import a .glb, or press + to drop a clay primitive. Then switch to Compose to draw the camera."
+        body="Import a .glb from the prompt bar or the Outliner, or press + to drop a clay primitive. Then switch to Compose to draw the camera."
         actionLabel="Add an object"
         onAction={() => useEditorStore.getState().setShowAddDrawer(true)}
         icon={<PlusIcon />}

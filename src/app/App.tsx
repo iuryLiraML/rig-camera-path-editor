@@ -34,7 +34,6 @@ import { ModeSwitcher } from '../ui/ModeSwitcher'
 import { ProjectChip } from '../ui/ProjectChip'
 import { AddObjectDrawer } from '../ui/AddObjectDrawer'
 import { ObjectBar } from '../ui/ObjectBar'
-import { BuildTools } from '../ui/BuildTools'
 import { NavLegend } from '../ui/NavLegend'
 import { ImportAssetsModal } from '../ui/ImportAssetsModal'
 import { ShotFrame } from '../ui/ShotFrame'
@@ -278,7 +277,6 @@ function EditorWorkspace() {
       {chrome.cameraBar && !chrome.footer && <CameraBar />}
       {chrome.cameraBar && <CameraAdjustPanel />}
       {chrome.objectBar && <ObjectBar />}
-      {chrome.buildTools && <BuildTools />}
       {chrome.addDrawer && <AddObjectDrawer />}
       <ImportAssetsModal />
 

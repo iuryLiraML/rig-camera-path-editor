@@ -29,15 +29,60 @@ describe('viewportPick', () => {
     expect(pickKindOf(child)).toBe('gizmo')
   })
 
-  it('prefers a scene object over a path line at the same depth', () => {
+  it('drops the transform plane so a mesh click next to the gizmo stays a mesh', () => {
+    const plane = new THREE.Object3D()
+    plane.name = 'TransformControlsPlane'
+    expect(pickKindOf(plane)).toBeNull()
+
     const tagged = tagHits([
-      hit('path-line', 'path:a', 1),
-      hit('object', 'obj:box', 1.02),
-      hit('path-anchor', 'anchor:1', 1.01),
+      { object: plane, distance: 1 },
+      hit('object', 'obj:box', 1.01),
+      hit('camera', 'cinema-camera', 2.5),
     ])
     const ordered = preferTaggedHits(tagged)
     expect(ordered[0]?.id).toBe('obj:box')
     expect(ordered[0]?.kind).toBe('object')
+  })
+
+  it('keeps the W/E/R arrows even when a mesh or camera sits closer on the ray', () => {
+    const root = new THREE.Object3D()
+    root.name = 'TransformControlsGizmo'
+    const child = new THREE.Mesh()
+    root.add(child)
+    const tagged = tagHits([
+      { object: child, distance: 1.4 },
+      hit('object', 'obj:box', 1),
+      hit('camera', 'cinema-camera', 1.1),
+    ])
+    expect(preferTaggedHits(tagged)[0]?.kind).toBe('gizmo')
+  })
+
+  it('prefers a scene object over a fat path line at the same depth', () => {
+    const tagged = tagHits([
+      hit('path-line', 'path:a', 1),
+      hit('object', 'obj:box', 1.02),
+    ])
+    const ordered = preferTaggedHits(tagged)
+    expect(ordered[0]?.id).toBe('obj:box')
+    expect(ordered[0]?.kind).toBe('object')
+  })
+
+  it('selects a cube in front of the camera icon, not the camera', () => {
+    const tagged = tagHits([
+      hit('object', 'obj:box', 1),
+      hit('camera', 'cinema-camera', 1.12),
+    ])
+    const ordered = preferTaggedHits(tagged)
+    expect(ordered[0]?.id).toBe('obj:box')
+    expect(ordered[0]?.kind).toBe('object')
+  })
+
+  it('selects the camera when it is clearly closer than the mesh', () => {
+    const tagged = tagHits([
+      hit('camera', 'cinema-camera', 1),
+      hit('object', 'obj:box', 2.2),
+    ])
+    expect(preferTaggedHits(tagged)[0]?.id).toBe('cinema-camera')
   })
 
   it('cycles stacked objects only on repeated clicks, not hover', () => {

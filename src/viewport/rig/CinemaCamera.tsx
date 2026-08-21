@@ -18,6 +18,10 @@ import { isTechMode } from '../RenderPasses'
 const BODY = '#2a2a2a'
 const BODY_HOT = '#5a5a5a'
 
+function ignoreRaycast() {
+  // Visual wire only — the body sphere is the pick volume.
+}
+
 function CameraFrustum({ selected }: { selected: boolean }) {
   const color = selected ? BODY_HOT : BODY
   const geo = useMemo(() => {
@@ -47,11 +51,11 @@ function CameraFrustum({ selected }: { selected: boolean }) {
 
   return (
     <group>
-      <lineSegments geometry={geo}>
-        <lineBasicMaterial color={color} />
+      <lineSegments geometry={geo} raycast={ignoreRaycast}>
+        <lineBasicMaterial color={color} depthTest={false} />
       </lineSegments>
-      <mesh geometry={up}>
-        <meshBasicMaterial color={color} side={THREE.DoubleSide} />
+      <mesh geometry={up} raycast={ignoreRaycast}>
+        <meshBasicMaterial color={color} depthTest={false} side={THREE.DoubleSide} />
       </mesh>
     </group>
   )
@@ -111,6 +115,11 @@ export function CinemaCamera() {
     if (!pose) return
     cam.position.set(...pose.position)
     cam.quaternion.set(...pose.quaternion)
+    const body = bodyRef.current
+    if (body) {
+      body.position.copy(cam.position)
+      body.quaternion.copy(cam.quaternion)
+    }
     if (playMode || cameraView) {
       applyCanvasAspect(cam, state.size.width, state.size.height)
     }
@@ -123,27 +132,35 @@ export function CinemaCamera() {
   if (!ready) return null
 
   return (
-    <PerspectiveCamera
-      ref={camRef}
-      makeDefault={playMode || cameraView}
-      fov={fov}
-      near={0.05}
-      far={200}
-      onPointerDown={(e) => {
-        e.stopPropagation()
-        useEditorStore.getState().select('cinema-camera')
-      }}
-    >
-      {/* camera body gizmo — the viewport camera icon. Hidden while looking
-          through or playing; static rigs keep it so the orange handles are
-          extras, not a replacement for the frustum. */}
+    <>
+      <PerspectiveCamera
+        ref={camRef}
+        makeDefault={playMode || cameraView}
+        fov={fov}
+        near={0.05}
+        far={200}
+      />
+      {/* Must live in the scene, not as a child of PerspectiveCamera: R3F
+          raycast skips a camera's subtree, so a click on the icon would
+          fall through onto whatever mesh sits behind it. */}
       <group
         ref={bodyRef}
         userData={{ pickKind: 'camera', pickId: 'cinema-camera' }}
         visible={!playMode && !cameraView && !tech}
+        frustumCulled={false}
+        onPointerDown={(e) => {
+          if (e.button !== 0) return
+          e.stopPropagation()
+          useEditorStore.getState().select('cinema-camera')
+          useEditorStore.getState().setTool('select')
+        }}
       >
+        <mesh position={[0, 0, -0.14]} frustumCulled={false}>
+          <sphereGeometry args={[0.18, 12, 12]} />
+          <meshBasicMaterial transparent opacity={0} depthTest={false} depthWrite={false} />
+        </mesh>
         <CameraFrustum selected={selected} />
       </group>
-    </PerspectiveCamera>
+    </>
   )
 }

@@ -37,25 +37,39 @@ export function resetPickCycle() {
   pendingClick = false
 }
 
-function isTransformControl(object: Object3D): boolean {
+function ancestorMatches(object: Object3D, test: (node: Object3D) => boolean): boolean {
   let node: Object3D | null = object
   while (node) {
-    const type = node.type
-    if (
-      type === 'TransformControls' ||
-      type === 'TransformControlsRoot' ||
-      type === 'TransformControlsGizmo' ||
-      type === 'TransformControlsPlane'
-    ) {
-      return true
-    }
-    if (typeof node.name === 'string' && node.name.startsWith('TransformControls')) return true
+    if (test(node)) return true
     node = node.parent
   }
   return false
 }
 
+/** Huge sheet through the selected object — must not steal mesh / camera clicks. */
+function isTransformControlPlane(object: Object3D): boolean {
+  return ancestorMatches(
+    object,
+    (node) => node.type === 'TransformControlsPlane' || node.name === 'TransformControlsPlane',
+  )
+}
+
+function isTransformControl(object: Object3D): boolean {
+  return ancestorMatches(object, (node) => {
+    const type = node.type
+    if (
+      type === 'TransformControls' ||
+      type === 'TransformControlsRoot' ||
+      type === 'TransformControlsGizmo'
+    ) {
+      return true
+    }
+    return typeof node.name === 'string' && node.name.startsWith('TransformControls')
+  })
+}
+
 export function pickKindOf(object: Object3D): PickKind | null {
+  if (isTransformControlPlane(object)) return null
   if (isTransformControl(object)) return 'gizmo'
   let node: Object3D | null = object
   while (node) {
@@ -86,12 +100,29 @@ export function tagHits<T extends { object: Object3D; distance: number }>(hits: 
   return out
 }
 
+function takeClosest<T>(hits: TaggedHit<T>[]): TaggedHit<T>[] {
+  const closest = Math.min(...hits.map((item) => item.distance))
+  const slack = Math.max(0.02, closest * 0.02)
+  return hits.filter((item) => item.distance <= closest + slack)
+}
+
 /**
- * Scene objects beat the path and the camera icon when they sit on the same
- * click. Repeated clicks in the same spot cycle stacked objects.
+ * The W/E/R transform gizmo of the current selection always wins — dragging
+ * an arrow must not pick the mesh or camera sitting behind it. Everything
+ * else uses true depth: a cube in front of the camera icon stays a cube.
+ * Scene objects still beat the fat spline stroke. Repeated clicks in the
+ * same spot cycle stacked objects.
  */
 export function preferTaggedHits<T>(tagged: TaggedHit<T>[]): TaggedHit<T>[] {
   if (tagged.length === 0) return tagged
+
+  const gizmos = tagged.filter((item) => item.kind === 'gizmo')
+  if (gizmos.length > 0) {
+    const chosen = takeClosest(gizmos)
+    const rest = tagged.filter((item) => !chosen.includes(item))
+    return [...chosen, ...rest]
+  }
+
   const closest = Math.min(...tagged.map((item) => item.distance))
   const slack = Math.max(0.14, closest * 0.1)
   const near = tagged.filter((item) => item.distance <= closest + slack)
@@ -134,7 +165,7 @@ function rotate<T>(hits: TaggedHit<T>[], index: number): TaggedHit<T>[] {
   return [...hits.slice(i), ...hits.slice(0, i)]
 }
 
-/** R3F `events.filter` — drop unmarked helpers, prefer objects over the spline. */
+/** R3F `events.filter` — drop unmarked helpers, transform gizmo first, then depth. */
 export function filterViewportHits<T extends { object: Object3D; distance: number }>(hits: T[]): T[] {
   return preferTaggedHits(tagHits(hits)).map((item) => item.hit)
 }

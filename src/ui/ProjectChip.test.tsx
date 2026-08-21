@@ -19,6 +19,15 @@ describe('ProjectChip', () => {
     expect(useEditorStore.getState().showOutliner).toBe(true)
   })
 
+  it('keeps the Outliner button on the left when the panel is open', () => {
+    useEditorStore.setState({ workspaceMode: 'build', showOutliner: true })
+    const { container, getByTitle } = render(<ProjectChip />)
+    const chip = container.firstElementChild as HTMLElement
+    expect(chip.style.left).toBe('12px')
+    const firstButton = chip.querySelector('button')
+    expect(firstButton).toBe(getByTitle('Outliner'))
+  })
+
   it('hides the outliner toggle in Visualize', () => {
     useEditorStore.setState({ workspaceMode: 'visualize' })
     const { queryByTitle, getByText } = render(<ProjectChip />)

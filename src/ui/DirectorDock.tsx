@@ -4,7 +4,7 @@ import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
-import { ExpandIcon, ImageIcon } from './icons'
+import { PlusIcon, ImportIcon, ExpandIcon, ImageIcon } from './icons'
 import { useViewportInsets } from './viewportInsets'
 
 function ToolChip({ name }: { name: string }) {
@@ -39,6 +39,7 @@ export function DirectorDock() {
   const visualizeMedia = useEditorStore((s) => s.visualizeMedia)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const expanded = useEditorStore((s) => s.directorExpanded)
+  const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
   const insets = useViewportInsets()
   const [input, setInput] = useState('')
   const [showSkills, setShowSkills] = useState(false)
@@ -73,7 +74,7 @@ export function DirectorDock() {
 
   return (
     <div
-      className="absolute z-30 flex w-[min(440px,calc(100%-24px))] -translate-x-1/2 flex-col"
+      className="absolute z-30 flex w-[min(520px,calc(100%-24px))] -translate-x-1/2 flex-col"
       style={{ left: insets.centre, bottom: insets.dockBottom }}
     >
       {expanded && (
@@ -231,7 +232,7 @@ export function DirectorDock() {
         </div>
       )}
 
-      <div className="panel overflow-hidden rounded-2xl p-2.5 focus-within:border-accent">
+      <div className="panel overflow-hidden rounded-3xl p-2.5 focus-within:border-accent">
         <input
           id="director-attach-photo"
           type="file"
@@ -307,23 +308,48 @@ export function DirectorDock() {
             </label>
           </div>
         )}
-        <div className="mt-1.5 flex items-center gap-1">
-          <label
-            htmlFor="director-attach-photo"
-            title="Attach a reference photo"
-            className={`cursor-pointer rounded-md p-1 ${
-              pendingImage || liftPhotoName ? 'bg-accent text-white' : 'text-ink-dim hover:text-ink'
-            }`}
-          >
-            <ImageIcon size={14} />
-          </label>
-          <span className="flex-1" />
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-0.5">
+            {workspaceMode === 'build' && (
+              <button
+                type="button"
+                title="Add an object"
+                onClick={() => useEditorStore.getState().toggleAddDrawer()}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                  showAddDrawer
+                    ? 'bg-accent text-white'
+                    : 'text-ink-dim hover:bg-panel-2 hover:text-ink'
+                }`}
+              >
+                <PlusIcon size={15} />
+              </button>
+            )}
+            <button
+              type="button"
+              title="Import a .glb or .gltf"
+              onClick={() => useEditorStore.getState().setShowImportModal(true)}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-dim hover:bg-panel-2 hover:text-ink"
+            >
+              <ImportIcon size={15} />
+            </button>
+            <label
+              htmlFor="director-attach-photo"
+              title="Attach a reference photo"
+              className={`flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-lg ${
+                pendingImage || liftPhotoName
+                  ? 'bg-accent text-white'
+                  : 'text-ink-dim hover:bg-panel-2 hover:text-ink'
+              }`}
+            >
+              <ImageIcon size={15} />
+            </label>
+          </div>
           {status === 'thinking' ? (
             <button
               type="button"
               onClick={() => useAgentStore.getState().stop()}
               title="Stop"
-              className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-panel-3 text-[11px] text-ink hover:bg-panel-3/70"
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-panel-3 text-[11px] text-ink hover:bg-panel-3/70"
             >
               ■
             </button>
@@ -333,7 +359,7 @@ export function DirectorDock() {
               onClick={send}
               disabled={!input.trim() && !pendingImage}
               title="Send (Enter)"
-              className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[12px] font-medium ${
+              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-medium ${
                 input.trim() || pendingImage
                   ? 'bg-accent text-white hover:bg-accent/85'
                   : 'bg-panel-3 text-ink-dim/50'

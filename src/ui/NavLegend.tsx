@@ -5,7 +5,7 @@ export function NavLegend() {
   return (
     <div
       className="pointer-events-none absolute z-20 flex items-center gap-3 text-[10px] text-ink-dim"
-      style={{ left: insets.left + 44, bottom: insets.bottom + GUTTER }}
+      style={{ left: insets.left, bottom: insets.bottom + GUTTER }}
     >
       <span>Orbit · LMB</span>
       <span>Pan · RMB / MMB</span>

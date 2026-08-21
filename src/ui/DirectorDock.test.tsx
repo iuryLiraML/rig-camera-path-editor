@@ -18,12 +18,19 @@ beforeEach(() => {
     workspaceMode: 'build',
     directorExpanded: false,
     playMode: false,
+    showImportModal: false,
+    showAddDrawer: false,
   })
 })
 
 afterEach(() => {
   cleanup()
-  useEditorStore.setState({ workspaceMode: 'build', directorExpanded: false })
+  useEditorStore.setState({
+    workspaceMode: 'build',
+    directorExpanded: false,
+    showImportModal: false,
+    showAddDrawer: false,
+  })
 })
 
 describe('DirectorDock', () => {
@@ -49,5 +56,30 @@ describe('DirectorDock', () => {
     expect(useEditorStore.getState().directorExpanded).toBe(true)
     expect(container.textContent).toContain('Director')
     expect(container.textContent?.toLowerCase()).not.toContain('remaining')
+  })
+
+  it('groups Add, Import and attach on the Build composer', () => {
+    const { getByTitle, queryByTitle } = render(<DirectorDock />)
+    expect(getByTitle('Add an object')).toBeTruthy()
+    expect(getByTitle('Import a .glb or .gltf')).toBeTruthy()
+    expect(getByTitle('Attach a reference photo')).toBeTruthy()
+    expect(getByTitle('Send (Enter)')).toBeTruthy()
+    expect(queryByTitle('Add an object')?.closest('.panel')).toBe(
+      getByTitle('Import a .glb or .gltf').closest('.panel'),
+    )
+  })
+
+  it('keeps Import on Compose without the Add control', () => {
+    useEditorStore.setState({ workspaceMode: 'compose' })
+    const { getByTitle, queryByTitle } = render(<DirectorDock />)
+    expect(queryByTitle('Add an object')).toBeNull()
+    expect(getByTitle('Import a .glb or .gltf')).toBeTruthy()
+    expect(getByTitle('Attach a reference photo')).toBeTruthy()
+  })
+
+  it('opens the import modal from the composer', () => {
+    const { getByTitle } = render(<DirectorDock />)
+    fireEvent.click(getByTitle('Import a .glb or .gltf'))
+    expect(useEditorStore.getState().showImportModal).toBe(true)
   })
 })

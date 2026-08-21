@@ -16,9 +16,9 @@ export const GUTTER = 12
 /** height of the floating footer row of pills (view modes, views, projection, split) */
 const FOOTER_ROW_HEIGHT = 32
 /** collapsed Director composer — ObjectBar / PiP sit above this */
-export const DIRECTOR_COMPOSER_HEIGHT = 88
-/** height of the top row (Toolbar / ModeSwitcher), both at top-3 */
-const TOP_ROW_HEIGHT = 38
+export const DIRECTOR_COMPOSER_HEIGHT = 100
+/** height of the top row (Toolbar / ModeSwitcher / ProjectChip), both at top-3 */
+export const TOP_ROW_HEIGHT = 38
 
 export const LEFT_PANEL_MAX = 280
 export const LEFT_PANEL_MIN = 196

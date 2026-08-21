@@ -7,7 +7,6 @@ export interface EditorChromeFlags {
   outliner: boolean
   addDrawer: boolean
   objectBar: boolean
-  buildTools: boolean
   timeline: boolean
   sequence: boolean
   composeTabs: boolean
@@ -38,7 +37,6 @@ export function editorChrome(input: {
       outliner: false,
       addDrawer: false,
       objectBar: false,
-      buildTools: false,
       timeline: false,
       sequence: false,
       composeTabs: false,
@@ -65,7 +63,6 @@ export function editorChrome(input: {
         outliner: input.showOutliner,
         addDrawer: input.showAddDrawer,
         objectBar: true,
-        buildTools: true,
         timeline: false,
         sequence: false,
         composeTabs: false,
@@ -88,7 +85,6 @@ export function editorChrome(input: {
         outliner: input.showOutliner,
         addDrawer: false,
         objectBar: false,
-        buildTools: false,
         timeline: input.composeDock === 'timeline',
         sequence: input.composeDock === 'sequence',
         composeTabs: true,
@@ -111,7 +107,6 @@ export function editorChrome(input: {
         outliner: false,
         addDrawer: false,
         objectBar: false,
-        buildTools: false,
         timeline: false,
         sequence: false,
         composeTabs: false,
