@@ -142,6 +142,7 @@ export function PenTool() {
         ref={meshRef}
         rotation-x={-Math.PI / 2}
         position-y={planeY}
+        userData={{ pickKind: 'pen', pickId: 'pen-plane' }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
