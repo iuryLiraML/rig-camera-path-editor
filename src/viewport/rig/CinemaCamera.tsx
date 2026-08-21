@@ -14,16 +14,14 @@ import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
 import { applyCanvasAspect } from '../../lib/staticCamera'
 import { isTechMode } from '../RenderPasses'
-
-const BODY = '#2a2a2a'
-const BODY_HOT = '#5a5a5a'
+import { CAMERA_ICON_COLOR, CAMERA_ICON_SELECTED } from '../viewportLook'
 
 function ignoreRaycast() {
   // Visual wire only — the body sphere is the pick volume.
 }
 
 function CameraFrustum({ selected }: { selected: boolean }) {
-  const color = selected ? BODY_HOT : BODY
+  const color = selected ? CAMERA_ICON_SELECTED : CAMERA_ICON_COLOR
   const geo = useMemo(() => {
     const near = 0.08
     const far = 0.36

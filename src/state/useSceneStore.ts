@@ -19,8 +19,7 @@ import { usePathStore } from './usePathStore'
 import { useRigStore } from './useRigStore'
 import {
   VIEWPORT_BG_DEFAULT_TOP,
-  VIEWPORT_BG_LEGACY_DEFAULT,
-  VIEWPORT_BG_SLATE_DEFAULT,
+  isShippedViewportBgDefault,
 } from '../viewport/viewportBackground'
 import { boundsAreUsable, meshWorldBounds } from '../lib/prepareImport'
 
@@ -544,7 +543,7 @@ export const useSceneStore = create<SceneState>()(
     },
     {
       name: 'rig-scene-settings',
-      version: 1,
+      version: 2,
       partialize: (s) => ({
         bgColor: s.bgColor,
         showGrid: s.showGrid,
@@ -553,7 +552,7 @@ export const useSceneStore = create<SceneState>()(
       }),
       migrate: (persisted) => {
         const p = (persisted ?? {}) as Record<string, unknown>
-        if (p.bgColor === VIEWPORT_BG_LEGACY_DEFAULT || p.bgColor === VIEWPORT_BG_SLATE_DEFAULT) {
+        if (isShippedViewportBgDefault(p.bgColor)) {
           p.bgColor = VIEWPORT_BG_DEFAULT_TOP
         }
         return p

@@ -1,15 +1,25 @@
 import * as THREE from 'three'
 
-/** App chrome gray — new scenes start on the same plate as Projects. */
-export const VIEWPORT_BG_DEFAULT_TOP = '#0f0f11'
+/** Lighter charcoal at the top of the viewport so the vertical gradient reads. */
+export const VIEWPORT_BG_DEFAULT_TOP = '#3a3f4c'
 /** Near-black the gradient falls into at the bottom. */
-export const VIEWPORT_BG_FLOOR = '#070708'
+export const VIEWPORT_BG_FLOOR = '#09090c'
 /** Shipped peach plate — migrate persisted settings that never left the default. */
 export const VIEWPORT_BG_LEGACY_DEFAULT = '#efc8c4'
 /** Previous Houdini slate default — migrate so existing editors pick up the gray. */
 export const VIEWPORT_BG_SLATE_DEFAULT = '#2c3e4c'
+/** Previous near-black default — migrate so the stronger gradient shows up. */
+export const VIEWPORT_BG_CHARCOAL_DEFAULT = '#0f0f11'
 
 const GRADIENT_HEIGHT = 256
+
+export function isShippedViewportBgDefault(hex: unknown): hex is string {
+  return (
+    hex === VIEWPORT_BG_LEGACY_DEFAULT ||
+    hex === VIEWPORT_BG_SLATE_DEFAULT ||
+    hex === VIEWPORT_BG_CHARCOAL_DEFAULT
+  )
+}
 
 export function mixHex(a: string, b: string, t: number): string {
   const ca = new THREE.Color(a)
@@ -17,9 +27,13 @@ export function mixHex(a: string, b: string, t: number): string {
   return `#${ca.lerp(cb, t).getHexString()}`
 }
 
-/** Bottom stop: the chosen top color pulled toward the charcoal floor. */
+/** Bottom stop: the chosen top color pulled almost to the charcoal floor. */
 export function viewportBgBottom(topHex: string): string {
-  return mixHex(topHex, VIEWPORT_BG_FLOOR, 0.78)
+  return mixHex(topHex, VIEWPORT_BG_FLOOR, 0.92)
+}
+
+export function viewportBgMid(topHex: string): string {
+  return mixHex(topHex, viewportBgBottom(topHex), 0.42)
 }
 
 export function paintViewportGradient(
@@ -30,6 +44,7 @@ export function paintViewportGradient(
 ) {
   const gradient = ctx.createLinearGradient(0, 0, 0, height)
   gradient.addColorStop(0, topHex)
+  gradient.addColorStop(0.38, viewportBgMid(topHex))
   gradient.addColorStop(1, viewportBgBottom(topHex))
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, width, height)

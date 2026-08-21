@@ -33,6 +33,7 @@ import {
   updateViewportGradientTexture,
   VIEWPORT_BG_DEFAULT_TOP,
 } from './viewportBackground'
+import { GRID_FADE_DISTANCE, GRID_FADE_STRENGTH } from './viewportLook'
 
 /** Routes R3F pointer picking into the pane under the cursor. */
 function PointerRouting() {
@@ -123,15 +124,13 @@ function EditorGrid() {
       infiniteGrid
       cellSize={0.5}
       sectionSize={2.5}
-      cellThickness={0.7}
-      sectionThickness={1.2}
-      cellColor="#9a9aa0"
-      sectionColor="#7d7d85"
-      // fadeFrom 0 = origin: pulling the camera back used to wipe the whole
-      // grid (default is camera, and fadeDistance 32 sat inside a typical orbit).
+      cellThickness={0.55}
+      sectionThickness={1.05}
+      cellColor="#8a8a92"
+      sectionColor="#b0b0b8"
       fadeFrom={0}
-      fadeDistance={180}
-      fadeStrength={0.7}
+      fadeDistance={GRID_FADE_DISTANCE}
+      fadeStrength={GRID_FADE_STRENGTH}
     />
   )
 }
