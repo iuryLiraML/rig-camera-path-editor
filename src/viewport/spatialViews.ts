@@ -74,6 +74,18 @@ export function frameSpatialCamera(view: SpatialView, aspect: number) {
   framed[view] = true
 }
 
+/** Aim a spatial camera at the world origin, keeping its front/top/right axis. */
+export function homeSpatialCamera(view: SpatialView) {
+  const cam = spatialCameras[view]
+  const dist = Math.max(2, cam.position.distanceTo(spatialTargets[view]))
+  _dir.set(...VIEW_DIRS[view]).normalize()
+  spatialTargets[view].set(0, 0, 0)
+  cam.position.copy(spatialTargets[view]).addScaledVector(_dir, dist)
+  cam.up.set(0, 1, 0)
+  cam.lookAt(spatialTargets[view])
+  cam.updateProjectionMatrix()
+}
+
 /** Frame once, then keep the pose so orbit/pan/zoom stick. */
 export function ensureSpatialCamera(view: SpatialView, aspect: number) {
   if (!framed[view]) {

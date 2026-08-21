@@ -96,6 +96,8 @@ interface EditorState {
   showSettings: boolean
   /** incremented to ask the editor camera to frame the model (F) */
   frameRequest: number
+  /** incremented to aim the editor camera at the world origin (H) */
+  homeRequest: number
   /** quick view snap request for the editor camera */
   viewRequest: { view: QuickView; n: number } | null
   /** live editor zoom readout (100% = default framing) */
@@ -155,6 +157,7 @@ interface EditorState {
   setPipRect: (rect: { right: number; bottom: number; fraction: number }) => void
   setShowSettings: (on: boolean) => void
   requestFrame: () => void
+  requestHome: () => void
   requestView: (view: QuickView) => void
   setZoomPct: (pct: number) => void
   setSnapEnabled: (on: boolean) => void
@@ -205,6 +208,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   keyableFocus: null,
   showSettings: false,
   frameRequest: 0,
+  homeRequest: 0,
   viewRequest: null,
   zoomPct: 100,
   snapEnabled: false,
@@ -300,6 +304,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   setPipRect: (pipRect) => set({ pipRect }),
   setShowSettings: (showSettings) => set({ showSettings }),
   requestFrame: () => set((s) => ({ frameRequest: s.frameRequest + 1 })),
+  requestHome: () => set((s) => ({ homeRequest: s.homeRequest + 1 })),
   requestView: (view) => set((s) => ({ viewRequest: { view, n: (s.viewRequest?.n ?? 0) + 1 } })),
   setZoomPct: (zoomPct) => set({ zoomPct }),
   setSnapEnabled: (snapEnabled) => set({ snapEnabled }),

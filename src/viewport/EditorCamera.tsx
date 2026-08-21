@@ -6,6 +6,7 @@ import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { lockOrbit, unlockOrbit } from '../lib/orbitLock'
 import { useShiftHeld } from '../lib/useShiftHeld'
 import { beginPickClick, hasInteractivePick } from '../lib/viewportPick'
+import { aimOrbitAtWorldOrigin } from '../lib/orbitHome'
 import { useEditorStore } from '../state/useEditorStore'
 import { computeRects, paneAt, useLayoutStore } from '../state/useLayoutStore'
 import { cinemaCameraRef } from './rig/CinemaCamera'
@@ -13,6 +14,7 @@ import { sceneBounds } from './SceneObjects'
 import {
   bindOrbitToPane,
   frameSpatialCamera,
+  homeSpatialCamera,
   isSpatialView,
   spatialCameras,
   spatialTargets,
@@ -37,6 +39,7 @@ export function EditorCamera() {
   const playMode = useEditorStore((s) => s.playMode)
   const cameraView = useEditorStore((s) => s.cameraView)
   const frameRequest = useEditorStore((s) => s.frameRequest)
+  const homeRequest = useEditorStore((s) => s.homeRequest)
   const viewRequest = useEditorStore((s) => s.viewRequest)
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null
   const fallbackCam = useThree((s) => s.camera)
@@ -73,6 +76,21 @@ export function EditorCamera() {
     camera.position.copy(center.clone().add(direction.multiplyScalar(radius * 2.4)))
     controls.update()
   }, [frameRequest, controls, fallbackCam, projection])
+
+  // H — look at the world origin, keeping the current distance and direction
+  useEffect(() => {
+    if (homeRequest === 0 || !controls) return
+    const view = pointerView.current
+    if (isSpatialView(view)) {
+      homeSpatialCamera(view)
+      controls.target.copy(spatialTargets[view])
+      if (controls.object === spatialCameras[view]) controls.update()
+      return
+    }
+    const camera = editorCam()
+    aimOrbitAtWorldOrigin(camera.position, controls.target)
+    controls.update()
+  }, [homeRequest, controls, fallbackCam, projection])
 
   // quick views — snap the camera to an axis, keeping the current distance
   useEffect(() => {

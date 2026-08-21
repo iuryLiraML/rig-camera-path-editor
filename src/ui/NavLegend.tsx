@@ -11,6 +11,7 @@ export function NavLegend() {
       <span>Pan · RMB / MMB</span>
       <span>Zoom · Scroll</span>
       <span>Frame · F</span>
+      <span>Origin · H</span>
     </div>
   )
 }

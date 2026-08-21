@@ -119,6 +119,12 @@ function useShortcuts() {
         case 'F':
           editor.requestFrame()
           break
+        case 'h':
+        case 'H':
+        case 'Home':
+          e.preventDefault()
+          editor.requestHome()
+          break
         case 'i':
         case 'I':
           e.preventDefault()

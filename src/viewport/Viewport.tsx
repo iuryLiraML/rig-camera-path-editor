@@ -12,7 +12,7 @@ import {
 } from '../state/useLayoutStore'
 import { useEditorOnly } from '../lib/editorOnly'
 import { isPathEditing, isSceneEditing } from '../lib/workspaceChrome'
-import { directorDockSlot, useViewportInsets, useWindowSize } from '../ui/viewportInsets'
+import { GUTTER, useViewportInsets } from '../ui/viewportInsets'
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
 import { SceneObjects } from './SceneObjects'
@@ -150,8 +150,6 @@ export function Viewport() {
   const tech = isTechMode(viewMode)
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
   const insets = useViewportInsets()
-  const win = useWindowSize()
-  const dock = directorDockSlot(insets, win.w)
 
   const pointerDownAt = useRef<[number, number]>([0, 0])
 
@@ -227,13 +225,15 @@ export function Viewport() {
 
       {!playMode && !cameraView && singlePane && isSceneEditing(playMode, workspaceMode) && (
         <GizmoHelper
-          alignment="bottom-right"
+          alignment="bottom-left"
           margin={[
-            Math.max(48, dock.right + dock.width + 16),
-            Math.max(72, insets.contentBottom),
+            Math.max(28, insets.left + 28),
+            Math.max(40, insets.bottom + GUTTER + 36),
           ]}
         >
           <GizmoViewport
+            scale={22}
+            axisHeadScale={0.85}
             axisColors={['#f05a5a', '#59c05a', '#4a7dff']}
             labelColor="#ffffff"
             hideNegativeAxes

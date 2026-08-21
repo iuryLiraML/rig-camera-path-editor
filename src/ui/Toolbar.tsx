@@ -8,7 +8,7 @@ import { exportDimensions, exportFrame, exportVideo } from '../lib/recorder'
 import type { ViewMode } from '../state/useEditorStore'
 import { Segmented } from './primitives'
 import { AddSceneMenu } from './AddSceneMenu'
-import { CameraIcon, CursorIcon, ExportIcon, PenIcon, PlayIcon } from './icons'
+import { CameraIcon, CursorIcon, ExportIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
 import { toolbarSlot, useViewportInsets, useWindowSize } from './viewportInsets'
 
 function ToolButton({
@@ -304,6 +304,12 @@ export function Toolbar() {
           <Divider />
         </>
       )}
+      <ToolButton
+        title="Center the view on the world origin (H)"
+        onClick={() => useEditorStore.getState().requestHome()}
+      >
+        <TargetIcon />
+      </ToolButton>
       <button
         title="Click to frame the scene (F)"
         onClick={() => useEditorStore.getState().requestFrame()}

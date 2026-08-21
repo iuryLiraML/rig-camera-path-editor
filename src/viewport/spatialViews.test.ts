@@ -7,8 +7,10 @@ vi.mock('./SceneObjects', () => ({ sceneBounds: () => null }))
 import {
   bindOrbitToPane,
   ensureSpatialCamera,
+  homeSpatialCamera,
   resetSpatialViews,
   spatialCameras,
+  spatialTargets,
   type OrbitLike,
 } from './spatialViews'
 
@@ -66,5 +68,16 @@ describe('spatialViews', () => {
     expect(controls.enabled).toBe(false)
     bindOrbitToPane(controls, 'editor', editor, true)
     expect(controls.enabled).toBe(false)
+  })
+
+  it('aims a spatial camera at the world origin and keeps its view axis', () => {
+    ensureSpatialCamera('front', 1)
+    spatialTargets.front.set(4, 2, -1)
+    spatialCameras.front.position.set(4, 2, 8)
+    homeSpatialCamera('front')
+    expect(spatialTargets.front.toArray()).toEqual([0, 0, 0])
+    const dir = new THREE.Vector3(0, 0.12, 1).normalize()
+    expect(spatialCameras.front.position.clone().normalize().dot(dir)).toBeCloseTo(1, 5)
+    expect(spatialCameras.front.position.z).toBeGreaterThan(2)
   })
 })
