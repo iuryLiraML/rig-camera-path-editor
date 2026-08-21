@@ -80,7 +80,11 @@ export function ProjectsWorkspace() {
       useEditorStore.getState().setAppView('editor')
     } catch (error) {
       console.error('createProject failed', error)
-      setError('The new project could not be created. Please try again.')
+      setError(
+        error instanceof Error
+          ? error.message
+          : 'The new project could not be created. Please try again.',
+      )
     }
   }
 
@@ -95,8 +99,10 @@ export function ProjectsWorkspace() {
       )
       setRenamingId(folder.id)
       setRenameValue(folder.name)
-    } catch {
-      setError('The folder could not be created. Please try again.')
+    } catch (error) {
+      setError(
+        error instanceof Error ? error.message : 'The folder could not be created. Please try again.',
+      )
     }
   }
 
@@ -317,7 +323,7 @@ export function ProjectsWorkspace() {
             <h2 id="project-list-title" className="text-sm font-semibold">
               {openFolder ? 'Projects' : 'Unfiled'} · {visible.length}
             </h2>
-            {projects.length > 4 && (
+            {scoped.length > 4 && (
               <input
                 type="search"
                 value={query}
@@ -352,11 +358,15 @@ export function ProjectsWorkspace() {
               <span className="text-xs">New project</span>
             </button>
           </div>
-          {scoped.length === 0 && (
+          {scoped.length === 0 && openFolder && (
             <p className="mt-6 text-sm text-ink-dim">
-              {openFolder
-                ? 'This folder is empty. Create a project to start a camera move.'
-                : 'No unfiled projects. Create one, or open a folder.'}
+              This folder is empty. Create a project to start a camera move, or import a .glb from
+              the editor.
+            </p>
+          )}
+          {scoped.length === 0 && !openFolder && folders.length > 0 && (
+            <p className="mt-6 text-sm text-ink-dim">
+              No unfiled projects. Create one, or open a folder.
             </p>
           )}
           {scoped.length > 0 && visible.length === 0 && (
