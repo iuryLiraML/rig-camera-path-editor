@@ -1,9 +1,9 @@
 import * as THREE from 'three'
 
 /** Lighter charcoal at the top of the viewport so the vertical gradient reads. */
-export const VIEWPORT_BG_DEFAULT_TOP = '#3a3f4c'
+export const VIEWPORT_BG_DEFAULT_TOP = '#6b7385'
 /** Near-black the gradient falls into at the bottom. */
-export const VIEWPORT_BG_FLOOR = '#09090c'
+export const VIEWPORT_BG_FLOOR = '#101218'
 /** Shipped peach plate — migrate persisted settings that never left the default. */
 export const VIEWPORT_BG_LEGACY_DEFAULT = '#efc8c4'
 /** Previous Houdini slate default — migrate so existing editors pick up the gray. */
@@ -44,7 +44,7 @@ export function paintViewportGradient(
 ) {
   const gradient = ctx.createLinearGradient(0, 0, 0, height)
   gradient.addColorStop(0, topHex)
-  gradient.addColorStop(0.38, viewportBgMid(topHex))
+  gradient.addColorStop(0.32, viewportBgMid(topHex))
   gradient.addColorStop(1, viewportBgBottom(topHex))
   ctx.fillStyle = gradient
   ctx.fillRect(0, 0, width, height)

@@ -55,13 +55,15 @@ describe('viewport camera glyph', () => {
     expect(idle.g).toBeGreaterThan(150)
     expect(idle.b).toBeLessThan(80)
     expect(selected.luma).toBeGreaterThan(idle.luma)
+    expect(selected.r).toBeGreaterThan(240)
+    expect(selected.g).toBeGreaterThan(220)
   })
 })
 
 describe('viewport grid fade', () => {
   it('falls off from the origin well inside a typical orbit', () => {
-    expect(GRID_FADE_DISTANCE).toBeLessThanOrEqual(40)
-    expect(GRID_FADE_STRENGTH).toBeGreaterThan(1)
+    expect(GRID_FADE_DISTANCE).toBeLessThanOrEqual(18)
+    expect(GRID_FADE_STRENGTH).toBeGreaterThan(2)
   })
 })
 

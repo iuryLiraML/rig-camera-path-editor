@@ -124,10 +124,10 @@ function EditorGrid() {
       infiniteGrid
       cellSize={0.5}
       sectionSize={2.5}
-      cellThickness={0.55}
-      sectionThickness={1.05}
-      cellColor="#8a8a92"
-      sectionColor="#b0b0b8"
+      cellThickness={0.45}
+      sectionThickness={0.95}
+      cellColor="#5a5a62"
+      sectionColor="#8e8e98"
       fadeFrom={0}
       fadeDistance={GRID_FADE_DISTANCE}
       fadeStrength={GRID_FADE_STRENGTH}

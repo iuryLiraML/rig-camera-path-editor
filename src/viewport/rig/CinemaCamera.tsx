@@ -49,6 +49,10 @@ function CameraFrustum({ selected }: { selected: boolean }) {
 
   return (
     <group>
+      <mesh position={[0, 0, -0.02]} raycast={ignoreRaycast} frustumCulled={false}>
+        <boxGeometry args={[0.11, 0.075, 0.14]} />
+        <meshBasicMaterial color={color} depthTest={false} />
+      </mesh>
       <lineSegments geometry={geo} raycast={ignoreRaycast}>
         <lineBasicMaterial color={color} depthTest={false} />
       </lineSegments>
