@@ -34,7 +34,7 @@ vi.mock('./cloud/client', async (importOriginal) => {
 })
 
 import { AUTOSAVE_MS, flushActiveProject, installPersistFlush, saveActiveProject, scheduleAutosave } from './projects'
-import { idbGet, idbGetAll, idbPut } from './idb'
+import { idbGet, idbGetAll, idbPut, STORES } from './idb'
 
 beforeEach(() => {
   memory.clear()
@@ -136,9 +136,9 @@ describe('idbGetAll after save', () => {
   it('round-trips the record so a refresh can reload it', async () => {
     useProjectStore.setState({ projectId: 'proj-round', name: 'Roundtrip' })
     await saveActiveProject()
-    const all = await idbGetAll()
+    const all = await idbGetAll<{ id: string; name: string }>(STORES.projects)
     expect(all.some((record) => record.id === 'proj-round')).toBe(true)
-    const stored = await idbGet('projects', 'proj-round')
+    const stored = await idbGet<{ id: string; name: string }>(STORES.projects, 'proj-round')
     expect(stored?.name).toBe('Roundtrip')
   })
 })

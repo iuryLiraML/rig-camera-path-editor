@@ -53,6 +53,7 @@ import {
 import { insertChannelKeyAt } from '../lib/timelineKey'
 import { writeStaticPose } from '../lib/autoKey'
 import { SettingsIcon } from './icons'
+import { PoseKeyButton } from './PoseKeyButton'
 
 function PanelButton({
   label,
