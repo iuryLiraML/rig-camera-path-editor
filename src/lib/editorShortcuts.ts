@@ -2,6 +2,7 @@ import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { usePathStore } from '../state/usePathStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { isObjectKeyFocus } from './keyAtPlayhead'
 import { deleteKeyframeAtPlayhead, deleteSelectedTimelineKey } from './timelineKey'
 
 export function isTextEditing(): boolean {
@@ -40,6 +41,12 @@ export function applyDeleteShortcut(
   if (key !== 'Delete' && key !== 'Backspace') return false
   const keyableField = options?.keyableField ?? isKeyableField()
   if (key === 'Backspace' && keyableField) return false
+
+  // Transform channel focus: unkey the playhead first. I selects the new key,
+  // and removing that id alone would leave a legacy pose driving the channel.
+  if (isObjectKeyFocus(useEditorStore.getState().keyableFocus)) {
+    if (deleteKeyframeAtPlayhead()) return true
+  }
 
   if (deleteSelectedTimelineKey()) return true
   if (deleteKeyframeAtPlayhead()) return true

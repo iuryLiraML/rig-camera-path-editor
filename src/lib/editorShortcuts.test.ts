@@ -95,4 +95,50 @@ describe('applyDeleteShortcut', () => {
     expect(applyDeleteShortcut('Delete', { keyableField: false })).toBe(true)
     expect(useSceneStore.getState().objects).toHaveLength(0)
   })
+
+  it('unkeys only the focused transform channel, then deletes the object', () => {
+    useSceneStore.getState().addPrimitive('box')
+    const id = useSceneStore.getState().objects[0].id
+    useEditorStore.setState({
+      selection: `obj:${id}`,
+      objectBarPanel: 'transform',
+      keyableFocus: 'objectPosition',
+    })
+    insertKeyframeAtPlayhead()
+    expect(useSceneStore.getState().objects[0].keys.map((k) => k.channel)).toEqual(['position'])
+
+    expect(applyDeleteShortcut('Delete', { keyableField: false })).toBe(true)
+    expect(useSceneStore.getState().objects[0].keys).toHaveLength(0)
+    expect(useSceneStore.getState().objects).toHaveLength(1)
+
+    expect(applyDeleteShortcut('Delete', { keyableField: false })).toBe(true)
+    expect(useSceneStore.getState().objects).toHaveLength(0)
+  })
+
+  it('splits a legacy pose key when Delete hits a focused channel', () => {
+    useSceneStore.getState().addPrimitive('box')
+    const object = useSceneStore.getState().objects[0]
+    useSceneStore.setState({
+      objects: [
+        {
+          ...object,
+          keys: [{ id: 'legacy-pose', time: 0.4, transform: { ...object.transform } }],
+        },
+      ],
+    })
+    useEditorStore.setState({
+      selection: `obj:${object.id}`,
+      objectBarPanel: 'transform',
+      keyableFocus: 'objectPosition',
+    })
+    insertKeyframeAtPlayhead()
+    const keyed = useSceneStore.getState().objects[0].keys
+    expect(keyed.some((k) => k.channel === 'position')).toBe(true)
+    expect(keyed.some((k) => !k.channel)).toBe(true)
+
+    expect(applyDeleteShortcut('Delete', { keyableField: false })).toBe(true)
+    const leftover = useSceneStore.getState().objects[0].keys
+    expect(leftover.map((k) => k.channel).sort()).toEqual(['rotation', 'scale'])
+    expect(useSceneStore.getState().objects).toHaveLength(1)
+  })
 })
