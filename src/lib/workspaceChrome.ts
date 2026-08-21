@@ -96,7 +96,7 @@ export function editorChrome(input: {
         visualizeRail: false,
         directorDock: true,
         footer: true,
-        navLegend: false,
+        navLegend: true,
         pip: true,
         cameraHud: true,
         onboarding: true,

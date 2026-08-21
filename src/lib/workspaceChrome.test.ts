@@ -46,6 +46,7 @@ describe('editorChrome', () => {
     expect(flags.objectBar).toBe(true)
     expect(flags.shotFrame).toBe(false)
     expect(flags.directorDock).toBe(true)
+    expect(flags.navLegend).toBe(true)
   })
 
   it('Visualize keeps the floating Director dock, not a right rail', () => {
