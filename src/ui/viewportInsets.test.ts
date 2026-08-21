@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   chromeBand,
+  clampPipRect,
   DIRECTOR_COMPOSER_HEIGHT,
   DIRECTOR_DOCK_WIDTH,
   directorDockSlot,
@@ -160,5 +161,19 @@ describe('viewportInsets', () => {
     const insets = viewportInsets('build', WINDOW, false)
     expect(insets.dockBottom).toBe(GUTTER + GUTTER)
     expect(insets.contentBottom).toBe(insets.dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER)
+  })
+
+  it('lifts a hydrated PiP off the Director rail and the Compose timeline', () => {
+    const vw = 1440
+    const vh = 900
+    const insets = viewportInsets('compose', vw, true, vh, 240, {
+      composeDock: 'timeline',
+      showOutliner: true,
+    })
+    const clamped = clampPipRect({ right: 16, bottom: 192, fraction: 0.22 }, insets, vw, vh)
+    expect(clamped.right).toBeGreaterThanOrEqual(GUTTER + DIRECTOR_DOCK_WIDTH + GUTTER)
+    expect(clamped.bottom).toBeGreaterThanOrEqual(insets.contentBottom)
+    const again = clampPipRect(clamped, insets, vw, vh)
+    expect(again).toEqual(clamped)
   })
 })

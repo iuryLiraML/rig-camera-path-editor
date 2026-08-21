@@ -72,6 +72,30 @@ export function chromeBand(
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
 
+/**
+ * Keep the camera PiP inside the free viewport. Saved `pipRect` values (and the
+ * store default `right: 16`) otherwise land under the Director rail or on the
+ * timeline after a project hydrate.
+ */
+export function clampPipRect(
+  r: { right: number; bottom: number; fraction: number },
+  insets: ViewportInsets,
+  vw: number,
+  vh: number,
+) {
+  const w = r.fraction * vw
+  const h = r.fraction * vh
+  const dock = directorDockSlot(insets)
+  const minRight = dock.right + dock.width + GUTTER
+  const maxRight = Math.max(minRight, vw - insets.left - w)
+  const maxBottom = Math.max(insets.contentBottom, vh - GUTTER - h)
+  return {
+    ...r,
+    right: clamp(r.right, minRight, maxRight),
+    bottom: clamp(r.bottom, insets.contentBottom, maxBottom),
+  }
+}
+
 export interface ChromeSizeInput {
   mode: WorkspaceMode
   composeDock: ComposeDock
