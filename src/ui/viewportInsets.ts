@@ -19,6 +19,8 @@ const FOOTER_ROW_HEIGHT = 32
 export const DIRECTOR_COMPOSER_HEIGHT = 100
 /** floating Director column on the right of the free area */
 export const DIRECTOR_DOCK_WIDTH = 360
+/** floor when the window is too tight to keep the full Director column */
+const DIRECTOR_DOCK_MIN = 200
 /** height of the top row (Toolbar / ModeSwitcher / ProjectChip), both at top-3 */
 export const TOP_ROW_HEIGHT = 38
 
@@ -43,14 +45,17 @@ export function toolbarSlot(insets: ViewportInsets, windowWidth: number): { righ
   return { right: Math.max(GUTTER, windowWidth - insets.right) }
 }
 
-/** CSS `right` for the Director column — same edge the toolbar hugs. */
+/**
+ * CSS `right` + width for the Director column. It pins to the window edge;
+ * chromeSizes already reserved that strip so the toolbar and ModeSwitcher sit
+ * to its left instead of drawing on top of the chat.
+ */
 export function directorDockSlot(
   insets: ViewportInsets,
-  windowWidth: number,
+  _windowWidth?: number,
 ): { right: number; width: number } {
-  const right = toolbarSlot(insets, windowWidth).right
-  const width = Math.min(DIRECTOR_DOCK_WIDTH, Math.max(0, insets.right - insets.left))
-  return { right, width }
+  const width = insets.rightWidth > 0 ? insets.rightWidth : DIRECTOR_DOCK_WIDTH
+  return { right: GUTTER, width }
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
@@ -76,9 +81,11 @@ export function chromeSizes(
   switch (input.mode) {
     case 'build':
       leftWidth = input.showOutliner ? LEFT_PANEL_MAX : 0
+      rightWidth = DIRECTOR_DOCK_WIDTH
       break
     case 'compose':
       leftWidth = input.showOutliner ? LEFT_PANEL_MAX : 0
+      rightWidth = DIRECTOR_DOCK_WIDTH
       if (input.timelineVisible) {
         timelineHeight =
           input.composeDock === 'sequence'
@@ -87,6 +94,7 @@ export function chromeSizes(
       }
       break
     case 'visualize':
+      rightWidth = DIRECTOR_DOCK_WIDTH
       break
     default: {
       const _never: never = input.mode
@@ -102,12 +110,12 @@ export function chromeSizes(
       leftWidth = Math.round(clamp(leftWidth, 0, Math.max(LEFT_PANEL_MIN, panelBudget)))
       if (leftWidth + 0 > widthBudget) leftWidth = Math.max(0, widthBudget)
     } else if (rightWidth > 0 && leftWidth === 0) {
-      rightWidth = Math.round(clamp(rightWidth, RIGHT_PANEL_MIN, Math.max(RIGHT_PANEL_MIN, panelBudget)))
+      rightWidth = Math.round(clamp(rightWidth, DIRECTOR_DOCK_MIN, Math.max(DIRECTOR_DOCK_MIN, panelBudget)))
       if (rightWidth > widthBudget) rightWidth = Math.max(0, widthBudget)
     } else if (leftWidth > 0 && rightWidth > 0) {
       const scale = panelBudget / (leftWidth + rightWidth)
       leftWidth = Math.round(clamp(leftWidth * scale, LEFT_PANEL_MIN, LEFT_PANEL_MAX))
-      rightWidth = Math.round(clamp(rightWidth * scale, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX))
+      rightWidth = Math.round(clamp(rightWidth * scale, DIRECTOR_DOCK_MIN, DIRECTOR_DOCK_WIDTH))
     }
   }
 

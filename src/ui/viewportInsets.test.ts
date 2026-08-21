@@ -15,12 +15,12 @@ import { TIMELINE_HEIGHT } from './Timeline'
 const WINDOW = 1202
 
 describe('viewportInsets', () => {
-  it('Build leaves the canvas full-bleed when the outliner is closed', () => {
+  it('Build reserves the Director column when the outliner is closed', () => {
     const insets = viewportInsets('build', WINDOW, false)
     expect(insets.leftWidth).toBe(0)
-    expect(insets.rightWidth).toBe(0)
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
     expect(insets.left).toBe(GUTTER)
-    expect(insets.right).toBe(WINDOW - GUTTER)
+    expect(insets.right).toBe(WINDOW - GUTTER - DIRECTOR_DOCK_WIDTH - GUTTER)
     expect(insets.bottom).toBe(GUTTER)
   })
 
@@ -35,7 +35,7 @@ describe('viewportInsets', () => {
     expect(insets.timelineHeight).toBe(SEQUENCE_HEIGHT)
     expect(insets.bottom).toBe(GUTTER + SEQUENCE_HEIGHT + GUTTER)
     expect(insets.leftWidth).toBe(0)
-    expect(insets.rightWidth).toBe(0)
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
   })
 
   it('Compose Timeline reserves the requested AE dock height', () => {
@@ -61,10 +61,10 @@ describe('viewportInsets', () => {
     expect(dockLeft).toBeGreaterThan(insets.centre)
   })
 
-  it('Visualize is full-bleed — Director floats on the right instead of a reserved rail', () => {
+  it('Visualize still reserves the Director column so overlays do not sit under chat', () => {
     const insets = viewportInsets('visualize', WINDOW, false)
-    expect(insets.rightWidth).toBe(0)
-    expect(insets.right).toBe(WINDOW - GUTTER)
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
+    expect(insets.right).toBe(WINDOW - GUTTER - DIRECTOR_DOCK_WIDTH - GUTTER)
     expect(insets.leftWidth).toBe(0)
     expect(insets.dockBottom).toBe(GUTTER + GUTTER)
   })
@@ -102,7 +102,7 @@ describe('viewportInsets', () => {
 
   it('keeps a free canvas in Visualize on a tight window', () => {
     const insets = viewportInsets('visualize', 820, false, 700)
-    expect(insets.rightWidth).toBe(0)
+    expect(insets.rightWidth).toBeGreaterThan(0)
     const free = freeAreaRect(insets, 700)
     expect(free.w).toBeGreaterThanOrEqual(200)
     expect(free.h).toBeGreaterThan(0)
@@ -122,15 +122,23 @@ describe('viewportInsets', () => {
     expect(taller.bottom).toBeGreaterThan(compact.bottom)
   })
 
-  it('keeps the toolbar on the right of the free area', () => {
+  it('keeps the toolbar on the right of the free area, left of the Director', () => {
     const insets = viewportInsets('build', WINDOW, false)
     const slot = toolbarSlot(insets, WINDOW)
-    expect(slot.right).toBe(GUTTER)
+    const dock = directorDockSlot(insets, WINDOW)
+    expect(slot.right).toBe(GUTTER + DIRECTOR_DOCK_WIDTH + GUTTER)
+    expect(slot.right).toBeGreaterThan(dock.right)
   })
 
-  it('keeps the toolbar on the right edge in Visualize', () => {
+  it('keeps the toolbar left of the Director in Visualize', () => {
     const insets = viewportInsets('visualize', WINDOW, false)
     const slot = toolbarSlot(insets, WINDOW)
-    expect(slot.right).toBe(GUTTER)
+    expect(slot.right).toBe(GUTTER + DIRECTOR_DOCK_WIDTH + GUTTER)
+  })
+
+  it('shifts the free-area centre left of the window centre so ModeSwitcher clears chat', () => {
+    const insets = viewportInsets('build', WINDOW, false)
+    expect(insets.centre).toBe(insets.left + (insets.right - insets.left) / 2)
+    expect(insets.centre).toBeLessThan(WINDOW / 2)
   })
 })

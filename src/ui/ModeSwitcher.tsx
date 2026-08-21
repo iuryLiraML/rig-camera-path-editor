@@ -1,5 +1,6 @@
 import { useEditorStore, type WorkspaceMode } from '../state/useEditorStore'
 import { CubeIcon, ClapperIcon, WandIcon } from './icons'
+import { useViewportInsets } from './viewportInsets'
 
 const MODES: { value: WorkspaceMode; label: string; icon: typeof WandIcon; title: string }[] = [
   { value: 'build', label: 'Build', icon: CubeIcon, title: 'Place objects in the scene' },
@@ -10,9 +11,13 @@ const MODES: { value: WorkspaceMode; label: string; icon: typeof WandIcon; title
 export function ModeSwitcher() {
   const mode = useEditorStore((s) => s.workspaceMode)
   const setMode = useEditorStore((s) => s.setWorkspaceMode)
+  const insets = useViewportInsets()
 
   return (
-    <div className="panel absolute left-1/2 top-3 z-40 flex -translate-x-1/2 items-center gap-0.5 px-1 py-1">
+    <div
+      className="panel absolute top-3 z-40 flex -translate-x-1/2 items-center gap-0.5 px-1 py-1"
+      style={{ left: insets.centre }}
+    >
       {MODES.map((option) => {
         const Icon = option.icon
         const active = mode === option.value
