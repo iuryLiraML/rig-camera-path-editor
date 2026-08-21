@@ -5,7 +5,9 @@ import {
   useEffect,
   useMemo,
   useRef,
+  useState,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from 'react'
 import { useCameraReady } from '../state/cameraPathLink'
 import { useEditorStore, type SelectableId, type SelectedTimelineKey } from '../state/useEditorStore'
@@ -48,11 +50,9 @@ import {
   valueToLaneY,
   type ValueRange,
 } from '../lib/lanePlot'
-import {
-  insertChannelKeyAt,
-  selectedKeyEase,
-  setSelectedKeyEase,
-} from '../lib/timelineKey'
+import { insertChannelKeyAt, selectedKeyEase, setSelectedKeyEase } from '../lib/timelineKey'
+import { animateMenuItems, animateProperty } from '../lib/animateProperty'
+import { writeObjectTransform, writeStaticPose } from '../lib/autoKey'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
 import {
   clampTimeView,
@@ -71,6 +71,7 @@ import {
 } from '../lib/timeView'
 import { CAMERA_CHANNELS, FX_PARAM_CHANNELS } from './cameraChannels'
 import { GraphEditor, buildGraphChannels } from './GraphEditor'
+import { Slider, XYZInput } from './primitives'
 import { normalizeSamples, sampleOverTime, TrackCurve } from './TrackCurve'
 import {
   GUTTER,
@@ -85,6 +86,7 @@ import { saveCurrentAsShot } from '../lib/projects'
 import { applyTogglePlayback } from '../lib/playback'
 import { PlayIcon } from './icons'
 import { ComposeDockTabs } from './ComposeDockTabs'
+import type { KeyableFocus } from '../lib/keyAtPlayhead'
 
 /** height of the docked timeline, used by other floating UI to move out of the way */
 export const TIMELINE_HEIGHT = TIMELINE_HEIGHT_DEFAULT
@@ -143,7 +145,7 @@ function TimeNavigator({
 
   return (
     <div className="flex h-3 shrink-0 items-center gap-2 pt-1">
-      <div className="w-24 shrink-0" />
+      <div className="w-44 shrink-0" />
       <div
         ref={barRef}
         data-time-navigator
@@ -520,6 +522,65 @@ function ClipRange({
   )
 }
 
+function AnimateMenu() {
+  const [open, setOpen] = useState(false)
+  const selection = useEditorStore((s) => s.selection)
+  const cameraKind = useRigStore((s) => s.cameraKind)
+  const items = animateMenuItems(selection, cameraKind)
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [open])
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        data-animate-menu
+        title={items.length === 0 ? 'Select an object, then + Animate' : 'Add a property track'}
+        disabled={items.length === 0}
+        onClick={() => setOpen((v) => !v)}
+        className={`rounded-md px-2 py-0.5 text-[11px] ${
+          items.length === 0
+            ? 'cursor-not-allowed text-ink-dim/50'
+            : open
+              ? 'bg-accent text-white'
+              : 'text-ink-dim hover:text-ink'
+        }`}
+      >
+        + Animate
+      </button>
+      {open && items.length > 0 && (
+        <div className="panel absolute left-0 top-8 z-30 w-40 p-1">
+          {items.map((item) => (
+            <button
+              key={`${item.kind}-${item.channel}`}
+              type="button"
+              className="block w-full rounded-md px-2 py-1 text-left text-[11px] text-ink hover:bg-panel-2"
+              onClick={() => {
+                animateProperty(item)
+                setOpen(false)
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TrackValues({ children }: { children: ReactNode }) {
+  return <div className="mt-0.5">{children}</div>
+}
+
 function Track({
   label,
   selectId,
@@ -541,6 +602,9 @@ function Track({
   onSelectKey,
   trackId,
   defaultEase,
+  focus,
+  values,
+  onFocus,
 }: {
   label: string
   selectId: SelectableId
@@ -581,10 +645,14 @@ function Track({
   onSelectKey?: (id: string) => void
   trackId?: string
   defaultEase?: EaseKind
+  focus?: KeyableFocus
+  values?: ReactNode
+  onFocus?: () => void
 }) {
   const selection = useEditorStore((s) => s.selection)
+  const keyableFocus = useEditorStore((s) => s.keyableFocus)
   const easingOn = useEditorStore((s) => s.timelineEasing)
-  const selected = selection === selectId
+  const highlighted = focus ? keyableFocus === focus : selection === selectId
   const sorted = [...keys].sort((a, b) => a.time - b.time)
   const view = useContext(TimeViewCtx)
   const selectedOnTrack = selectedId ? keys.some((k) => k.id === selectedId && !k.implicit) : false
@@ -601,15 +669,24 @@ function Track({
     Boolean(target.closest('[data-timeline-key],[data-ease-handle],[data-bezier-handle]'))
 
   return (
-    <div className="flex h-10 items-center gap-2" data-track={trackId}>
-      <button
-        onClick={() => useEditorStore.getState().select(selected ? null : selectId)}
-        className={`w-24 shrink-0 truncate rounded-md px-2 py-1 text-left text-[11px] ${
-          selected ? 'bg-accent text-white' : 'text-ink-dim hover:bg-panel-2 hover:text-ink'
+    <div className={`flex items-center gap-2 ${values ? 'h-14' : 'h-10'}`} data-track={trackId}>
+      <div
+        className={`w-44 shrink-0 rounded-md px-2 py-1 text-left text-[11px] ${
+          highlighted ? 'bg-accent text-white' : 'text-ink-dim hover:bg-panel-2 hover:text-ink'
         }`}
       >
-        {label}
-      </button>
+        <button
+          type="button"
+          className="block w-full truncate text-left"
+          onClick={() => {
+            useEditorStore.getState().select(selectId)
+            onFocus?.()
+          }}
+        >
+          {label}
+        </button>
+        {values && <TrackValues>{values}</TrackValues>}
+      </div>
       <div
         data-lane
         data-range-lo={valueRange?.lo}
@@ -844,6 +921,10 @@ export function Timeline() {
   const freqKeys = useRigStore((s) => s.freqKeys)
   const targetKeys = useRigStore((s) => s.targetKeys)
   const lookOffsetKeys = useRigStore((s) => s.lookOffsetKeys)
+  const staticPosKeys = useRigStore((s) => s.staticPosKeys)
+  const staticRotKeys = useRigStore((s) => s.staticRotKeys)
+  const cameraKind = useRigStore((s) => s.cameraKind)
+  const staticPose = useRigStore((s) => s.staticPose)
   const fov = useRigStore((s) => s.fov)
   const roll = useRigStore((s) => s.roll)
   const target = useRigStore((s) => s.target)
@@ -903,6 +984,20 @@ export function Timeline() {
     const range = plotRange([...values, ...lookOffsetKeys.map((k) => k.value[1])], RANGE_LOOK)
     return { curve: normalizeInRange(values, range), range }
   }, [lookOffsetKeys, lookOffset, ease])
+  const staticPosPlot = useMemo(() => {
+    const values = sampleOverTime((time) =>
+      evalVec3(time, staticPosKeys, staticPose.position, ease)[1],
+    )
+    const range = plotRange([...values, ...staticPosKeys.map((k) => k.value[1])], RANGE_LOOK)
+    return { curve: normalizeInRange(values, range), range }
+  }, [staticPosKeys, staticPose.position, ease])
+  const staticRotPlot = useMemo(() => {
+    const values = sampleOverTime((time) =>
+      evalVec3(time, staticRotKeys, staticPose.rotation, ease)[1],
+    )
+    const range = plotRange([...values, ...staticRotKeys.map((k) => k.value[1])], RANGE_ROLL)
+    return { curve: normalizeInRange(values, range), range }
+  }, [staticRotKeys, staticPose.rotation, ease])
   const intensityPlot = useMemo(() => {
     const values = sampleOverTime((time) =>
       evalValue(time, intensityKeys, cameraNoise.intensity, ease),
@@ -1086,6 +1181,7 @@ export function Timeline() {
         >
           Graph
         </button>
+        <AnimateMenu />
         {timelineGraph && selectedKeyframe && (
           <span className="flex items-center gap-0.5">
             <button
@@ -1188,7 +1284,7 @@ export function Timeline() {
 
       {/* ruler + tracks share one aligned area */}
       <div className="flex items-stretch gap-2">
-        <div className="w-24 shrink-0" />
+        <div className="w-44 shrink-0" />
         <div className="relative min-w-0 flex-1 overflow-hidden">
           {/* ruler — wheel zooms around the cursor; Shift+wheel pans */}
           <div
@@ -1261,11 +1357,14 @@ export function Timeline() {
           />
         ) : (
         <div className="flex flex-col gap-1 pt-1">
+          {cameraKind !== 'static' && (
           <Track
             label="Camera"
             trackId="progress"
             selectId="cinema-camera"
             color="#3b82f6"
+            focus="progress"
+            onFocus={() => useEditorStore.getState().setKeyableFocus('progress')}
             keys={progressLaneKeys(progressKeys, duration)}
             onMove={rig.updateProgressKeyTime}
             onDelete={(id) => {
@@ -1286,6 +1385,112 @@ export function Timeline() {
             onSelectKey={(id) => selectRigKey('progress', id)}
             defaultEase={ease}
           />
+          )}
+          {cameraKind === 'static' && staticPosKeys.length > 0 && (
+            <Track
+              label="Camera · Position"
+              trackId="staticPos"
+              selectId="cinema-camera"
+              color="#60a5fa"
+              focus="staticPos"
+              onFocus={() => useEditorStore.getState().setKeyableFocus('staticPos')}
+              values={
+                <XYZInput
+                  value={evalVec3(t, staticPosKeys, staticPose.position, ease)}
+                  onChange={(axis, value) => {
+                    const next = [...evalVec3(t, staticPosKeys, staticPose.position, ease)] as [
+                      number,
+                      number,
+                      number,
+                    ]
+                    next[axis] = value
+                    writeStaticPose({ position: next })
+                  }}
+                />
+              }
+              keys={staticPosKeys.map((k) => ({
+                id: k.id,
+                time: k.time,
+                title: `${(k.time * duration).toFixed(1)}s — Position`,
+                value: k.value[1],
+                ease: k.ease,
+                easeBezier: k.easeBezier,
+                easeIn: k.easeIn,
+                easeOut: k.easeOut,
+              }))}
+              onMove={(keyId, time) =>
+                useRigStore.getState().updateChannelKeyTime('staticPos', keyId, time)
+              }
+              onDelete={(keyId) => {
+                useRigStore.getState().removeChannelKey('staticPos', keyId)
+                useEditorStore.getState().selectKeyframe(null)
+              }}
+              curve={staticPosPlot.curve}
+              valueRange={staticPosPlot.range}
+              onMoveValue={(id, value) => useRigStore.getState().setKeyValue('staticPos', id, value)}
+              onBezier={(id, bezier) => useRigStore.getState().setKeyBezier('staticPos', id, bezier)}
+              onAdd={() => insertChannelKeyAt('staticPos', useRigStore.getState().t)}
+              onAddAt={(time) => insertChannelKeyAt('staticPos', time)}
+              addTitle="Add a camera position keyframe at the playhead"
+              onSpacing={(id, side, w) => applyChannelSpacing('staticPos', id, side, w)}
+              selectedId={rigSelectedId(selectedKeyframe, 'staticPos')}
+              onSelectKey={(id) => selectRigKey('staticPos', id)}
+              defaultEase={ease}
+            />
+          )}
+          {cameraKind === 'static' && staticRotKeys.length > 0 && (
+            <Track
+              label="Camera · Rotation"
+              trackId="staticRot"
+              selectId="cinema-camera"
+              color="#60a5fa"
+              focus="staticRot"
+              onFocus={() => useEditorStore.getState().setKeyableFocus('staticRot')}
+              values={
+                <XYZInput
+                  step={1}
+                  value={evalVec3(t, staticRotKeys, staticPose.rotation, ease)}
+                  onChange={(axis, value) => {
+                    const next = [...evalVec3(t, staticRotKeys, staticPose.rotation, ease)] as [
+                      number,
+                      number,
+                      number,
+                    ]
+                    next[axis] = value
+                    writeStaticPose({ rotation: next })
+                  }}
+                />
+              }
+              keys={staticRotKeys.map((k) => ({
+                id: k.id,
+                time: k.time,
+                title: `${(k.time * duration).toFixed(1)}s — Rotation`,
+                value: k.value[1],
+                ease: k.ease,
+                easeBezier: k.easeBezier,
+                easeIn: k.easeIn,
+                easeOut: k.easeOut,
+              }))}
+              onMove={(keyId, time) =>
+                useRigStore.getState().updateChannelKeyTime('staticRot', keyId, time)
+              }
+              onDelete={(keyId) => {
+                useRigStore.getState().removeChannelKey('staticRot', keyId)
+                useEditorStore.getState().selectKeyframe(null)
+              }}
+              curve={staticRotPlot.curve}
+              valueRange={staticRotPlot.range}
+              onMoveValue={(id, value) => useRigStore.getState().setKeyValue('staticRot', id, value)}
+              onBezier={(id, bezier) => useRigStore.getState().setKeyBezier('staticRot', id, bezier)}
+              onAdd={() => insertChannelKeyAt('staticRot', useRigStore.getState().t)}
+              onAddAt={(time) => insertChannelKeyAt('staticRot', time)}
+              addTitle="Add a camera rotation keyframe at the playhead"
+              onSpacing={(id, side, w) => applyChannelSpacing('staticRot', id, side, w)}
+              selectedId={rigSelectedId(selectedKeyframe, 'staticRot')}
+              onSelectKey={(id) => selectRigKey('staticRot', id)}
+              defaultEase={ease}
+            />
+          )}
           {cameraNoise.enabled && (
             <Track
               label="FX"
@@ -1384,6 +1589,7 @@ export function Timeline() {
             if (tracking && channel.id === 'target') return null
             if (!tracking && channel.id === 'lookOffset') return null
             const keys = channel.pick({ fovKeys, rollKeys, targetKeys, lookOffsetKeys })
+            if (keys.length === 0) return null
             const plot = channelPlots[channel.id]
             const valueOf = (id: string) => {
               if (channel.id === 'fov') return fovKeys.find((k) => k.id === id)?.value
@@ -1398,6 +1604,37 @@ export function Timeline() {
                 label={channel.label}
                 selectId="cinema-camera"
                 color="#60a5fa"
+                focus={channel.id}
+                onFocus={() => useEditorStore.getState().setKeyableFocus(channel.id)}
+                values={
+                  channel.id === 'fov' ? (
+                    <Slider
+                      value={evalValue(t, fovKeys, fov, ease)}
+                      min={15}
+                      max={120}
+                      step={1}
+                      format={(v) => `${Math.round(v)}°`}
+                      onChange={(v) => {
+                        const state = useRigStore.getState()
+                        if (state.fovKeys.length > 0) state.upsertChannelKey('fov', state.t, v)
+                        else state.setFov(v)
+                      }}
+                    />
+                  ) : channel.id === 'roll' ? (
+                    <Slider
+                      value={evalValue(t, rollKeys, roll, ease)}
+                      min={-180}
+                      max={180}
+                      step={1}
+                      format={(v) => `${Math.round(v)}°`}
+                      onChange={(v) => {
+                        const state = useRigStore.getState()
+                        if (state.rollKeys.length > 0) state.upsertChannelKey('roll', state.t, v)
+                        else state.setRoll(v)
+                      }}
+                    />
+                  ) : undefined
+                }
                 keys={keys.map((k) => {
                   const full =
                     channel.id === 'fov'
@@ -1471,41 +1708,22 @@ export function Timeline() {
                 />
               )
             }
-            const channels = object.keys.length === 0 ? null : OBJECT_CHANNELS
-            if (!channels) {
-              return (
-                <Track
-                  key={object.id}
-                  trackId={`object-${object.id}`}
-                  label={object.name}
-                  selectId={`obj:${object.id}`}
-                  color="#7c5cff"
-                  keys={[]}
-                  onMove={() => {}}
-                  onDelete={() => {}}
-                  onAdd={() => scene.addObjectKey(object.id, useRigStore.getState().t)}
-                  onAddAt={(time) => scene.addObjectKey(object.id, time)}
-                  addTitle="Save the current pose at the playhead"
-                  selectedId={
-                    selectedKeyframe?.kind === 'object' && selectedKeyframe.objectId === object.id
-                      ? selectedKeyframe.id
-                      : null
-                  }
-                  onSelectKey={(id) =>
-                    useEditorStore.getState().selectTimelineKey(
-                      { kind: 'object', objectId: object.id, id },
-                      `obj:${object.id}`,
-                    )
-                  }
-                  defaultEase={ease}
-                />
-              )
-            }
+            const channels = OBJECT_CHANNELS.filter(
+              (channel) => keysForObjectChannel(object.keys, channel).length > 0,
+            )
+            if (channels.length === 0) return null
             return (
               <Fragment key={object.id}>
                 {channels.map((channel) => {
               const laneKeys = keysForObjectChannel(object.keys, channel)
               const label = OBJECT_CHANNEL_LABELS[channel]
+              const live = evalModelTransform(t, object.keys, ease, object.transform) ?? object.transform
+              const focus =
+                channel === 'position'
+                  ? 'objectPosition'
+                  : channel === 'rotation'
+                    ? 'objectRotation'
+                    : 'objectScale'
               return (
                 <Track
                   key={`${object.id}-${channel}`}
@@ -1513,6 +1731,19 @@ export function Timeline() {
                   label={`${object.name} · ${label}`}
                   selectId={`obj:${object.id}`}
                   color="#7c5cff"
+                  focus={focus}
+                  onFocus={() => useEditorStore.getState().setKeyableFocus(focus)}
+                  values={
+                    <XYZInput
+                      step={channel === 'rotation' ? 1 : 0.1}
+                      value={live[channel]}
+                      onChange={(axis, value) => {
+                        const next = { ...live, [channel]: [...live[channel]] as typeof live.position }
+                        next[channel][axis] = value
+                        writeObjectTransform(object.id, next, [channel])
+                      }}
+                    />
+                  }
                   keys={laneKeys.map((k) => ({
                     id: k.id,
                     time: k.time,
@@ -1562,6 +1793,11 @@ export function Timeline() {
               </Fragment>
             )
           })}
+          {objects.every((object) => object.follow || object.keys.length === 0) &&
+            staticPosKeys.length === 0 &&
+            staticRotKeys.length === 0 && (
+              <p className="px-2 py-3 text-[11px] text-ink-dim">Select an object, then + Animate</p>
+            )}
         </div>
         )}
 
@@ -1570,7 +1806,7 @@ export function Timeline() {
           <div
             className="pointer-events-none absolute bottom-0 top-[-28px]"
             style={{
-              left: `calc(6.5rem + (100% - 6.5rem - 2rem) * ${playX})`,
+              left: `calc(11.5rem + (100% - 11.5rem - 2rem) * ${playX})`,
             }}
           >
             <div className="absolute bottom-0 top-0 w-px bg-accent" />

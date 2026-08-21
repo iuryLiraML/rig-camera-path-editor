@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { applyDeleteShortcut, isKeyableShortcut } from './editorShortcuts'
+import {
+  applyDeleteShortcut,
+  applyHelpShortcut,
+  applySaveShortcut,
+  applyTimelineShortcut,
+  isKeyableShortcut,
+  SHORTCUT_ROWS,
+} from './editorShortcuts'
 import { insertKeyframeAtPlayhead } from './insertKeyframe'
+import { useSaveStatusStore } from './saveStatus'
 import { useEditorStore } from '../state/useEditorStore'
 import { usePathStore } from '../state/usePathStore'
 import { useRigStore } from '../state/useRigStore'
@@ -13,6 +21,10 @@ beforeEach(() => {
     keyableFocus: null,
     objectBarPanel: 'none',
     playMode: false,
+    workspaceMode: 'build',
+    composeDock: 'sequence',
+    timelineGraph: false,
+    showShortcuts: false,
   })
   usePathStore.setState({ selectedAnchorIds: [] })
   useSceneStore.setState({ objects: [], pendingLifts: [] })
@@ -27,8 +39,16 @@ afterEach(() => {
     keyableFocus: null,
     objectBarPanel: 'none',
     playMode: false,
+    workspaceMode: 'build',
+    composeDock: 'sequence',
+    timelineGraph: false,
+    showShortcuts: false,
   })
 })
+
+function key(init: KeyboardEventInit) {
+  return new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })
+}
 
 describe('isKeyableShortcut', () => {
   it('allows I and Delete through number fields', () => {
@@ -140,5 +160,48 @@ describe('applyDeleteShortcut', () => {
     const leftover = useSceneStore.getState().objects[0].keys
     expect(leftover.map((k) => k.channel).sort()).toEqual(['rotation', 'scale'])
     expect(useSceneStore.getState().objects).toHaveLength(1)
+  })
+})
+
+describe('shortcut handlers', () => {
+  it('lists the Compose cheat-sheet rows', () => {
+    expect(SHORTCUT_ROWS.map((row) => row.keys)).toEqual([
+      'I',
+      'Delete',
+      'Space',
+      'W E R',
+      'T',
+      'Shift+T',
+      '?',
+      'Ctrl/Cmd+S',
+      'Ctrl/Cmd+Z / Y',
+    ])
+  })
+
+  it('opens Compose Timeline on T', () => {
+    const event = key({ key: 't' })
+    expect(applyTimelineShortcut(event)).toBe(true)
+    expect(useEditorStore.getState().workspaceMode).toBe('compose')
+    expect(useEditorStore.getState().composeDock).toBe('timeline')
+    expect(useEditorStore.getState().timelineGraph).toBe(false)
+  })
+
+  it('toggles the Graph Editor on Shift+T', () => {
+    const event = key({ key: 'T', shiftKey: true })
+    expect(applyTimelineShortcut(event)).toBe(true)
+    expect(useEditorStore.getState().composeDock).toBe('timeline')
+    expect(useEditorStore.getState().timelineGraph).toBe(true)
+  })
+
+  it('toggles the shortcuts overlay on ?', () => {
+    expect(applyHelpShortcut(key({ key: '?' }))).toBe(true)
+    expect(useEditorStore.getState().showShortcuts).toBe(true)
+    expect(applyHelpShortcut(key({ key: '?' }))).toBe(true)
+    expect(useEditorStore.getState().showShortcuts).toBe(false)
+  })
+
+  it('handles Ctrl+S without throwing', () => {
+    useSaveStatusStore.setState({ status: 'dirty' })
+    expect(applySaveShortcut(key({ key: 's', ctrlKey: true }))).toBe(true)
   })
 })

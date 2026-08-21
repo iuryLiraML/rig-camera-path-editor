@@ -31,6 +31,8 @@ beforeEach(() => {
     freqKeys: [],
     targetKeys: [],
     lookOffsetKeys: [],
+    staticPosKeys: [],
+    staticRotKeys: [],
   })
 })
 
@@ -41,6 +43,18 @@ describe('insertChannelKeyAt', () => {
     expect(keys).toHaveLength(1)
     expect(keys[0].time).toBeCloseTo(0.25, 5)
     expect(keys[0].value).toBeCloseTo(45, 5)
+  })
+
+  it('adds a Free-camera position key from the rest pose', () => {
+    useRigStore.setState({
+      staticPose: { position: [2, 3, 4], rotation: [0, 0, 0] },
+      staticPosKeys: [],
+    })
+    insertChannelKeyAt('staticPos', 0.25)
+    const keys = useRigStore.getState().staticPosKeys
+    expect(keys).toHaveLength(1)
+    expect(keys[0].time).toBeCloseTo(0.25, 5)
+    expect(keys[0].value).toEqual([2, 3, 4])
   })
 })
 
@@ -65,6 +79,13 @@ describe('deleteKeyframeAtPlayhead', () => {
     useEditorStore.setState({ keyableFocus: 'fov' })
     expect(deleteKeyframeAtPlayhead()).toBe(true)
     expect(useRigStore.getState().fovKeys).toHaveLength(0)
+  })
+
+  it('removes a Free-camera rotation key at the playhead', () => {
+    insertChannelKeyAt('staticRot', 0.4)
+    useEditorStore.setState({ keyableFocus: 'staticRot' })
+    expect(deleteKeyframeAtPlayhead()).toBe(true)
+    expect(useRigStore.getState().staticRotKeys).toHaveLength(0)
   })
 
   it('removes an object pose key when Transform is open', () => {

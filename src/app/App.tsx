@@ -26,6 +26,9 @@ import { redo, undo, historyIsDirty } from '../lib/history'
 import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
 import {
   applyDeleteShortcut,
+  applyHelpShortcut,
+  applySaveShortcut,
+  applyTimelineShortcut,
   isKeyableField,
   isKeyableShortcut,
   isTextEditing,
@@ -43,18 +46,26 @@ import { ImportAssetsModal } from '../ui/ImportAssetsModal'
 import { CameraBar } from '../ui/CameraBar'
 import { CameraAdjustPanel } from '../ui/CameraAdjustPanel'
 import { SequenceStrip } from '../ui/SequenceStrip'
+import { ShortcutsOverlay } from '../ui/ShortcutsOverlay'
 
 function useShortcuts() {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (isTextEditing()) return
-      if (isKeyableField() && !isKeyableShortcut(e.key)) return
       const editor = useEditorStore.getState()
       const rig = useRigStore.getState()
       const path = usePathStore.getState()
 
+      if (applySaveShortcut(e)) return
+      if (editor.showShortcuts && e.key === 'Escape') {
+        e.preventDefault()
+        editor.setShowShortcuts(false)
+        return
+      }
+      if (isTextEditing()) return
+      if (applyHelpShortcut(e) || applyTimelineShortcut(e)) return
+      if (isKeyableField() && !isKeyableShortcut(e.key)) return
+
       // looking through a free camera: WASD/QE fly — don't steal them for gizmos
-      if (
         editor.cameraView &&
         rig.cameraKind === 'static' &&
         !e.ctrlKey &&
@@ -285,6 +296,7 @@ function EditorWorkspace() {
       {chrome.objectBar && <ObjectBar />}
       {chrome.addDrawer && <AddObjectDrawer />}
       <ImportAssetsModal />
+      <ShortcutsOverlay />
 
       {playMode && !recording && (
         <button

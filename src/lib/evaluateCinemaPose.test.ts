@@ -426,4 +426,56 @@ describe('evaluateStaticPose', () => {
     expect(free.quaternion).not.toEqual(aimed.quaternion)
     expect(free.position).toEqual([0, 1, 5])
   })
+
+  it('interpolates keyed position as a pure function of t', () => {
+    const pose = evaluateCinemaPose(
+      0.5,
+      { anchors: [] },
+      channels({
+        ease: 'linear',
+        cameraKind: 'static',
+        lookAtMode: 'free',
+        staticPose: { position: [0, 0, 0], rotation: [0, 0, 0] },
+        staticPosKeys: [
+          { id: 'p0', time: 0, value: [0, 1, 0] },
+          { id: 'p1', time: 1, value: [4, 1, 0] },
+        ],
+      }),
+    )!
+    expect(pose.position[0]).toBeCloseTo(2, 5)
+    expect(pose.position[1]).toBeCloseTo(1, 5)
+    expect(pose.position[2]).toBeCloseTo(0, 5)
+  })
+
+  it('interpolates keyed rotation in Free', () => {
+    const start = evaluateCinemaPose(
+      0,
+      { anchors: [] },
+      channels({
+        ease: 'linear',
+        cameraKind: 'static',
+        lookAtMode: 'free',
+        staticPose: { position: [0, 1, 5], rotation: [0, 0, 0] },
+        staticRotKeys: [
+          { id: 'r0', time: 0, value: [0, 0, 0] },
+          { id: 'r1', time: 1, value: [0, 90, 0] },
+        ],
+      }),
+    )!
+    const mid = evaluateCinemaPose(
+      0.5,
+      { anchors: [] },
+      channels({
+        ease: 'linear',
+        cameraKind: 'static',
+        lookAtMode: 'free',
+        staticPose: { position: [0, 1, 5], rotation: [0, 0, 0] },
+        staticRotKeys: [
+          { id: 'r0', time: 0, value: [0, 0, 0] },
+          { id: 'r1', time: 1, value: [0, 90, 0] },
+        ],
+      }),
+    )!
+    expect(start.quaternion).not.toEqual(mid.quaternion)
+  })
 })

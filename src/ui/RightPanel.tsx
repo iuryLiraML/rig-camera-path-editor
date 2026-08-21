@@ -50,7 +50,8 @@ import {
   Slider,
   XYZInput,
 } from './primitives'
-import { PoseKeyButton } from './PoseKeyButton'
+import { insertChannelKeyAt } from '../lib/timelineKey'
+import { writeStaticPose } from '../lib/autoKey'
 import { SettingsIcon } from './icons'
 
 function PanelButton({
@@ -801,6 +802,8 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
   const cameraCount = useCameraOptionsStore((s) => s.options.length)
   const cameraKind = useRigStore((s) => s.cameraKind)
   const staticPose = useRigStore((s) => s.staticPose)
+  const staticPosKeys = useRigStore((s) => s.staticPosKeys)
+  const staticRotKeys = useRigStore((s) => s.staticRotKeys)
   const tracking = Boolean(targetObjectId && objects.some((object) => object.id === targetObjectId))
   const rig = useRigStore.getState()
   const isStatic = cameraKind === 'static'
@@ -817,6 +820,8 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
   const freqNow = evalValue(t, freqKeys, cameraNoise.freq, ease)
   const targetNow = evalVec3(t, targetKeys, target, ease)
   const lookOffsetNow = evalVec3(t, lookOffsetKeys, lookOffset, ease)
+  const staticPosNow = evalVec3(t, staticPosKeys, staticPose.position, ease)
+  const staticRotNow = evalVec3(t, staticRotKeys, staticPose.rotation, ease)
 
   const currentProgress = evalProgress(t, progressKeys, ease)
   const sortedKeys = [...progressKeys].sort((a, b) => a.time - b.time)
@@ -848,14 +853,28 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
               floor pad trucks, the diamond aims. Look through, then WASD to fly.
             </p>
             <Row label="Position">
-              <XYZInput
-                value={staticPose.position}
-                onChange={(axis, v) => {
-                  const next = [...staticPose.position] as Vec3
-                  next[axis] = v
-                  useRigStore.getState().setStaticPose({ position: next })
-                }}
-              />
+              <div className="flex items-center gap-2">
+                <XYZInput
+                  value={staticPosNow}
+                  keyed={hasKeyAtTime(staticPosKeys, t)}
+                  onFocusChange={(on) =>
+                    useEditorStore.getState().setKeyableFocus(on ? 'staticPos' : null)
+                  }
+                  onChange={(axis, v) => {
+                    const next = [...staticPosNow] as Vec3
+                    next[axis] = v
+                    writeStaticPose({ position: next })
+                  }}
+                />
+                <KeyButton
+                  active={staticPosKeys.length > 0}
+                  onKey={hasKeyAtTime(staticPosKeys, t)}
+                  onClick={() => {
+                    useEditorStore.getState().setKeyableFocus('staticPos')
+                    insertChannelKeyAt('staticPos', useRigStore.getState().t)
+                  }}
+                />
+              </div>
             </Row>
           </>
         )}
@@ -992,14 +1011,29 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
         </Row>
         {isStatic && lookAtMode === 'free' && (
           <Row label="Rotation">
-            <XYZInput
-              value={staticPose.rotation}
-              onChange={(axis, v) => {
-                const next = [...staticPose.rotation] as Vec3
-                next[axis] = v
-                useRigStore.getState().setStaticPose({ rotation: next })
-              }}
-            />
+            <div className="flex items-center gap-2">
+              <XYZInput
+                value={staticRotNow}
+                step={1}
+                keyed={hasKeyAtTime(staticRotKeys, t)}
+                onFocusChange={(on) =>
+                  useEditorStore.getState().setKeyableFocus(on ? 'staticRot' : null)
+                }
+                onChange={(axis, v) => {
+                  const next = [...staticRotNow] as Vec3
+                  next[axis] = v
+                  writeStaticPose({ rotation: next })
+                }}
+              />
+              <KeyButton
+                active={staticRotKeys.length > 0}
+                onKey={hasKeyAtTime(staticRotKeys, t)}
+                onClick={() => {
+                  useEditorStore.getState().setKeyableFocus('staticRot')
+                  insertChannelKeyAt('staticRot', useRigStore.getState().t)
+                }}
+              />
+            </div>
           </Row>
         )}
         {lookAtMode !== 'free' && <TrackObjectRow />}

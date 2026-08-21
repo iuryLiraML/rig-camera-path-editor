@@ -1,19 +1,28 @@
+import { useSaveStatusStore } from '../lib/saveStatus'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { ListIcon } from './icons'
 import { ProjectMenu } from './LeftPanel'
 import { GUTTER, LEFT_PANEL_MAX } from './viewportInsets'
 
+const SAVE_CHIP: Record<'saved' | 'saving' | 'dirty', { label: string; className: string }> = {
+  saved: { label: 'Saved', className: 'text-ink-dim' },
+  saving: { label: 'Saving…', className: 'text-ink-dim' },
+  dirty: { label: 'Not saved', className: 'text-amber-400' },
+}
+
 export function ProjectChip() {
   const name = useProjectStore((s) => s.name)
   const showOutliner = useEditorStore((s) => s.showOutliner)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const saveStatus = useSaveStatusStore((s) => s.status)
   const canToggleOutliner = workspaceMode !== 'visualize'
+  const chip = SAVE_CHIP[saveStatus]
 
   return (
     <div
       className={`panel absolute z-40 flex items-center gap-1.5 px-2 py-1 ${
-        showOutliner ? 'rounded-b-none border-b-0' : 'max-w-[240px]'
+        showOutliner ? 'rounded-b-none border-b-0' : 'max-w-[280px]'
       }`}
       style={{
         top: GUTTER,
@@ -51,6 +60,13 @@ export function ProjectChip() {
         className="min-w-0 flex-1 truncate bg-transparent text-[11px] font-medium text-ink outline-none"
         title="Project name"
       />
+      <span
+        data-save-status={saveStatus}
+        className={`shrink-0 text-[10px] ${chip.className}`}
+        title={chip.label}
+      >
+        {chip.label}
+      </span>
       {showOutliner && (
         <>
           <ProjectMenu />

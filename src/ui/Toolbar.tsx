@@ -4,11 +4,12 @@ import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { downloadRigJSON } from '../state/useRigStore'
 import { applyBeginPlayback } from '../lib/playback'
+import { openComposeTimeline } from '../lib/editorShortcuts'
 import { exportDimensions, exportFrame, exportVideo } from '../lib/recorder'
 import type { ViewMode } from '../state/useEditorStore'
 import { Segmented } from './primitives'
 import { AddSceneMenu } from './AddSceneMenu'
-import { CameraIcon, CursorIcon, ExportIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
+import { CameraIcon, ClockIcon, CursorIcon, ExportIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
 import { toolbarSlot, useViewportInsets, useWindowSize } from './viewportInsets'
 
 function ToolButton({
@@ -228,6 +229,7 @@ export function Toolbar() {
   const selection = useEditorStore((s) => s.selection)
   const zoomPct = useEditorStore((s) => s.zoomPct)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const composeDock = useEditorStore((s) => s.composeDock)
   const hasPath = useCameraReady()
   const insets = useViewportInsets()
   const win = useWindowSize()
@@ -318,6 +320,20 @@ export function Toolbar() {
         {zoomPct}%
       </button>
       <Divider />
+      <ToolButton
+        title="Timeline (T)"
+        active={workspaceMode === 'compose' && composeDock === 'timeline'}
+        onClick={() => {
+          const editor = useEditorStore.getState()
+          if (workspaceMode === 'compose' && composeDock === 'timeline') {
+            editor.setComposeDock('sequence')
+            return
+          }
+          openComposeTimeline()
+        }}
+      >
+        <ClockIcon />
+      </ToolButton>
       <ExportMenu disabled={!hasPath} />
       <ToolButton
         title={hasPath ? 'Fullscreen preview (hides panels)' : 'Create a path first'}

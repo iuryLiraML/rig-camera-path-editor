@@ -26,8 +26,11 @@ import {
   type ProjectWorkflow,
 } from './projectWorkflow'
 import { deleteFolder as deleteFolderRecord, listFolders } from './folders'
+import { setPersistFlusher } from './persistFlush'
+import { useSaveStatusStore } from './saveStatus'
 
 const ACTIVE_KEY = 'rig-active-project'
+export const AUTOSAVE_MS = 800
 
 export interface ProjectAssetRef {
   assetId: string
@@ -96,36 +99,110 @@ function restoreDirectorChat() {
   useAgentStore.getState().hydrateDirectorChat()
 }
 
-/** Persists the active project (debounced by watchers, immediate on switch). */
-export async function saveActiveProject() {
-  const { projectId } = useProjectStore.getState()
-  if (!projectId) return
-  const createdAt = createdAtById.get(projectId) ?? Date.now()
-  createdAtById.set(projectId, createdAt)
-  const previous = await idbGet<ProjectRecord>(STORES.projects, projectId)
-  const record: ProjectRecord = {
-    ...buildActiveRecord(projectId, createdAt),
-    cloudProjectId: previous?.cloudProjectId ?? (isCloudFirst() ? projectId : undefined),
-    cloudUpdatedAt: previous?.cloudUpdatedAt,
-    bufferAssets: previous?.bufferAssets,
-    stillAssets: previous?.stillAssets,
+/**
+ * Assigns an id to the live editor session without wiping the scene — unlike
+ * "New project", which starts from an empty rig. Used when autosave/unload
+ * runs before the user has ever named a project.
+ */
+async function createUntitledFromCurrent(): Promise<string | null> {
+  const current = useProjectStore.getState()
+  const name = current.name.trim() || 'Untitled'
+  let id = makeSceneId('proj')
+  let cloudUpdatedAt: string | undefined
+  if (isCloudFirst()) {
+    const accessToken = useCloudAuthStore.getState().accessToken
+    if (!accessToken) return null
+    const created = await createCloudProject(accessToken, {
+      name,
+      workflowVersion: PROJECT_WORKFLOW_VERSION,
+      workflow: current.workflow,
+      editorState: {},
+    })
+    id = created.id
+    cloudUpdatedAt = created.updatedAt
   }
-  await idbPut(STORES.projects, record)
-  void syncActiveProjectToCloud().catch((error) => {
-    if (error instanceof CloudConflictError) {
-      useCloudAuthStore.getState().setSaveConflict({
-        projectId,
-        updatedAt: error.updatedAt,
-      })
+  createdAtById.set(id, Date.now())
+  current.loadProject({
+    projectId: id,
+    name,
+    workflow: current.workflow,
+    guidelines: current.guidelines,
+    savedPrompts: current.savedPrompts,
+    skills: current.skills,
+    shots: current.shots,
+    directorChat: current.directorChat,
+    directorLessons: current.directorLessons,
+    folderId: current.folderId,
+  })
+  localStorage.setItem(ACTIVE_KEY, id)
+  if (cloudUpdatedAt) {
+    const createdAt = createdAtById.get(id) ?? Date.now()
+    await idbPut(STORES.projects, {
+      ...buildActiveRecord(id, createdAt),
+      cloudProjectId: id,
+      cloudUpdatedAt,
+    })
+  }
+  await refreshProjectList()
+  return id
+}
+
+async function ensureActiveProjectId(createIfMissing: boolean): Promise<string | null> {
+  const existing = useProjectStore.getState().projectId
+  if (existing) return existing
+  if (!createIfMissing) return null
+  // Projects home with no open session — do not spawn an untitled on tab hide.
+  if (useEditorStore.getState().appView === 'projects') return null
+  return createUntitledFromCurrent()
+}
+
+/** Persists the active project (debounced by watchers, immediate on switch). */
+export async function saveActiveProject(options?: { createIfMissing?: boolean }) {
+  const createIfMissing = options?.createIfMissing ?? true
+  useSaveStatusStore.getState().setStatus('saving')
+  try {
+    const projectId = await ensureActiveProjectId(createIfMissing)
+    if (!projectId) {
+      useSaveStatusStore.getState().setStatus('saved')
       return
     }
-    console.error('Cloud sync failed', error)
-    if (isCloudFirst()) {
-      useSceneStore.getState().showNotice(
-        error instanceof Error ? error.message : 'Cloud save failed. The project is not durable offline.',
-      )
+    const createdAt = createdAtById.get(projectId) ?? Date.now()
+    createdAtById.set(projectId, createdAt)
+    const previous = await idbGet<ProjectRecord>(STORES.projects, projectId)
+    const record: ProjectRecord = {
+      ...buildActiveRecord(projectId, createdAt),
+      cloudProjectId: previous?.cloudProjectId ?? (isCloudFirst() ? projectId : undefined),
+      cloudUpdatedAt: previous?.cloudUpdatedAt,
+      bufferAssets: previous?.bufferAssets,
+      stillAssets: previous?.stillAssets,
     }
-  })
+    await idbPut(STORES.projects, record)
+    useSaveStatusStore.getState().setStatus('saved')
+    void syncActiveProjectToCloud().catch((error) => {
+      if (error instanceof CloudConflictError) {
+        useCloudAuthStore.getState().setSaveConflict({
+          projectId,
+          updatedAt: error.updatedAt,
+        })
+        return
+      }
+      console.error('Cloud sync failed', error)
+      if (isCloudFirst()) {
+        useSceneStore.getState().showNotice(
+          error instanceof Error ? error.message : 'Cloud save failed. The project is not durable offline.',
+        )
+      }
+    })
+  } catch (error) {
+    useSaveStatusStore.getState().setStatus('dirty')
+    throw error
+  }
+}
+
+/** Skip the autosave debounce and write now (Ctrl+S, key insert, tab hide). */
+export function flushActiveProject(options?: { createIfMissing?: boolean }) {
+  clearTimeout(saveTimer)
+  return saveActiveProject(options)
 }
 
 function sceneSummaries(shots: Shot[] | undefined) {
@@ -246,24 +323,45 @@ function applyRecord(record: ProjectRecord) {
 let watching = false
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 let autosaveSuspended = false
+let persistFlushInstalled = false
+
+export function scheduleAutosave() {
+  if (autosaveSuspended) return
+  useSaveStatusStore.getState().setStatus('dirty')
+  clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    void saveActiveProject().catch((error) => console.error('Failed to autosave project', error))
+  }, AUTOSAVE_MS)
+}
+
+function onVisibilityFlush() {
+  if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') return
+  void flushActiveProject().catch((error) => console.error('Failed to flush project', error))
+}
+
+/** Write on hide / unload so an 800ms debounce cannot drop the last edit. */
+export function installPersistFlush() {
+  if (persistFlushInstalled || typeof window === 'undefined') return
+  persistFlushInstalled = true
+  window.addEventListener('beforeunload', onVisibilityFlush)
+  window.addEventListener('pagehide', onVisibilityFlush)
+  document.addEventListener('visibilitychange', onVisibilityFlush)
+}
 
 function watchForAutosave() {
   if (watching) return
   watching = true
-  const schedule = () => {
-    if (autosaveSuspended) return
-    clearTimeout(saveTimer)
-    saveTimer = setTimeout(() => {
-      void saveActiveProject().catch((error) => console.error('Failed to autosave project', error))
-    }, 800)
-  }
-  useSceneStore.subscribe(schedule)
-  useRigStore.subscribe((s) => {
-    if (!s.playing) schedule() // playback t updates are not worth writes
+  setPersistFlusher(() => {
+    void flushActiveProject().catch((error) => console.error('Failed to flush project', error))
   })
-  usePathStore.subscribe(schedule) // path geometry lives here now
-  useCameraOptionsStore.subscribe(schedule)
-  useProjectStore.subscribe(schedule)
+  installPersistFlush()
+  useSceneStore.subscribe(scheduleAutosave)
+  useRigStore.subscribe((s) => {
+    if (!s.playing) scheduleAutosave() // playback t updates are not worth writes
+  })
+  usePathStore.subscribe(scheduleAutosave) // path geometry lives here now
+  useCameraOptionsStore.subscribe(scheduleAutosave)
+  useProjectStore.subscribe(scheduleAutosave)
 }
 
 async function openHydratedRecord(record: ProjectRecord) {
@@ -384,7 +482,7 @@ async function switchProjectNow(id: string) {
   const { projectId } = useProjectStore.getState()
   if (id === projectId) return
   clearTimeout(saveTimer)
-  await saveActiveProject()
+  await saveActiveProject({ createIfMissing: false })
   resetEditorChrome()
 
   if (isCloudFirst()) {
@@ -410,7 +508,7 @@ export function switchProject(id: string) {
 
 async function createProjectNow(name: string, saveCurrent: boolean, folderId: string | null = null) {
   clearTimeout(saveTimer)
-  if (saveCurrent) await saveActiveProject()
+  if (saveCurrent) await saveActiveProject({ createIfMissing: false })
 
   let id = makeSceneId('proj')
   let cloudUpdatedAt: string | undefined

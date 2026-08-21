@@ -8,6 +8,7 @@ import { evalObjectWorldTransform, resolveTrackTarget } from '../../lib/objectMo
 import { localPointToWorld } from '../../lib/pathSpace'
 import { lockOrbit, unlockOrbit } from '../../lib/orbitLock'
 import { truckOnGround } from '../../lib/planeDrag'
+import { writeStaticPose } from '../../lib/autoKey'
 import { applyPoseToObject, eulerDegFromQuaternion, poseFromObject } from '../../lib/staticCamera'
 import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
@@ -115,7 +116,11 @@ export function CameraRig() {
   useScreenScale(pickRef, 0.07)
 
   useFrame(() => {
-    const pose = useRigStore.getState().staticPose
+    const rig = useRigStore.getState()
+    const pose = {
+      position: evalVec3(rig.t, rig.staticPosKeys, rig.staticPose.position, rig.ease),
+      rotation: evalVec3(rig.t, rig.staticRotKeys, rig.staticPose.rotation, rig.ease),
+    }
     const look = currentLookPoint()
     if (proxyRef.current && !gizmoDragging.current) {
       applyPoseToObject(proxyRef.current, pose)
@@ -178,7 +183,7 @@ export function CameraRig() {
     switch (d.kind) {
       case 'ground': {
         const trucked = truckOnGround(d.startCam, d.startTarget, d.startGround, next)
-        useRigStore.getState().setStaticPose({ position: trucked.camera })
+        writeStaticPose({ position: trucked.camera })
         if (lookAtMode === 'target') writeLookAt(trucked.target)
         if (groundHandle.current) {
           groundHandle.current.position.set(trucked.camera[0], 0, trucked.camera[2])
@@ -243,11 +248,10 @@ export function CameraRig() {
           onObjectChange={() => {
             const proxy = proxyRef.current
             if (!proxy) return
-            const rig = useRigStore.getState()
             if (mode === 'rotate') {
-              rig.setStaticPose({ rotation: eulerDegFromQuaternion(proxy.quaternion) })
+              writeStaticPose({ rotation: eulerDegFromQuaternion(proxy.quaternion) })
             } else {
-              rig.setStaticPose({ position: poseFromObject(proxy).position })
+              writeStaticPose({ position: poseFromObject(proxy).position })
             }
           }}
         />

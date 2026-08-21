@@ -34,6 +34,8 @@ export const KEY_CHANNELS = [
   'freq',
   'target',
   'lookOffset',
+  'staticPos',
+  'staticRot',
 ] as const
 
 export type KeyChannel = (typeof KEY_CHANNELS)[number]
@@ -106,6 +108,7 @@ export function resolveKeyTargets(
   focus: KeyableFocus | null,
   selection: string | null,
   animated: KeyChannel[],
+  emptyFallback: KeyChannel = 'progress',
 ): { channels: KeyChannel[]; object: boolean; objectChannels: ObjectChannel[] } {
   if (isKeyChannel(focus)) {
     return { channels: [focus], object: false, objectChannels: [] }
@@ -129,6 +132,6 @@ export function resolveKeyTargets(
   if (selection?.startsWith('obj:')) {
     return { channels: [], object: true, objectChannels: [...OBJECT_CHANNELS] }
   }
-  if (animated.length === 0) return { channels: ['progress'], object: false, objectChannels: [] }
+  if (animated.length === 0) return { channels: [emptyFallback], object: false, objectChannels: [] }
   return { channels: animated, object: false, objectChannels: [] }
 }

@@ -7,7 +7,7 @@ import {
 } from './keyframes'
 import { useEditorStore, type SelectedTimelineKey } from '../state/useEditorStore'
 import { useRigStore, type RigChannel, type ScalarChannel } from '../state/useRigStore'
-import { useSceneStore } from '../state/useSceneStore'
+import { requestPersistFlush } from './persistFlush'
 import { type EaseKind } from './easing'
 import {
   findKeyAtTime,
@@ -32,6 +32,12 @@ export function insertChannelKeyAt(channel: RigChannel, time: number) {
     case 'lookOffset':
       rig.upsertLookOffsetKey(t, evalVec3(t, rig.lookOffsetKeys, rig.lookOffset, rig.ease))
       break
+    case 'staticPos':
+      rig.upsertStaticPosKey(t, evalVec3(t, rig.staticPosKeys, rig.staticPose.position, rig.ease))
+      break
+    case 'staticRot':
+      rig.upsertStaticRotKey(t, evalVec3(t, rig.staticRotKeys, rig.staticPose.rotation, rig.ease))
+      break
     case 'fov':
     case 'roll':
     case 'intensity':
@@ -49,6 +55,7 @@ export function insertChannelKeyAt(channel: RigChannel, time: number) {
       return _never
     }
   }
+  requestPersistFlush()
 }
 
 function scalarAt(channel: ScalarChannel, rig: ReturnType<typeof useRigStore.getState>) {
@@ -203,6 +210,10 @@ function channelField(channel: RigChannel) {
       return 'targetKeys' as const
     case 'lookOffset':
       return 'lookOffsetKeys' as const
+    case 'staticPos':
+      return 'staticPosKeys' as const
+    case 'staticRot':
+      return 'staticRotKeys' as const
     case 'progress':
       return 'progressKeys' as const
     default: {

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
+import { writeStaticPose } from '../../lib/autoKey'
 import { useRigStore } from '../../state/useRigStore'
 import { applyFly, lookAtRotationDeg } from '../../lib/staticCamera'
 
@@ -117,8 +118,8 @@ export function CameraFly() {
         dt: Math.min(0.05, delta),
       },
     )
-    if (aimLocked) rig.setStaticPose({ position: next.position })
-    else rig.setStaticPose(next)
+    if (aimLocked) writeStaticPose({ position: next.position })
+    else writeStaticPose(next)
   })
 
   return null

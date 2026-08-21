@@ -43,7 +43,8 @@ export type ScalarChannel =
   | 'ampPos'
   | 'ampRot'
   | 'freq'
-export type RigChannel = ScalarChannel | 'target' | 'lookOffset' | 'progress'
+export type Vec3Channel = 'target' | 'lookOffset' | 'staticPos' | 'staticRot'
+export type RigChannel = ScalarChannel | Vec3Channel | 'progress'
 
 const CHANNEL_FIELD = {
   fov: 'fovKeys',
@@ -56,6 +57,8 @@ const CHANNEL_FIELD = {
   freq: 'freqKeys',
   target: 'targetKeys',
   lookOffset: 'lookOffsetKeys',
+  staticPos: 'staticPosKeys',
+  staticRot: 'staticRotKeys',
   progress: 'progressKeys',
 } as const
 
@@ -130,6 +133,8 @@ export interface RigSnapshot {
   targetKeys?: Vec3Key[]
   lookOffset?: Vec3
   lookOffsetKeys?: Vec3Key[]
+  staticPosKeys?: Vec3Key[]
+  staticRotKeys?: Vec3Key[]
   cameraNoise?: CameraNoise
   /** Scene object the look-at target follows; null = fixed / keyed XYZ */
   targetObjectId?: string | null
@@ -172,6 +177,8 @@ interface RigState {
   targetKeys: Vec3Key[]
   lookOffset: Vec3
   lookOffsetKeys: Vec3Key[]
+  staticPosKeys: Vec3Key[]
+  staticRotKeys: Vec3Key[]
   cameraNoise: CameraNoise
   targetObjectId: string | null
   pathSpace: PathSpace
@@ -190,6 +197,8 @@ interface RigState {
   upsertChannelKey: (channel: ScalarChannel, time: number, value: number) => void
   upsertTargetKey: (time: number, value: Vec3) => void
   upsertLookOffsetKey: (time: number, value: Vec3) => void
+  upsertStaticPosKey: (time: number, value: Vec3) => void
+  upsertStaticRotKey: (time: number, value: Vec3) => void
   removeChannelKey: (channel: RigChannel, id: string) => void
   updateChannelKeyTime: (channel: RigChannel, id: string, time: number) => void
   setKeyValue: (channel: RigChannel, id: string, value: number) => void
@@ -249,6 +258,8 @@ export const useRigStore = create<RigState>()((set, get) => ({
       targetKeys: [] as Vec3Key[],
       lookOffset: [0, 0, 0] as Vec3,
       lookOffsetKeys: [] as Vec3Key[],
+      staticPosKeys: [] as Vec3Key[],
+      staticRotKeys: [] as Vec3Key[],
       cameraNoise: { ...DEFAULT_CAMERA_NOISE },
       targetObjectId: null as string | null,
       pathSpace: 'world' as PathSpace,
@@ -317,6 +328,26 @@ export const useRigStore = create<RigState>()((set, get) => ({
           }
         }),
 
+      upsertStaticPosKey: (time, value) =>
+        set((s) => {
+          const existing = s.staticPosKeys.find((k) => Math.abs(k.time - time) < KEY_MERGE_EPS)
+          return {
+            staticPosKeys: existing
+              ? s.staticPosKeys.map((k) => (k.id === existing.id ? { ...k, value } : k))
+              : [...s.staticPosKeys, { id: makeKeyId('staticPos', time), time, value }],
+          }
+        }),
+
+      upsertStaticRotKey: (time, value) =>
+        set((s) => {
+          const existing = s.staticRotKeys.find((k) => Math.abs(k.time - time) < KEY_MERGE_EPS)
+          return {
+            staticRotKeys: existing
+              ? s.staticRotKeys.map((k) => (k.id === existing.id ? { ...k, value } : k))
+              : [...s.staticRotKeys, { id: makeKeyId('staticRot', time), time, value }],
+          }
+        }),
+
       removeChannelKey: (channel, id) =>
         set((s) => {
           const field = CHANNEL_FIELD[channel]
@@ -345,7 +376,7 @@ export const useRigStore = create<RigState>()((set, get) => ({
               ),
             }
           }
-          if (channel === 'target' || channel === 'lookOffset') {
+          if (channel === 'target' || channel === 'lookOffset' || channel === 'staticPos' || channel === 'staticRot') {
             const keys = s[field] as Vec3Key[]
             return {
               [field]: keys.map((k) =>
@@ -431,6 +462,8 @@ export const useRigStore = create<RigState>()((set, get) => ({
           freqKeys: s.freqKeys.map(stripSpacing),
           targetKeys: s.targetKeys.map(stripSpacing),
           lookOffsetKeys: s.lookOffsetKeys.map(stripSpacing),
+          staticPosKeys: s.staticPosKeys.map(stripSpacing),
+          staticRotKeys: s.staticRotKeys.map(stripSpacing),
         })),
 
       clearChannel: (channel) =>
@@ -503,6 +536,8 @@ export const useRigStore = create<RigState>()((set, get) => ({
             targetKeys: s.targetKeys,
             lookOffset: s.lookOffset,
             lookOffsetKeys: s.lookOffsetKeys,
+            staticPosKeys: s.staticPosKeys,
+            staticRotKeys: s.staticRotKeys,
             cameraNoise: s.cameraNoise,
             targetObjectId: s.targetObjectId,
             pathSpace: s.pathSpace,
@@ -545,6 +580,8 @@ export const useRigStore = create<RigState>()((set, get) => ({
             targetKeys: Array.isArray(data.targetKeys) ? data.targetKeys : [],
             lookOffset: readVec3(data.lookOffset, [0, 0, 0]),
             lookOffsetKeys: Array.isArray(data.lookOffsetKeys) ? data.lookOffsetKeys : [],
+            staticPosKeys: Array.isArray(data.staticPosKeys) ? data.staticPosKeys : [],
+            staticRotKeys: Array.isArray(data.staticRotKeys) ? data.staticRotKeys : [],
             cameraNoise: normalizeCameraNoise(data.cameraNoise),
             targetObjectId: typeof data.targetObjectId === 'string' ? data.targetObjectId : null,
             pathSpace: data.pathSpace === 'object' ? 'object' : 'world',
@@ -604,6 +641,8 @@ export function getRigSnapshot(): RigSnapshot {
       targetKeys: s.targetKeys,
       lookOffset: s.lookOffset,
       lookOffsetKeys: s.lookOffsetKeys,
+      staticPosKeys: s.staticPosKeys,
+      staticRotKeys: s.staticRotKeys,
       cameraNoise: s.cameraNoise,
       targetObjectId: s.targetObjectId,
       pathSpace: s.pathSpace,
@@ -665,6 +704,8 @@ export function applyRigSnapshot(snapshot: RigSnapshot) {
     targetKeys: snap.targetKeys ?? [],
     lookOffset: readVec3(snap.lookOffset, [0, 0, 0]),
     lookOffsetKeys: snap.lookOffsetKeys ?? [],
+    staticPosKeys: snap.staticPosKeys ?? [],
+    staticRotKeys: snap.staticRotKeys ?? [],
     cameraNoise: normalizeCameraNoise(snap.cameraNoise),
     targetObjectId: snap.targetObjectId ?? null,
     pathSpace: snap.pathSpace === 'object' ? 'object' : 'world',

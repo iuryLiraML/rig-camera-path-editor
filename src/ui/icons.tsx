@@ -63,6 +63,13 @@ export const PlayIcon = (p: IconProps) => (
   </svg>
 )
 
+export const ClockIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="8" r="5.5" />
+    <path d="M8 5v3.2l2 1.3" />
+  </svg>
+)
+
 export const CubeIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M8 1.8l5.4 3.1v6.2L8 14.2l-5.4-3.1V4.9L8 1.8z" />

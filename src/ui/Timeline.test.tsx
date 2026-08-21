@@ -5,6 +5,7 @@ import { Timeline } from './Timeline'
 import { CAMERA_PATH_ID, makeAnchor, usePathStore } from '../state/usePathStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
+import { useSceneStore } from '../state/useSceneStore'
 
 /**
  * Regression: the timeline crashed the whole editor.
@@ -53,6 +54,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   setAnchors(0)
+  useSceneStore.setState({ objects: [], pendingLifts: [] })
   useEditorStore.setState({
     timelineEasing: false,
     timelineHeight: 168,
@@ -60,8 +62,16 @@ afterEach(() => {
     selectedKeyframe: null,
     timelineGraph: false,
     graphChannel: 'progress',
+    selection: null,
   })
-  useRigStore.setState({ progressKeys: [], fovKeys: [], rollKeys: [] })
+  useRigStore.setState({
+    progressKeys: [],
+    fovKeys: [],
+    rollKeys: [],
+    staticPosKeys: [],
+    staticRotKeys: [],
+    cameraKind: 'path',
+  })
 })
 
 describe('Timeline', () => {
@@ -232,5 +242,27 @@ describe('Timeline', () => {
     expect(container.querySelector('[data-graph-spline]')).not.toBeNull()
     expect(container.querySelector('path[data-graph-spline]')?.getAttribute('d')).toContain('C')
     expect(container.querySelector('[data-bezier-handle="1"]')).not.toBeNull()
+  })
+
+  it('shows + Animate and the empty-state copy instead of a mute object row', () => {
+    setAnchors(3)
+    const { container, getByText } = render(<Timeline />)
+    expect(container.querySelector('[data-animate-menu]')).toBeTruthy()
+    expect(container.textContent).toContain('Select an object, then + Animate')
+    expect(container.textContent).not.toContain('Save the current pose at the playhead')
+    fireEvent.click(getByText('+ Animate'))
+    expect(container.textContent).not.toContain('Position')
+  })
+
+  it('lists Position / Rotation / Scale after selecting an object', () => {
+    setAnchors(3)
+    useSceneStore.getState().addPrimitive('box')
+    const id = useSceneStore.getState().objects[0].id
+    useEditorStore.setState({ selection: `obj:${id}` })
+    const { getByText, getAllByText } = render(<Timeline />)
+    fireEvent.click(getByText('+ Animate'))
+    expect(getAllByText('Position').length).toBeGreaterThan(0)
+    fireEvent.click(getAllByText('Position')[0])
+    expect(useSceneStore.getState().objects[0].keys.some((k) => k.channel === 'position')).toBe(true)
   })
 })

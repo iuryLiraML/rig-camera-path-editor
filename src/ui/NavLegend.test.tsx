@@ -13,6 +13,7 @@ describe('viewport home chrome', () => {
   it('lists the world-origin shortcut on the nav legend', () => {
     const { container } = render(<NavLegend />)
     expect(container.textContent).toContain('Origin · H')
+    expect(container.textContent).toContain('? shortcuts')
   })
 
   it('offers a toolbar button that requests a home framing', () => {
@@ -20,5 +21,13 @@ describe('viewport home chrome', () => {
     const { getByTitle } = render(<Toolbar />)
     fireEvent.click(getByTitle('Center the view on the world origin (H)'))
     expect(useEditorStore.getState().homeRequest).toBe(before + 1)
+  })
+
+  it('opens Compose Timeline from the clock button', () => {
+    useEditorStore.setState({ workspaceMode: 'build', composeDock: 'sequence' })
+    const { getByTitle } = render(<Toolbar />)
+    fireEvent.click(getByTitle('Timeline (T)'))
+    expect(useEditorStore.getState().workspaceMode).toBe('compose')
+    expect(useEditorStore.getState().composeDock).toBe('timeline')
   })
 })

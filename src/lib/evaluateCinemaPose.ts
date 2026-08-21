@@ -49,6 +49,9 @@ export type CinemaChannels = {
   /** Local offset from the tracked object's origin (ignored without track) */
   lookOffset?: Vec3
   lookOffsetKeys?: Vec3Key[]
+  /** Free-camera position / rotation over time (empty = rest `staticPose`) */
+  staticPosKeys?: Vec3Key[]
+  staticRotKeys?: Vec3Key[]
   /** When set, path anchors are in this object's local space (relative camera) */
   pathParent?: TrackTarget | null
   /** `static` = manually-posed pathless camera (uses `staticPose`) */
@@ -110,10 +113,12 @@ function resolveLookTarget(t: number, channels: CinemaChannels, out: THREE.Vecto
   }
 }
 
-/** Constant pose of a manually-posed, pathless camera (ignores `t` except channels). */
+/** Pose of a manually-posed, pathless camera — position/rotation are f(t) when keyed. */
 function evaluateStaticPose(t: number, channels: CinemaChannels): CinemaPose {
   const sp = channels.staticPose ?? { position: [0, 0, 0] as Vec3, rotation: [0, 0, 0] as Vec3 }
-  _pos.set(...sp.position)
+  const position = evalVec3(t, channels.staticPosKeys ?? [], sp.position, channels.ease)
+  const rotation = evalVec3(t, channels.staticRotKeys ?? [], sp.rotation, channels.ease)
+  _pos.set(...position)
   const fov = evalValue(t, channels.fovKeys ?? [], channels.fov, channels.ease)
   const rollDeg = evalValue(t, channels.rollKeys ?? [], channels.roll, channels.ease)
 
@@ -124,9 +129,9 @@ function evaluateStaticPose(t: number, channels: CinemaChannels): CinemaPose {
     orientationTo(_view, _tan, _quat)
   } else {
     _euler.set(
-      sp.rotation[0] * THREE.MathUtils.DEG2RAD,
-      sp.rotation[1] * THREE.MathUtils.DEG2RAD,
-      sp.rotation[2] * THREE.MathUtils.DEG2RAD,
+      rotation[0] * THREE.MathUtils.DEG2RAD,
+      rotation[1] * THREE.MathUtils.DEG2RAD,
+      rotation[2] * THREE.MathUtils.DEG2RAD,
       'YXZ',
     )
     _quat.setFromEuler(_euler)

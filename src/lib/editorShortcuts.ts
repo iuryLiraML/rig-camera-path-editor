@@ -2,6 +2,7 @@ import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { usePathStore } from '../state/usePathStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { flushActiveProject } from './projects'
 import { isObjectKeyFocus } from './keyAtPlayhead'
 import { deleteKeyframeAtPlayhead, deleteSelectedTimelineKey } from './timelineKey'
 
@@ -79,4 +80,48 @@ export function applyDeleteShortcut(
   }
 
   return false
+}
+
+export const SHORTCUT_ROWS: { keys: string; action: string }[] = [
+  { keys: 'I', action: 'Key the focused property at the playhead' },
+  { keys: 'Delete', action: 'Remove that key (then the object if none)' },
+  { keys: 'Space', action: 'Play / pause' },
+  { keys: 'W E R', action: 'Move / rotate / scale (opens Transform)' },
+  { keys: 'T', action: 'Open Timeline (Compose)' },
+  { keys: 'Shift+T', action: 'Toggle Graph Editor' },
+  { keys: '?', action: 'This list' },
+  { keys: 'Ctrl/Cmd+S', action: 'Save now (also keep autosave)' },
+  { keys: 'Ctrl/Cmd+Z / Y', action: 'Undo / redo' },
+]
+
+export function openComposeTimeline() {
+  const editor = useEditorStore.getState()
+  editor.setAppView('editor')
+  editor.setWorkspaceMode('compose')
+  editor.setComposeDock('timeline')
+}
+
+/** T opens Compose Timeline; Shift+T toggles the graph editor. */
+export function applyTimelineShortcut(e: KeyboardEvent): boolean {
+  if (e.key !== 't' && e.key !== 'T') return false
+  if (e.ctrlKey || e.metaKey || e.altKey) return false
+  e.preventDefault()
+  openComposeTimeline()
+  if (e.shiftKey) useEditorStore.getState().toggleTimelineGraph()
+  return true
+}
+
+export function applySaveShortcut(e: KeyboardEvent): boolean {
+  if (!(e.ctrlKey || e.metaKey) || (e.key !== 's' && e.key !== 'S')) return false
+  e.preventDefault()
+  void flushActiveProject().catch((error) => console.error('Failed to save project', error))
+  return true
+}
+
+export function applyHelpShortcut(e: KeyboardEvent): boolean {
+  if (e.key !== '?' && !(e.shiftKey && e.key === '/')) return false
+  if (e.ctrlKey || e.metaKey || e.altKey) return false
+  e.preventDefault()
+  useEditorStore.getState().toggleShortcuts()
+  return true
 }

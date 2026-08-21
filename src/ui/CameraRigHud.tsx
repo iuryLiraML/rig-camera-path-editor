@@ -1,3 +1,4 @@
+import { writeStaticPose } from '../lib/autoKey'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { editorCameraRef } from '../viewport/EditorCamera'
@@ -92,8 +93,8 @@ export function CameraRigHud() {
               const cam = editorCameraRef.current
               if (!cam) return
               const pose = poseFromCamera(cam)
+              writeStaticPose(pose)
               const rig = useRigStore.getState()
-              rig.setStaticPose(pose)
               if (rig.lookAtMode === 'target') rig.setTarget(lookPointFromPose(pose))
             }}
           />

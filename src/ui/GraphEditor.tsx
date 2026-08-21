@@ -84,6 +84,8 @@ function clampWrite(channel: RigChannel, value: number): number {
       return clampChannelValue('unit', value)
     case 'target':
     case 'lookOffset':
+    case 'staticPos':
+    case 'staticRot':
       return value
     default: {
       const _never: never = channel

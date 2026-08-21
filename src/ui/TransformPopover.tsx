@@ -4,6 +4,7 @@ import {
   hasObjectChannelKeyAtTime,
   isObjectKeyFocus,
 } from '../lib/keyAtPlayhead'
+import { autoKeyObjectChannels } from '../lib/autoKey'
 import { type ObjectChannel } from '../lib/keyframes'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
@@ -34,9 +35,11 @@ export function TransformPopover({ objectId }: { objectId: string }) {
     if (part === 'scale' && uniform) {
       const next: Vec3 = [value, value, value]
       scene.setTransformAll(objectId, { ...object.transform, scale: next })
+      autoKeyObjectChannels(objectId, ['scale'])
       return
     }
     scene.setTransform(objectId, part, axis, value)
+    autoKeyObjectChannels(objectId, [part])
   }
 
   const markChannel = (channel: ObjectChannel) => (on: boolean) => {

@@ -5,7 +5,7 @@ import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { aimObject } from '../lib/cameraOrientation'
 import { buildCurve, clamp01 } from '../lib/curve'
 import { useEditorOnly } from '../lib/editorOnly'
-import { evalModelTransform } from '../lib/keyframes'
+import { evalModelTransform, type ObjectChannel } from '../lib/keyframes'
 import {
   applyObjectDrag,
   hitOnPlane,
@@ -18,6 +18,7 @@ import {
 import { repairImportedShading } from '../lib/prepareImport'
 import { usePathStore } from '../state/usePathStore'
 import { isSceneEditing } from '../lib/workspaceChrome'
+import { writeObjectTransform } from '../lib/autoKey'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneStore'
@@ -173,14 +174,21 @@ function ObjectNode({ object }: { object: SceneObject }) {
     g.scale.set(...pose.scale)
   })
 
-  const syncTransform = () => {
+  const syncTransform = (channels?: ObjectChannel[]) => {
     const g = groupRef.current
     if (!g) return
-    useSceneStore.getState().setTransformAll(object.id, {
-      position: g.position.toArray() as Vec3,
-      rotation: [g.rotation.x * RAD, g.rotation.y * RAD, g.rotation.z * RAD],
-      scale: g.scale.toArray() as Vec3,
-    })
+    const mode = useEditorStore.getState().gizmoMode
+    const channel =
+      mode === 'rotate' ? 'rotation' : mode === 'scale' ? 'scale' : 'position'
+    writeObjectTransform(
+      object.id,
+      {
+        position: g.position.toArray() as Vec3,
+        rotation: [g.rotation.x * RAD, g.rotation.y * RAD, g.rotation.z * RAD],
+        scale: g.scale.toArray() as Vec3,
+      },
+      channels ?? [channel],
+    )
   }
 
   const meshDrag = useRef<{
@@ -246,7 +254,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
     const editor = useEditorStore.getState()
     if (editor.snapEnabled) next = snapObjectDrag(next, editor.gridSize, live.mode)
     g.position.set(...next)
-    syncTransform()
+    syncTransform(['position'])
   }
 
   return (

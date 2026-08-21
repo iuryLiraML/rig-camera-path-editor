@@ -22,6 +22,8 @@ export function cinemaChannelsFromRig(
     targetKeys: Vec3Key[]
     lookOffset?: Vec3
     lookOffsetKeys?: Vec3Key[]
+    staticPosKeys?: Vec3Key[]
+    staticRotKeys?: Vec3Key[]
     fov: number
     roll: number
     target: Vec3
@@ -58,6 +60,8 @@ export function cinemaChannelsFromRig(
     targetKeys: rig.targetKeys,
     lookOffset: rig.lookOffset ?? [0, 0, 0],
     lookOffsetKeys: rig.lookOffsetKeys ?? [],
+    staticPosKeys: rig.staticPosKeys ?? [],
+    staticRotKeys: rig.staticRotKeys ?? [],
     fov: rig.fov,
     roll: rig.roll,
     target: rig.target,

@@ -5,6 +5,7 @@ import {
   type KeyableFocus,
 } from './keyAtPlayhead'
 import { insertChannelKeyAt, selectRigKeyAtTime } from './timelineKey'
+import { requestPersistFlush } from './persistFlush'
 import { keysForObjectChannel, OBJECT_CHANNEL_LABELS } from './keyframes'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
@@ -27,6 +28,8 @@ export function insertKeyframeAtPlayhead() {
       rig.freqKeys.length > 0 ? 'freq' : null,
       rig.targetKeys.length > 0 ? 'target' : null,
       rig.lookOffsetKeys.length > 0 ? 'lookOffset' : null,
+      rig.staticPosKeys.length > 0 ? 'staticPos' : null,
+      rig.staticRotKeys.length > 0 ? 'staticRot' : null,
     ] as const
   ).filter((channel): channel is NonNullable<typeof channel> => channel !== null)
 
@@ -34,6 +37,7 @@ export function insertKeyframeAtPlayhead() {
     editor.keyableFocus,
     editor.selection,
     [...animated],
+    rig.cameraKind === 'static' ? 'staticPos' : 'progress',
   )
 
   if (object) {
@@ -57,6 +61,7 @@ export function insertKeyframeAtPlayhead() {
     const label =
       targets.length === 1 ? OBJECT_CHANNEL_LABELS[targets[0]] : 'Pose'
     useSceneStore.getState().showNotice(`${label} keyframe set`)
+    requestPersistFlush()
     return
   }
 

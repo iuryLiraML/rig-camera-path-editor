@@ -120,6 +120,8 @@ interface EditorState {
   timelineGraph: boolean
   /** which camera channel the graph is focused on */
   graphChannel: RigChannel
+  /** ? cheat sheet */
+  showShortcuts: boolean
   setTool: (tool: Tool) => void
   setProjection: (projection: Projection) => void
   select: (id: SelectableId | null) => void
@@ -171,6 +173,8 @@ interface EditorState {
   setTimelineGraph: (on: boolean) => void
   toggleTimelineGraph: () => void
   setGraphChannel: (channel: RigChannel) => void
+  setShowShortcuts: (on: boolean) => void
+  toggleShortcuts: () => void
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -220,6 +224,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   selectedKeyframe: null,
   timelineGraph: false,
   graphChannel: 'progress',
+  showShortcuts: false,
   setTool: (tool) => set({ tool }),
   setProjection: (projection) => set({ projection }),
   select: (selection) => {
@@ -335,4 +340,6 @@ export const useEditorStore = create<EditorState>((set) => ({
       }
     }),
   setGraphChannel: (graphChannel) => set({ graphChannel }),
+  setShowShortcuts: (showShortcuts) => set({ showShortcuts }),
+  toggleShortcuts: () => set((s) => ({ showShortcuts: !s.showShortcuts })),
 }))
