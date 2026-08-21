@@ -66,6 +66,7 @@ function useShortcuts() {
       if (isKeyableField() && !isKeyableShortcut(e.key)) return
 
       // looking through a free camera: WASD/QE fly — don't steal them for gizmos
+      if (
         editor.cameraView &&
         rig.cameraKind === 'static' &&
         !e.ctrlKey &&

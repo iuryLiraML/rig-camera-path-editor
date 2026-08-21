@@ -1,4 +1,5 @@
-import { objectChannelIsAnimated, type ObjectChannel } from './keyframes'
+import { type ObjectChannel } from './keyframes'
+import { objectChannelIsAnimated } from './keyAtPlayhead'
 import { requestPersistFlush } from './persistFlush'
 import { useRigStore, type StaticPose } from '../state/useRigStore'
 import { useSceneStore, type Transform } from '../state/useSceneStore'

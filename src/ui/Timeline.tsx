@@ -1589,7 +1589,6 @@ export function Timeline() {
             if (tracking && channel.id === 'target') return null
             if (!tracking && channel.id === 'lookOffset') return null
             const keys = channel.pick({ fovKeys, rollKeys, targetKeys, lookOffsetKeys })
-            if (keys.length === 0) return null
             const plot = channelPlots[channel.id]
             const valueOf = (id: string) => {
               if (channel.id === 'fov') return fovKeys.find((k) => k.id === id)?.value

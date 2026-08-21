@@ -7,6 +7,7 @@ import {
 } from './keyframes'
 import { useEditorStore, type SelectedTimelineKey } from '../state/useEditorStore'
 import { useRigStore, type RigChannel, type ScalarChannel } from '../state/useRigStore'
+import { useSceneStore } from '../state/useSceneStore'
 import { requestPersistFlush } from './persistFlush'
 import { type EaseKind } from './easing'
 import {

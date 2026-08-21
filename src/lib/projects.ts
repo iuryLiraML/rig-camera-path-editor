@@ -334,17 +334,22 @@ export function scheduleAutosave() {
   }, AUTOSAVE_MS)
 }
 
+function flushNow() {
+  void flushActiveProject().catch((error) => console.error('Failed to flush project', error))
+}
+
+/** Tab hide only — `beforeunload` still fires while visibility is `visible`. */
 function onVisibilityFlush() {
   if (typeof document !== 'undefined' && document.visibilityState !== 'hidden') return
-  void flushActiveProject().catch((error) => console.error('Failed to flush project', error))
+  flushNow()
 }
 
 /** Write on hide / unload so an 800ms debounce cannot drop the last edit. */
 export function installPersistFlush() {
   if (persistFlushInstalled || typeof window === 'undefined') return
   persistFlushInstalled = true
-  window.addEventListener('beforeunload', onVisibilityFlush)
-  window.addEventListener('pagehide', onVisibilityFlush)
+  window.addEventListener('beforeunload', flushNow)
+  window.addEventListener('pagehide', flushNow)
   document.addEventListener('visibilitychange', onVisibilityFlush)
 }
 
