@@ -39,10 +39,12 @@ installs deps but must not start it.
   optional.** They only matter for the BYOK AI "Director" assistant and fal.ai
   features. Core editing/animation/export works with no keys and no backend;
   unhandled `/api/*` calls simply fail without the (absent) cloud backend.
-- **AI/cloud keys are opt-in.** Server-side keys go in `.env.local`
-  (`ANTHROPIC_API_KEY`, `KIMI_API_KEY`, `FAL_KEY`) and must **never** be
-  `VITE_`-prefixed (that would inline them into the public bundle). The
-  assistant is also BYOK via Settings (localStorage), so no env keys are
-  required for setup.
+- **AI/cloud keys belong on the deployment, not in Settings.** Production:
+  Vercel → Project → Settings → Environment Variables → `ANTHROPIC_API_KEY`,
+  `KIMI_API_KEY`, `FAL_KEY` (Production + Preview), then Redeploy. Confirm
+  `GET /api/agent-config` returns booleans. Locally the same names go in
+  `.env.local` (see `.env.example`). Never `VITE_`-prefix them — that inlines
+  secrets into the public bundle. Settings still accepts an optional personal
+  key as a BYOK override. Core editing/animation/export works with no keys.
 - **Verify in the browser.** For UI/geometry/animation work, drive the dev
   server and inspect the DOM/screenshots yourself rather than asking the user.

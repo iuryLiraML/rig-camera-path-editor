@@ -30,7 +30,9 @@ npm run build        # web + the Node backend (needs server/tsconfig.json)
   builds**, and it carries the client app only. Never push `cloud-wip` to
   `origin` — see the publish procedure in `docs/STATUS.md`.
 - **No secrets in the repo, ever**, and remember `VITE_*` values are inlined
-  into the public bundle, so a secret there is a published secret.
+  into the public bundle, so a secret there is a published secret. Shared AI
+  keys go on the Vercel project as `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, and
+  `FAL_KEY` (never `VITE_*`). Settings is only an optional personal override.
 - **Objects are differentiated by grayscale only.** Do not touch lights or
   materials unless asked.
 - **The animation must be a pure function of `t`.** The MP4 exporter renders

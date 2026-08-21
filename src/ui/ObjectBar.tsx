@@ -201,7 +201,7 @@ function MoreMenu({ objectId }: { objectId: string }) {
               useEditorStore.getState().setShowSettings(true)
             }}
           >
-            Add Fal key to remesh
+            Add FAL_KEY on Vercel
           </button>
         ))}
       <button

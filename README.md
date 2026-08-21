@@ -18,6 +18,30 @@ npm run build   # type-check + production build in dist/
 > Note: this folder lives on a drive where native file-watching is unreliable, so
 > `vite.config.ts` uses polling for HMR.
 
+## Site keys (Vercel)
+
+The Director and Fal lifts must **not** be configured by pasting keys into the
+in-app Settings dialog for the shared deployment. Put them on the Vercel project:
+
+1. Open [Vercel](https://vercel.com) → the `rig-camera-path-editor` project →
+   **Settings → Environment Variables**.
+2. Add these names (no `VITE_` prefix) for **Production** and **Preview**:
+   - `ANTHROPIC_API_KEY` — Anthropic (Director)
+   - `KIMI_API_KEY` — Moonshot / Kimi (Director)
+   - `FAL_KEY` — fal.ai (photo lift / remesh)
+3. **Redeploy** the latest production deployment (env vars are read at build/runtime
+   for Edge functions; a new deploy is required).
+4. Confirm at `https://<your-app>/api/agent-config` — you should see
+   `{"anthropic":true,"kimi":true,"fal":true}` (booleans only; the keys never appear).
+5. In the app, Settings → **Deployment keys (Vercel)** should say
+   “on this deployment” for each vendor.
+
+Locally, copy `.env.example` to `.env.local` with the same names. `npm run dev`
+serves the same `/api` proxy.
+
+Optional whole-site HTTP basic auth (Edge middleware): `SITE_USER` + `SITE_PASSWORD`.
+If either is missing, the gate stays off.
+
 ## Features (v0.5.0)
 
 ### Scene
@@ -101,18 +125,11 @@ npm run build   # type-check + production build in dist/
   (`frame-2.4s_outline.png`) for image-model restyling
 - Camera rig JSON export/import (versioned, backward compatible)
 
-### AI assistant (BYOK)
-- Design inspector + Director chat split in the right panel — a Claude agent drives the editor from chat
-  (presets, custom paths, keyframes, look-at, lens, object poses, primitives, save shot,
-  output format)
-- Sees a scene JSON + viewport screenshot every turn
-- **Camera skills**: built-in recipes (drone, packshot, orbit-reveal, dolly-push) plus
-  your own — a Skills manager lets you author custom camera-move skills (name +
-  description + recipe) per project; the agent lists and loads them on demand, and chips
-  let you force one. Project guidelines feed the agent too.
-- Multi-provider (BYOK): **Anthropic**, **OpenRouter**, or **z.ai** (GLM models, e.g.
-  glm-5.2). Pick the provider, key and model in Settings; a screenshot toggle sends the
-  viewport to vision models. Keys stored locally (localStorage)
+### AI assistant (site key on Vercel, optional BYOK)
+- Director chat on the right of the viewport — a Claude / Kimi agent drives the editor from a prompt
+- **Production keys live on Vercel, not in Settings.** Set `ANTHROPIC_API_KEY`, `KIMI_API_KEY`, and `FAL_KEY` on the Vercel project (Production + Preview), then Redeploy. They are attached server-side by `/api/*` and never reach the browser. Do **not** use `VITE_*` — Vite inlines those into the public bundle.
+- Settings still accepts an optional personal key (BYOK override, stored in localStorage). Paste one only if you want to use your own account instead of the site key.
+- Multi-provider: **Anthropic** and **Kimi** (Moonshot). Fal is used to lift a person/prop from a photo.
 
 ### Projects, shots & board
 - Everything lives inside a project (scene, rig, shots, guidelines, camera skills) in

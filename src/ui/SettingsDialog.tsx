@@ -100,6 +100,35 @@ export function SettingsDialog() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
+        <Section title="Deployment keys (Vercel)">
+          <p className="text-[10px] leading-relaxed text-ink-dim">
+            Shared Anthropic, Kimi and Fal keys belong in the Vercel project as server
+            environment variables — never in this dialog for the site key, and never as{' '}
+            <span className="font-mono">VITE_*</span> (those are baked into the public
+            bundle). After you add them, Redeploy. This list only reports whether the
+            current deployment can see them.
+          </p>
+          <ul className="mt-1 space-y-1 text-[11px] text-ink">
+            {(
+              [
+                ['Anthropic', 'ANTHROPIC_API_KEY', serverKeys.anthropic],
+                ['Kimi', 'KIMI_API_KEY', serverKeys.kimi],
+                ['Fal', 'FAL_KEY', serverKeys.fal],
+              ] as const
+            ).map(([label, envVar, on]) => (
+              <li key={envVar} className="flex items-baseline justify-between gap-3">
+                <span>
+                  {label}{' '}
+                  <span className="font-mono text-[10px] text-ink-dim">{envVar}</span>
+                </span>
+                <span className={on ? 'text-emerald-400' : 'text-ink-dim'}>
+                  {on ? 'on this deployment' : 'not set'}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Section>
+
         <Section title={cloudStatus === 'signed-in' ? 'AI provider (session only; store in your vault)' : 'AI provider (stored locally in this browser)'}>
           <Row label="Provider">
             <Segmented<ProviderKind>
