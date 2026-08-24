@@ -30,7 +30,7 @@ describe('CameraAdjustPanel', () => {
     expect(container.textContent).toContain('Adjust')
     expect(container.textContent).toContain('FX')
     expect(container.textContent).toContain('FOV')
-    expect(container.textContent).toContain('Look At')
+    expect(container.textContent).toContain('Look')
     expect(container.textContent).not.toContain('Handheld')
   })
 

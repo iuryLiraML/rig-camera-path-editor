@@ -209,7 +209,14 @@ export function makeDefaultKnotObject(
 
 export type LiftKind = 'person' | 'prop' | 'generate' | 'remesh'
 
-export type PendingLift = { id: string; name: string; kind: LiftKind; objectId?: string }
+export type PendingLift = {
+  id: string
+  name: string
+  kind: LiftKind
+  objectId?: string
+  /** 0..1 when Fal reports a real fraction; null = indeterminate job bar. */
+  progress: number | null
+}
 
 interface SceneState {
   objects: SceneObject[]
@@ -223,6 +230,7 @@ interface SceneState {
   notice: string | null
   beginLift: (name: string, kind: LiftKind, objectId?: string) => string
   renameLift: (id: string, name: string) => void
+  setLiftProgress: (id: string, progress: number | null) => void
   endLift: (id: string) => void
   addObject: (object: SceneObject) => void
   replaceImportedRoot: (id: string, root: THREE.Object3D, clips: THREE.AnimationClip[]) => void
@@ -302,12 +310,16 @@ export const useSceneStore = create<SceneState>()(
 
         beginLift: (name, kind, objectId) => {
           const id = `lift-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-          set((s) => ({ pendingLifts: [...s.pendingLifts, { id, name, kind, objectId }] }))
+          set((s) => ({ pendingLifts: [...s.pendingLifts, { id, name, kind, objectId, progress: null }] }))
           return id
         },
         renameLift: (id, name) =>
           set((s) => ({
             pendingLifts: s.pendingLifts.map((lift) => (lift.id === id ? { ...lift, name } : lift)),
+          })),
+        setLiftProgress: (id, progress) =>
+          set((s) => ({
+            pendingLifts: s.pendingLifts.map((lift) => (lift.id === id ? { ...lift, progress } : lift)),
           })),
         endLift: (id) => set((s) => ({ pendingLifts: s.pendingLifts.filter((lift) => lift.id !== id) })),
 

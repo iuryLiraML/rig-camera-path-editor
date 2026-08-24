@@ -1,7 +1,8 @@
 import * as THREE from 'three'
 import { buildCurve, clamp01 } from './curve'
 import { orientationTo } from './cameraOrientation'
-import { evalProgress, evalValue, evalVec3, type ProgressKey, type ValueKey, type Vec3Key } from './keyframes'
+import { evalProgress, evalValue, type ProgressKey, type ValueKey, type Vec3Key } from './keyframes'
+import { evalCinemaVec3 } from './vec3Axes'
 import type { EaseKind } from './easing'
 import type { PathAnchor } from '../state/usePathStore'
 import type { Vec3 } from '../state/useSceneStore'
@@ -36,6 +37,22 @@ export type CinemaChannels = {
   ampRotKeys?: ValueKey[]
   freqKeys?: ValueKey[]
   targetKeys?: Vec3Key[]
+  targetXKeys?: ValueKey[]
+  targetYKeys?: ValueKey[]
+  targetZKeys?: ValueKey[]
+  lookOffset?: Vec3
+  lookOffsetKeys?: Vec3Key[]
+  lookOffsetXKeys?: ValueKey[]
+  lookOffsetYKeys?: ValueKey[]
+  lookOffsetZKeys?: ValueKey[]
+  staticPosKeys?: Vec3Key[]
+  staticRotKeys?: Vec3Key[]
+  staticPosXKeys?: ValueKey[]
+  staticPosYKeys?: ValueKey[]
+  staticPosZKeys?: ValueKey[]
+  staticRotXKeys?: ValueKey[]
+  staticRotYKeys?: ValueKey[]
+  staticRotZKeys?: ValueKey[]
   fov: number
   roll: number
   target: Vec3
@@ -46,12 +63,6 @@ export type CinemaChannels = {
   duration?: number
   /** When set, look-at Target follows this object's f(t) pose instead of XYZ keys */
   track?: TrackTarget | null
-  /** Local offset from the tracked object's origin (ignored without track) */
-  lookOffset?: Vec3
-  lookOffsetKeys?: Vec3Key[]
-  /** Free-camera position / rotation over time (empty = rest `staticPose`) */
-  staticPosKeys?: Vec3Key[]
-  staticRotKeys?: Vec3Key[]
   /** When set, path anchors are in this object's local space (relative camera) */
   pathParent?: TrackTarget | null
   /** `static` = manually-posed pathless camera (uses `staticPose`) */
@@ -106,18 +117,44 @@ function applyNoiseToPose(pose: CinemaPose, t: number, channels: CinemaChannels)
 function resolveLookTarget(t: number, channels: CinemaChannels, out: THREE.Vector3): void {
   if (channels.track) {
     const parent = evalObjectWorldTransform(t, channels.track.object, channels.track.path, channels.ease)
-    const offset = evalVec3(t, channels.lookOffsetKeys ?? [], channels.lookOffset ?? [0, 0, 0], channels.ease)
+    const offset = evalCinemaVec3(
+      t,
+      { x: channels.lookOffsetXKeys, y: channels.lookOffsetYKeys, z: channels.lookOffsetZKeys },
+      channels.lookOffsetKeys,
+      channels.lookOffset ?? [0, 0, 0],
+      channels.ease,
+    )
     out.set(...localPointToWorld(offset, parent))
   } else {
-    out.set(...evalVec3(t, channels.targetKeys ?? [], channels.target, channels.ease))
+    out.set(
+      ...evalCinemaVec3(
+        t,
+        { x: channels.targetXKeys, y: channels.targetYKeys, z: channels.targetZKeys },
+        channels.targetKeys,
+        channels.target,
+        channels.ease,
+      ),
+    )
   }
 }
 
 /** Pose of a manually-posed, pathless camera — position/rotation are f(t) when keyed. */
 function evaluateStaticPose(t: number, channels: CinemaChannels): CinemaPose {
   const sp = channels.staticPose ?? { position: [0, 0, 0] as Vec3, rotation: [0, 0, 0] as Vec3 }
-  const position = evalVec3(t, channels.staticPosKeys ?? [], sp.position, channels.ease)
-  const rotation = evalVec3(t, channels.staticRotKeys ?? [], sp.rotation, channels.ease)
+  const position = evalCinemaVec3(
+    t,
+    { x: channels.staticPosXKeys, y: channels.staticPosYKeys, z: channels.staticPosZKeys },
+    channels.staticPosKeys,
+    sp.position,
+    channels.ease,
+  )
+  const rotation = evalCinemaVec3(
+    t,
+    { x: channels.staticRotXKeys, y: channels.staticRotYKeys, z: channels.staticRotZKeys },
+    channels.staticRotKeys,
+    sp.rotation,
+    channels.ease,
+  )
   _pos.set(...position)
   const fov = evalValue(t, channels.fovKeys ?? [], channels.fov, channels.ease)
   const rollDeg = evalValue(t, channels.rollKeys ?? [], channels.roll, channels.ease)

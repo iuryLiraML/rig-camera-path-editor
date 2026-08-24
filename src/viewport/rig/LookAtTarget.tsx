@@ -7,7 +7,7 @@ import { useEditorStore } from '../../state/useEditorStore'
 import { useRigStore } from '../../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
 import { usePathStore } from '../../state/usePathStore'
-import { evalVec3 } from '../../lib/keyframes'
+import { evalSeparatedVec3 } from '../../lib/vec3Axes'
 import { evalObjectWorldTransform, resolveTrackTarget } from '../../lib/objectMotion'
 import { localPointToWorld } from '../../lib/pathSpace'
 import { useEditorOnly } from '../../lib/editorOnly'
@@ -25,9 +25,13 @@ function ignoreRaycast() {
 
 export function LookAtTarget() {
   const target = useRigStore((s) => s.target)
-  const targetKeys = useRigStore((s) => s.targetKeys)
+  const targetXKeys = useRigStore((s) => s.targetXKeys)
+  const targetYKeys = useRigStore((s) => s.targetYKeys)
+  const targetZKeys = useRigStore((s) => s.targetZKeys)
   const lookOffset = useRigStore((s) => s.lookOffset)
-  const lookOffsetKeys = useRigStore((s) => s.lookOffsetKeys)
+  const lookOffsetXKeys = useRigStore((s) => s.lookOffsetXKeys)
+  const lookOffsetYKeys = useRigStore((s) => s.lookOffsetYKeys)
+  const lookOffsetZKeys = useRigStore((s) => s.lookOffsetZKeys)
   const t = useRigStore((s) => s.t)
   const ease = useRigStore((s) => s.ease)
   const targetObjectId = useRigStore((s) => s.targetObjectId)
@@ -46,10 +50,10 @@ export function LookAtTarget() {
 
   const position = track
     ? localPointToWorld(
-        evalVec3(t, lookOffsetKeys, lookOffset, ease),
+        evalSeparatedVec3(t, lookOffsetXKeys, lookOffsetYKeys, lookOffsetZKeys, lookOffset, ease),
         evalObjectWorldTransform(t, track.object, track.path, ease),
       )
-    : evalVec3(t, targetKeys, target, ease)
+    : evalSeparatedVec3(t, targetXKeys, targetYKeys, targetZKeys, target, ease)
 
   const dragging = useRef(false)
   const handleRef = useRef<THREE.Group>(null)

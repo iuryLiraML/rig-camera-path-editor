@@ -9,8 +9,9 @@ import {
   type GraphValueFormat,
   type ValueRange,
 } from '../lib/lanePlot'
-import { KEY_MERGE_EPS, keyOutgoingBezier, type ValueKey, type Vec3Key } from '../lib/keyframes'
+import { KEY_MERGE_EPS, keyOutgoingBezier, type ValueKey } from '../lib/keyframes'
 import { insertChannelKeyAt } from '../lib/timelineKey'
+import { isVec3AxisChannel } from '../lib/vec3Axes'
 import { snapToFrame, timeToX, xToTime, type TimeView } from '../lib/timeView'
 import type { EaseKind } from '../lib/easing'
 import {
@@ -21,7 +22,7 @@ import {
 } from '../lib/graphSpline'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore, type RigChannel } from '../state/useRigStore'
-import { CAMERA_CHANNELS, FX_PARAM_CHANNELS } from './cameraChannels'
+import { CAMERA_AXIS_TRACKS, CAMERA_CHANNELS, FX_PARAM_CHANNELS } from './cameraChannels'
 
 export type GraphLaneKey = {
   id: string
@@ -82,15 +83,10 @@ function clampWrite(channel: RigChannel, value: number): number {
     case 'ampRot':
     case 'freq':
       return clampChannelValue('unit', value)
-    case 'target':
-    case 'lookOffset':
-    case 'staticPos':
-    case 'staticRot':
-      return value
-    default: {
+    default:
+      if (isVec3AxisChannel(channel)) return value
       const _never: never = channel
       return _never
-    }
   }
 }
 
@@ -232,7 +228,7 @@ function GraphKey({
           }
           const liveView = useEditorStore.getState().timelineView
           let nextTime = timeFromEvent(pointer, lane, liveView)
-          if (!ev.shiftKey) nextTime = snapToFrame(nextTime, duration)
+          if (!ev.shiftKey) nextTime = snapToFrame(nextTime, duration, useRigStore.getState().fps)
           onMove(liveId, nextTime)
           onMoveValue(liveId, valueFromLanePointer(pointer.clientY, lane, onMoveValueRange(lane)))
         }
@@ -284,6 +280,7 @@ export function GraphEditor({
   const graphChannel = useEditorStore((s) => s.graphChannel)
   const selectedKeyframe = useEditorStore((s) => s.selectedKeyframe)
   const duration = useRigStore((s) => s.duration)
+  const fps = useRigStore((s) => s.fps)
   const focused = channels.find((channel) => channel.id === graphChannel) ?? channels[0]
   if (!focused) return null
 
@@ -301,7 +298,7 @@ export function GraphEditor({
     target instanceof Element &&
     Boolean(target.closest('[data-timeline-key],[data-bezier-handle]'))
 
-  const addAt = (time: number) => insertChannelKeyAt(focused.id, snapToFrame(time, duration))
+  const addAt = (time: number) => insertChannelKeyAt(focused.id, snapToFrame(time, duration, fps))
 
   const selectKey = (id: string) => {
     const realId = focused.id === 'progress' ? materializeProgressId(id) : id
@@ -344,7 +341,7 @@ export function GraphEditor({
         title="Click to move playhead · Alt+click to add a key · drag diamonds and handles · Shift for fine control"
         onPointerDown={(e: ReactPointerEvent<HTMLDivElement>) => {
           if (hitOnHandle(e.target)) return
-          const time = snapToFrame(timeFromEvent(e, e.currentTarget, view), duration)
+          const time = snapToFrame(timeFromEvent(e, e.currentTarget, view), duration, fps)
           useRigStore.getState().setPlaying(false)
           useRigStore.getState().setT(time)
           useEditorStore.getState().selectKeyframe(null)
@@ -553,14 +550,11 @@ export function buildGraphChannels(input: {
   cameraNoiseEnabled: boolean
   fovKeys: ValueKey[]
   rollKeys: ValueKey[]
-  targetKeys: Vec3Key[]
-  lookOffsetKeys: Vec3Key[]
-  channelPlots: Record<'fov' | 'roll' | 'target' | 'lookOffset', ScalarPlot>
+  channelPlots: Record<'fov' | 'roll', ScalarPlot>
   tracking: boolean
-  staticPosKeys?: Vec3Key[]
-  staticRotKeys?: Vec3Key[]
-  staticPosPlot?: ScalarPlot
-  staticRotPlot?: ScalarPlot
+  cameraKind: 'path' | 'static'
+  axisKeys: Partial<Record<(typeof CAMERA_AXIS_TRACKS)[number]['id'], ValueKey[]>>
+  axisPlots: Partial<Record<(typeof CAMERA_AXIS_TRACKS)[number]['id'], ScalarPlot>>
 }): GraphChannel[] {
   const duration = input.duration
   const channels: GraphChannel[] = [
@@ -613,104 +607,55 @@ export function buildGraphChannels(input: {
     }
   }
   for (const channel of CAMERA_CHANNELS) {
-    if (input.tracking && channel.id === 'target') continue
-    if (!input.tracking && channel.id === 'lookOffset') continue
     const keys = channel.pick({
       fovKeys: input.fovKeys,
       rollKeys: input.rollKeys,
-      targetKeys: input.targetKeys,
-      lookOffsetKeys: input.lookOffsetKeys,
     })
     const plot = input.channelPlots[channel.id]
-    const valueOf = (id: string) => {
-      switch (channel.id) {
-        case 'fov':
-          return input.fovKeys.find((k) => k.id === id)?.value
-        case 'roll':
-          return input.rollKeys.find((k) => k.id === id)?.value
-        case 'target':
-          return input.targetKeys.find((k) => k.id === id)?.value[1]
-        case 'lookOffset':
-          return input.lookOffsetKeys.find((k) => k.id === id)?.value[1]
-        default: {
-          const _never: never = channel.id
-          return _never
-        }
-      }
-    }
-    const format: GraphValueFormat = channel.id === 'fov' || channel.id === 'roll' ? 'degrees' : 'look'
     channels.push({
       id: channel.id,
       label: channel.label,
       color: '#60a5fa',
       keys: keys.map((k) => {
-        let full: ValueKey | Vec3Key | undefined
-        switch (channel.id) {
-          case 'fov':
-            full = input.fovKeys.find((item) => item.id === k.id)
-            break
-          case 'roll':
-            full = input.rollKeys.find((item) => item.id === k.id)
-            break
-          case 'target':
-            full = input.targetKeys.find((item) => item.id === k.id)
-            break
-          case 'lookOffset':
-            full = input.lookOffsetKeys.find((item) => item.id === k.id)
-            break
-          default: {
-            const _never: never = channel.id
-            return _never
-          }
-        }
+        const full = channel.id === 'fov'
+          ? input.fovKeys.find((item) => item.id === k.id)
+          : input.rollKeys.find((item) => item.id === k.id)
         return {
           id: k.id,
           time: k.time,
-          title: `${(k.time * duration).toFixed(1)}s — ${channel.label} ${channel.describe(k)}`,
-          value: valueOf(k.id),
+          title: `${(k.time * duration).toFixed(1)}s — ${channel.label}`,
+          value: full?.value,
           ease: full?.ease,
           easeBezier: full?.easeBezier,
         }
       }),
       curve: plot.curve,
       range: plot.range,
-      format,
-    })
-  }
-  if (input.staticPosKeys && input.staticPosKeys.length > 0 && input.staticPosPlot) {
-    channels.push({
-      id: 'staticPos',
-      label: 'Camera · Position',
-      color: '#60a5fa',
-      keys: input.staticPosKeys.map((k) => ({
-        id: k.id,
-        time: k.time,
-        title: `${(k.time * duration).toFixed(1)}s — Position`,
-        value: k.value[1],
-        ease: k.ease,
-        easeBezier: k.easeBezier,
-      })),
-      curve: input.staticPosPlot.curve,
-      range: input.staticPosPlot.range,
-      format: 'look',
-    })
-  }
-  if (input.staticRotKeys && input.staticRotKeys.length > 0 && input.staticRotPlot) {
-    channels.push({
-      id: 'staticRot',
-      label: 'Camera · Rotation',
-      color: '#60a5fa',
-      keys: input.staticRotKeys.map((k) => ({
-        id: k.id,
-        time: k.time,
-        title: `${(k.time * duration).toFixed(1)}s — Rotation`,
-        value: k.value[1],
-        ease: k.ease,
-        easeBezier: k.easeBezier,
-      })),
-      curve: input.staticRotPlot.curve,
-      range: input.staticRotPlot.range,
       format: 'degrees',
+    })
+  }
+  for (const track of CAMERA_AXIS_TRACKS) {
+    if (track.when === 'static' && input.cameraKind !== 'static') continue
+    if (track.when === 'target' && input.tracking) continue
+    if (track.when === 'offset' && !input.tracking) continue
+    const keys = input.axisKeys[track.id] ?? []
+    if (keys.length === 0) continue
+    const plot = input.axisPlots[track.id]
+    channels.push({
+      id: track.id,
+      label: track.label,
+      color: '#60a5fa',
+      keys: keys.map((k) => ({
+        id: k.id,
+        time: k.time,
+        title: `${(k.time * duration).toFixed(1)}s — ${track.label}`,
+        value: k.value,
+        ease: k.ease,
+        easeBezier: k.easeBezier,
+      })),
+      curve: plot?.curve ?? [],
+      range: plot?.range ?? RANGE_UNIT,
+      format: track.format,
     })
   }
   return channels

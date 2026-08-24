@@ -73,7 +73,7 @@ function applyLookOffsetForTrack(id: string | null, scene: PathSpaceScene) {
   const rig = useRigStore.getState()
   if (!id) {
     rig.setLookOffset([...ZERO_LOOK_OFFSET] as Vec3)
-    rig.clearChannel('lookOffset')
+    rig.clearVec3Group('lookOffset')
     return
   }
   const object = scene.objects.find((item) => item.id === id)
@@ -83,7 +83,7 @@ function applyLookOffsetForTrack(id: string | null, scene: PathSpaceScene) {
       ? localAabbCenter(object.root, parent)
       : ([...ZERO_LOOK_OFFSET] as Vec3)
   rig.setLookOffset(offset)
-  rig.clearChannel('lookOffset')
+  rig.clearVec3Group('lookOffset')
 }
 
 /** Bake object-space path back to world before the parent is removed. */

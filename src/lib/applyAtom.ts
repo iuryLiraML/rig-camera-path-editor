@@ -6,6 +6,7 @@ import { aspectFromExport, type Aabb } from './agent/framing'
 import { isShotAngle, isShotScale, type ShotAngle, type ShotScale } from './agent/shotTypes'
 import { instantiateAtom, type AtomKind, type AtomPath } from './atomPath'
 import type { Vec3 } from '../state/useSceneStore'
+import { vec3GroupHasKeys } from './timelineKey'
 
 export function followedPathId(): string {
   return cameraPath()?.id ?? CAMERA_PATH_ID
@@ -35,13 +36,13 @@ export function applyAtomPath(atom: AtomPath, duration?: number): void {
   rig.setRoll(atom.roll)
   rig.setTargetObjectId(null)
   if (atom.lookKeys.length > 0) {
-    rig.clearChannel('target')
+    rig.clearVec3Group('target')
     rig.setLookAtMode('target')
-    for (const key of atom.lookKeys) rig.upsertTargetKey(key.time, key.target)
+    for (const key of atom.lookKeys) rig.upsertVec3GroupKey('target', key.time, key.target)
   } else {
     rig.setLookAtMode('target')
     rig.setTarget(atom.lookTarget)
-    if (rig.targetKeys.length > 0) rig.clearChannel('target')
+    if (vec3GroupHasKeys('target', rig)) rig.clearVec3Group('target')
   }
   if (atom.fovKeys.length > 0) {
     rig.clearChannel('fov')

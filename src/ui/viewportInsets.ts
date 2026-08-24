@@ -31,7 +31,7 @@ export const LEFT_PANEL_MAX = 280
 export const LEFT_PANEL_MIN = 196
 export const RIGHT_PANEL_MAX = 360
 export const RIGHT_PANEL_MIN = 220
-export const TIMELINE_HEIGHT_DEFAULT = 240
+export const TIMELINE_HEIGHT_DEFAULT = 312
 /** user-drag cap; chromeSizes still shrinks further to keep MIN_FREE_HEIGHT */
 export const TIMELINE_HEIGHT_MAX = 480
 export const TIMELINE_MIN = 108

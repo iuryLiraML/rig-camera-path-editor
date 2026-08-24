@@ -15,10 +15,24 @@ export type TimeView = {
 export const FULL_TIME_VIEW: TimeView = { start: 0, span: 1 }
 
 /**
- * Tightest zoom: a couple of frames on a typical shot. Matches the 30 fps
- * MP4 export so the ruler can count frames the way After Effects does.
+ * Frame rates a shot can use. Animation stays a pure function of t (0..1);
+ * fps only maps seconds ↔ frames for the ruler, snap, and MP4 export.
  */
-export const TIMELINE_FPS = 30
+export const SHOT_FPS_OPTIONS = [24, 25, 30, 60] as const
+export type ShotFps = (typeof SHOT_FPS_OPTIONS)[number]
+export const DEFAULT_SHOT_FPS: ShotFps = 30
+/** Default shot / export fps when a file has none. Keep the name — callers pass an override. */
+export const TIMELINE_FPS = DEFAULT_SHOT_FPS
+
+export function isShotFps(value: number): value is ShotFps {
+  return (SHOT_FPS_OPTIONS as readonly number[]).includes(value)
+}
+
+/** Missing or unknown fps → 30 so old JSON does not jump. */
+export function normalizeShotFps(value: unknown): ShotFps {
+  const n = typeof value === 'number' ? value : Number(value)
+  return isShotFps(n) ? n : DEFAULT_SHOT_FPS
+}
 
 /** ~0.8 % of the shot — about 1–2 frames on a 6 s / 30 fps clip */
 export const MIN_TIME_SPAN = 0.008
@@ -65,32 +79,59 @@ export function isZoomed(view: TimeView): boolean {
   return view.span < 1 - 1e-6
 }
 
-export function shotFrameCount(duration: number, fps = TIMELINE_FPS): number {
-  return Math.max(1, Math.round(duration * fps))
+export function shotFrameCount(duration: number, fps: number = DEFAULT_SHOT_FPS): number {
+  return Math.max(1, Math.round(duration * normalizeShotFps(fps)))
+}
+
+export const MIN_SHOT_DURATION = 1
+export const MAX_SHOT_DURATION = 30
+
+export function clampShotDuration(seconds: number): number {
+  if (!Number.isFinite(seconds)) return MIN_SHOT_DURATION
+  return Math.min(MAX_SHOT_DURATION, Math.max(MIN_SHOT_DURATION, seconds))
+}
+
+export function minShotFrames(fps: number): number {
+  return Math.round(normalizeShotFps(fps) * MIN_SHOT_DURATION)
+}
+
+export function maxShotFrames(fps: number): number {
+  return Math.round(normalizeShotFps(fps) * MAX_SHOT_DURATION)
+}
+
+/** Shot length from a frame count at the export fps. Clamped to 1–30 s. */
+export function durationFromFrameCount(frames: number, fps: number = DEFAULT_SHOT_FPS): number {
+  const n = Math.round(Number(frames))
+  const rate = normalizeShotFps(fps)
+  if (!Number.isFinite(n) || n < 1) return MIN_SHOT_DURATION
+  return clampShotDuration(n / rate)
 }
 
 /** Frame index at normalized time t. t=0 → 0; t=1 → duration×fps (the end). */
-export function timeToFrame(t: number, duration: number, fps = TIMELINE_FPS): number {
-  const total = duration * fps
+export function timeToFrame(t: number, duration: number, fps: number = DEFAULT_SHOT_FPS): number {
+  const rate = normalizeShotFps(fps)
+  const total = duration * rate
   return Math.min(total, Math.max(0, Math.round(t * total)))
 }
 
-export function frameToTime(frame: number, duration: number, fps = TIMELINE_FPS): number {
-  const total = duration * fps
+export function frameToTime(frame: number, duration: number, fps: number = DEFAULT_SHOT_FPS): number {
+  const rate = normalizeShotFps(fps)
+  const total = duration * rate
   if (total <= 0) return 0
   return Math.min(1, Math.max(0, frame / total))
 }
 
-/** Snap normalized time onto the 30 fps export grid (After Effects default). */
-export function snapToFrame(t: number, duration: number, fps = TIMELINE_FPS): number {
+/** Snap normalized time onto the shot fps grid (After Effects composition timebase). */
+export function snapToFrame(t: number, duration: number, fps: number = DEFAULT_SHOT_FPS): number {
   return frameToTime(timeToFrame(t, duration, fps), duration, fps)
 }
 
 /** AE-style seconds:frames for a short shot — `0:12` is 12 frames into second 0. */
-export function formatTimecode(t: number, duration: number, fps = TIMELINE_FPS): string {
-  const frame = timeToFrame(t, duration, fps)
-  const sec = Math.floor(frame / fps)
-  const f = Math.round(frame - sec * fps)
+export function formatTimecode(t: number, duration: number, fps: number = DEFAULT_SHOT_FPS): string {
+  const rate = normalizeShotFps(fps)
+  const frame = timeToFrame(t, duration, rate)
+  const sec = Math.floor(frame / rate)
+  const f = Math.round(frame - sec * rate)
   return `${sec}:${String(f).padStart(2, '0')}`
 }
 
@@ -115,10 +156,11 @@ function stepForVisibleFrames(visibleFrames: number): number {
 export function rulerMarks(
   duration: number,
   view: TimeView,
-  fps = TIMELINE_FPS,
+  fps: number = DEFAULT_SHOT_FPS,
 ): { t: number; label: string | null; major: boolean }[] {
-  if (duration <= 0 || fps <= 0) return []
-  const total = duration * fps
+  const rate = normalizeShotFps(fps)
+  if (duration <= 0 || rate <= 0) return []
+  const total = duration * rate
   const visibleFrames = view.span * total
   const step = stepForVisibleFrames(visibleFrames)
   const f0 = view.start * total
@@ -127,19 +169,19 @@ export function rulerMarks(
   const marks: { t: number; label: string | null; major: boolean }[] = []
   for (let frame = first; frame <= f1 + 1e-6; frame += step) {
     const t = Math.min(1, Math.max(0, frame / total))
-    const onSecond = Math.abs(frame / fps - Math.round(frame / fps)) < 1e-6
+    const onSecond = Math.abs(frame / rate - Math.round(frame / rate)) < 1e-6
     const pastEnd = t >= 1 - 1e-9 && frame > 0
     const major = onSecond || step <= 2
     let label: string | null = null
     if (!pastEnd) {
-      if (step >= fps) {
-        if (onSecond) label = `${Math.round(frame / fps)}s`
+      if (step >= rate) {
+        if (onSecond) label = `${Math.round(frame / rate)}s`
       } else if (step >= 10) {
         if (onSecond || Math.abs(frame / (2 * step) - Math.round(frame / (2 * step))) < 1e-6) {
-          label = formatRulerLabel(Math.round(frame), fps)
+          label = formatRulerLabel(Math.round(frame), rate)
         }
       } else {
-        label = formatRulerLabel(Math.round(frame), fps)
+        label = formatRulerLabel(Math.round(frame), rate)
       }
     }
     marks.push({ t, label, major })

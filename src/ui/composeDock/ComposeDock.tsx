@@ -7,7 +7,6 @@ import { useSceneStore } from '../../state/useSceneStore'
 import {
   evalProgress,
   evalValue,
-  evalVec3,
 } from '../../lib/keyframes'
 import {
   normalizeInRange,
@@ -23,14 +22,13 @@ import {
   formatTimecode,
   panTimeView,
   rulerMarks,
-  shotFrameCount,
   timeInView,
   timeToX,
-  TIMELINE_FPS,
   wheelZoomFactor,
   zoomAround,
 } from '../../lib/timeView'
-import { FX_PARAM_CHANNELS } from '../cameraChannels'
+import { CAMERA_AXIS_TRACKS, FX_PARAM_CHANNELS } from '../cameraChannels'
+import { axisIndexOf, vec3GroupOf, type Vec3AxisChannel } from '../../lib/vec3Axes'
 import { GraphEditor, buildGraphChannels } from '../GraphEditor'
 import { sampleOverTime } from '../TrackCurve'
 import { applyCameraPreset, PRESETS } from '../../lib/presets'
@@ -40,7 +38,7 @@ import { ShotStrip } from './ShotStrip'
 import { TimelineRuler, TimeNavigator } from './TimelineRuler'
 import { progressLaneKeys, TimelineTracks } from './TimelineTracks'
 import { TimelineTransport } from './TimelineTransport'
-import { TimeViewCtx, timeFromEvent, TIMELINE_HEIGHT } from './timelineShared'
+import { TimeViewCtx, timeFromEvent, TIMELINE_HEIGHT, TRACK_LANE_LEFT, TRACK_LANE_RIGHT } from './timelineShared'
 
 export { TIMELINE_HEIGHT }
 
@@ -87,6 +85,7 @@ export function ComposeDock() {
   const playing = useRigStore((s) => s.playing)
   const t = useRigStore((s) => s.t)
   const duration = useRigStore((s) => s.duration)
+  const fps = useRigStore((s) => s.fps)
   const loop = useRigStore((s) => s.loop)
   const ease = useRigStore((s) => s.ease)
   const progressKeys = useRigStore((s) => s.progressKeys)
@@ -98,10 +97,18 @@ export function ComposeDock() {
   const ampPosKeys = useRigStore((s) => s.ampPosKeys)
   const ampRotKeys = useRigStore((s) => s.ampRotKeys)
   const freqKeys = useRigStore((s) => s.freqKeys)
-  const targetKeys = useRigStore((s) => s.targetKeys)
-  const lookOffsetKeys = useRigStore((s) => s.lookOffsetKeys)
-  const staticPosKeys = useRigStore((s) => s.staticPosKeys)
-  const staticRotKeys = useRigStore((s) => s.staticRotKeys)
+  const staticPosXKeys = useRigStore((s) => s.staticPosXKeys)
+  const staticPosYKeys = useRigStore((s) => s.staticPosYKeys)
+  const staticPosZKeys = useRigStore((s) => s.staticPosZKeys)
+  const staticRotXKeys = useRigStore((s) => s.staticRotXKeys)
+  const staticRotYKeys = useRigStore((s) => s.staticRotYKeys)
+  const staticRotZKeys = useRigStore((s) => s.staticRotZKeys)
+  const lookOffsetXKeys = useRigStore((s) => s.lookOffsetXKeys)
+  const lookOffsetYKeys = useRigStore((s) => s.lookOffsetYKeys)
+  const lookOffsetZKeys = useRigStore((s) => s.lookOffsetZKeys)
+  const targetXKeys = useRigStore((s) => s.targetXKeys)
+  const targetYKeys = useRigStore((s) => s.targetYKeys)
+  const targetZKeys = useRigStore((s) => s.targetZKeys)
   const cameraKind = useRigStore((s) => s.cameraKind)
   const staticPose = useRigStore((s) => s.staticPose)
   const fov = useRigStore((s) => s.fov)
@@ -148,30 +155,67 @@ export function ComposeDock() {
     const range = plotRange([...values, ...rollKeys.map((k) => k.value)], RANGE_ROLL)
     return { curve: normalizeInRange(values, range), range }
   }, [rollKeys, roll, ease])
-  const targetPlot = useMemo(() => {
-    const values = sampleOverTime((time) => evalVec3(time, targetKeys, target, ease)[1])
-    const range = plotRange([...values, ...targetKeys.map((k) => k.value[1])], RANGE_LOOK)
-    return { curve: normalizeInRange(values, range), range }
-  }, [targetKeys, target, ease])
-  const lookOffsetPlot = useMemo(() => {
-    const values = sampleOverTime((time) => evalVec3(time, lookOffsetKeys, lookOffset, ease)[1])
-    const range = plotRange([...values, ...lookOffsetKeys.map((k) => k.value[1])], RANGE_LOOK)
-    return { curve: normalizeInRange(values, range), range }
-  }, [lookOffsetKeys, lookOffset, ease])
-  const staticPosPlot = useMemo(() => {
-    const values = sampleOverTime((time) =>
-      evalVec3(time, staticPosKeys, staticPose.position, ease)[1],
-    )
-    const range = plotRange([...values, ...staticPosKeys.map((k) => k.value[1])], RANGE_LOOK)
-    return { curve: normalizeInRange(values, range), range }
-  }, [staticPosKeys, staticPose.position, ease])
-  const staticRotPlot = useMemo(() => {
-    const values = sampleOverTime((time) =>
-      evalVec3(time, staticRotKeys, staticPose.rotation, ease)[1],
-    )
-    const range = plotRange([...values, ...staticRotKeys.map((k) => k.value[1])], RANGE_ROLL)
-    return { curve: normalizeInRange(values, range), range }
-  }, [staticRotKeys, staticPose.rotation, ease])
+  const axisKeys = {
+    staticPosX: staticPosXKeys,
+    staticPosY: staticPosYKeys,
+    staticPosZ: staticPosZKeys,
+    staticRotX: staticRotXKeys,
+    staticRotY: staticRotYKeys,
+    staticRotZ: staticRotZKeys,
+    lookOffsetX: lookOffsetXKeys,
+    lookOffsetY: lookOffsetYKeys,
+    lookOffsetZ: lookOffsetZKeys,
+    targetX: targetXKeys,
+    targetY: targetYKeys,
+    targetZ: targetZKeys,
+  } satisfies Record<Vec3AxisChannel, typeof staticPosXKeys>
+  const axisRest = (id: Vec3AxisChannel) => {
+    const i = axisIndexOf(id)
+    const group = vec3GroupOf(id)
+    switch (group) {
+      case 'staticPos':
+        return staticPose.position[i]
+      case 'staticRot':
+        return staticPose.rotation[i]
+      case 'lookOffset':
+        return lookOffset[i]
+      case 'target':
+        return target[i]
+      default: {
+        const _never: never = group
+        return _never
+      }
+    }
+  }
+  const axisPlots = useMemo(() => {
+    const plots: Partial<Record<Vec3AxisChannel, { curve: number[]; range: ValueRange }>> = {}
+    for (const track of CAMERA_AXIS_TRACKS) {
+      const keys = axisKeys[track.id]
+      const fallback = axisRest(track.id)
+      const hint = track.format === 'degrees' ? RANGE_ROLL : RANGE_LOOK
+      const values = sampleOverTime((time) => evalValue(time, keys, fallback, ease))
+      const range = plotRange([...values, ...keys.map((k) => k.value)], hint)
+      plots[track.id] = { curve: normalizeInRange(values, range), range }
+    }
+    return plots
+  }, [
+    staticPosXKeys,
+    staticPosYKeys,
+    staticPosZKeys,
+    staticRotXKeys,
+    staticRotYKeys,
+    staticRotZKeys,
+    lookOffsetXKeys,
+    lookOffsetYKeys,
+    lookOffsetZKeys,
+    targetXKeys,
+    targetYKeys,
+    targetZKeys,
+    staticPose,
+    lookOffset,
+    target,
+    ease,
+  ])
   const intensityPlot = useMemo(() => {
     const values = sampleOverTime((time) =>
       evalValue(time, intensityKeys, cameraNoise.intensity, ease),
@@ -240,9 +284,8 @@ export function ComposeDock() {
     useRigStore.getState().setT(timeFromEvent(e, rulerRef.current, timelineView))
   }
 
-  const ticks = rulerMarks(duration, timelineView, TIMELINE_FPS)
+  const ticks = rulerMarks(duration, timelineView, fps)
   const playX = timeToX(t, timelineView)
-  const frameCount = shotFrameCount(duration, TIMELINE_FPS)
 
   return (
     <TimeViewCtx.Provider value={timelineView}>
@@ -261,9 +304,9 @@ export function ComposeDock() {
               playing={playing}
               t={t}
               duration={duration}
+              fps={fps}
               loop={loop}
               ease={ease}
-              frameCount={frameCount}
             />
             <TimelineRuler
               rulerRef={rulerRef}
@@ -300,21 +343,16 @@ export function ComposeDock() {
                     cameraNoiseEnabled: cameraNoise.enabled,
                     fovKeys,
                     rollKeys,
-                    targetKeys,
-                    lookOffsetKeys,
                     channelPlots: {
                       fov: fovPlot,
                       roll: rollPlot,
-                      target: targetPlot,
-                      lookOffset: lookOffsetPlot,
                     },
                     tracking: Boolean(
                       targetObjectId && objects.some((object) => object.id === targetObjectId),
                     ),
-                    staticPosKeys,
-                    staticRotKeys,
-                    staticPosPlot,
-                    staticRotPlot,
+                    cameraKind,
+                    axisKeys,
+                    axisPlots,
                   })}
                   defaultEase={ease}
                 />
@@ -328,13 +366,13 @@ export function ComposeDock() {
                   fovKeys={fovKeys}
                   rollKeys={rollKeys}
                   intensityKeys={intensityKeys}
-                  targetKeys={targetKeys}
-                  lookOffsetKeys={lookOffsetKeys}
-                  staticPosKeys={staticPosKeys}
-                  staticRotKeys={staticRotKeys}
+                  axisKeys={axisKeys}
+                  axisPlots={axisPlots}
                   staticPose={staticPose}
                   fov={fov}
                   roll={roll}
+                  target={target}
+                  lookOffset={lookOffset}
                   targetObjectId={targetObjectId}
                   cameraNoise={cameraNoise}
                   objects={objects}
@@ -343,10 +381,6 @@ export function ComposeDock() {
                   progressPlot={progressPlot}
                   fovPlot={fovPlot}
                   rollPlot={rollPlot}
-                  targetPlot={targetPlot}
-                  lookOffsetPlot={lookOffsetPlot}
-                  staticPosPlot={staticPosPlot}
-                  staticRotPlot={staticRotPlot}
                   intensityPlot={intensityPlot}
                   fxParamBag={fxParamBag}
                   fxParamPlots={fxParamPlots}
@@ -356,12 +390,12 @@ export function ComposeDock() {
                 <div
                   className="pointer-events-none absolute bottom-0 top-[-28px]"
                   style={{
-                    left: `calc(11.5rem + (100% - 11.5rem - 2rem) * ${playX})`,
+                    left: `calc(${TRACK_LANE_LEFT} + (100% - ${TRACK_LANE_LEFT} - ${TRACK_LANE_RIGHT}) * ${playX})`,
                   }}
                 >
                   <div className="absolute bottom-0 top-0 w-px bg-accent" />
                   <div className="absolute -top-0.5 -translate-x-1/2 rounded bg-accent px-1 py-px text-[9px] font-medium tabular-nums text-white">
-                    {formatTimecode(t, duration)}
+                    {formatTimecode(t, duration, fps)}
                   </div>
                 </div>
               )}

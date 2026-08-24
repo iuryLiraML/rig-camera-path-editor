@@ -6,11 +6,14 @@ import {
   nudgeFov,
   writeFov,
   writeObjectTransform,
+  wrapRollDeg,
   writeRoll,
   writeStaticPose,
+  writeVec3Axis,
 } from './autoKey'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, identityTransform } from '../state/useSceneStore'
+import { emptyVec3AxisKeyState } from './vec3Axes'
 
 describe('auto-key', () => {
   beforeEach(() => {
@@ -22,11 +25,8 @@ describe('auto-key', () => {
       fovKeys: [],
       rollKeys: [],
       progressKeys: [],
-      targetKeys: [],
-      lookOffsetKeys: [],
       staticPose: { position: [4, 2, 6], rotation: [0, 0, 0] },
-      staticPosKeys: [],
-      staticRotKeys: [],
+      ...emptyVec3AxisKeyState(),
     })
   })
 
@@ -51,15 +51,24 @@ describe('auto-key', () => {
     expect(useSceneStore.getState().objects[0].keys).toHaveLength(0)
   })
 
-  it('keys Free-camera position only after that channel is animated', () => {
+  it('keys only the animated Free-camera axis', () => {
     writeStaticPose({ position: [1, 2, 3] })
-    expect(useRigStore.getState().staticPosKeys).toHaveLength(0)
+    expect(useRigStore.getState().staticPosXKeys).toHaveLength(0)
     expect(useRigStore.getState().staticPose.position).toEqual([1, 2, 3])
 
-    useRigStore.getState().upsertStaticPosKey(0, [1, 2, 3])
+    useRigStore.getState().upsertChannelKey('staticPosX', 0, 1)
     writeStaticPose({ position: [5, 2, 3] })
-    expect(useRigStore.getState().staticPosKeys.length).toBeGreaterThanOrEqual(2)
+    expect(useRigStore.getState().staticPosXKeys.length).toBeGreaterThanOrEqual(2)
+    expect(useRigStore.getState().staticPosYKeys).toHaveLength(0)
+    expect(useRigStore.getState().staticPosZKeys).toHaveLength(0)
     expect(useRigStore.getState().staticPose.position).toEqual([5, 2, 3])
+  })
+
+  it('skips auto-key when the caller is only previewing a live pose', () => {
+    useRigStore.getState().upsertChannelKey('staticPosX', 0, 1)
+    writeStaticPose({ position: [8, 2, 3] }, { key: false })
+    expect(useRigStore.getState().staticPosXKeys).toHaveLength(1)
+    expect(useRigStore.getState().staticPose.position).toEqual([8, 2, 3])
   })
 
   it('reads the Free-camera pose at t, not the rest pose', () => {
@@ -67,13 +76,27 @@ describe('auto-key', () => {
       t: 1,
       ease: 'linear',
       staticPose: { position: [0, 0, 0], rotation: [0, 0, 0] },
-      staticPosKeys: [
-        { id: 'a', time: 0, value: [0, 0, 0] },
-        { id: 'b', time: 1, value: [10, 0, 0] },
+      staticPosXKeys: [
+        { id: 'a', time: 0, value: 0 },
+        { id: 'b', time: 1, value: 10 },
       ],
-      staticRotKeys: [],
+      staticPosYKeys: [],
+      staticPosZKeys: [],
+      staticRotXKeys: [],
+      staticRotYKeys: [],
+      staticRotZKeys: [],
     })
     expect(evaluatedStaticPose().position[0]).toBeCloseTo(10)
+  })
+
+  it('inspector axis write keys only that axis', () => {
+    useRigStore.getState().upsertChannelKey('staticPosX', 0, 4)
+    useRigStore.getState().upsertChannelKey('staticPosY', 0, 2)
+    writeVec3Axis('staticPos', 0, 8)
+    const x = useRigStore.getState().staticPosXKeys.find((k) => Math.abs(k.time - 0.5) < 0.02)
+    expect(x?.value).toBeCloseTo(8)
+    expect(useRigStore.getState().staticPosYKeys).toHaveLength(1)
+    expect(useRigStore.getState().staticPosYKeys[0].time).toBeCloseTo(0)
   })
 
   it('keys FOV only after that channel is animated', () => {
@@ -85,6 +108,14 @@ describe('auto-key', () => {
     writeFov(28)
     expect(useRigStore.getState().fovKeys.length).toBeGreaterThanOrEqual(2)
     expect(useRigStore.getState().fov).toBeCloseTo(28)
+  })
+
+  it('wraps roll onto (−180, 180]', () => {
+    expect(wrapRollDeg(0)).toBe(0)
+    expect(wrapRollDeg(190)).toBeCloseTo(-170)
+    expect(wrapRollDeg(-190)).toBeCloseTo(170)
+    expect(wrapRollDeg(180)).toBe(180)
+    expect(wrapRollDeg(-180)).toBe(180)
   })
 
   it('keys roll only after that channel is animated', () => {

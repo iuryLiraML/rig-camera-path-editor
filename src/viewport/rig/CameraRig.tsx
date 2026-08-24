@@ -2,7 +2,7 @@ import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { GizmoControls } from '../GizmoControls'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
-import { evalVec3 } from '../../lib/keyframes'
+import { evalSeparatedVec3 } from '../../lib/vec3Axes'
 import { writeLookAt } from '../../lib/lookAtWrite'
 import { evalObjectWorldTransform, resolveTrackTarget } from '../../lib/objectMotion'
 import { localPointToWorld } from '../../lib/pathSpace'
@@ -32,11 +32,25 @@ function currentLookPoint(): Vec3 {
   const track = resolveTrackTarget(rig.targetObjectId, scene.objects, scene.paths)
   if (track) {
     return localPointToWorld(
-      evalVec3(rig.t, rig.lookOffsetKeys, rig.lookOffset, rig.ease),
+      evalSeparatedVec3(
+        rig.t,
+        rig.lookOffsetXKeys,
+        rig.lookOffsetYKeys,
+        rig.lookOffsetZKeys,
+        rig.lookOffset,
+        rig.ease,
+      ),
       evalObjectWorldTransform(rig.t, track.object, track.path, rig.ease),
     )
   }
-  return evalVec3(rig.t, rig.targetKeys, rig.target, rig.ease)
+  return evalSeparatedVec3(
+    rig.t,
+    rig.targetXKeys,
+    rig.targetYKeys,
+    rig.targetZKeys,
+    rig.target,
+    rig.ease,
+  )
 }
 
 function restoreOrbit() {
@@ -118,8 +132,22 @@ export function CameraRig() {
   useFrame(() => {
     const rig = useRigStore.getState()
     const pose = {
-      position: evalVec3(rig.t, rig.staticPosKeys, rig.staticPose.position, rig.ease),
-      rotation: evalVec3(rig.t, rig.staticRotKeys, rig.staticPose.rotation, rig.ease),
+      position: evalSeparatedVec3(
+        rig.t,
+        rig.staticPosXKeys,
+        rig.staticPosYKeys,
+        rig.staticPosZKeys,
+        rig.staticPose.position,
+        rig.ease,
+      ),
+      rotation: evalSeparatedVec3(
+        rig.t,
+        rig.staticRotXKeys,
+        rig.staticRotYKeys,
+        rig.staticRotZKeys,
+        rig.staticPose.rotation,
+        rig.ease,
+      ),
     }
     const look = currentLookPoint()
     if (proxyRef.current && !gizmoDragging.current) {

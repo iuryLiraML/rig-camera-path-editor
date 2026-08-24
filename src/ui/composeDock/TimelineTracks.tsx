@@ -19,7 +19,6 @@ import { useSceneStore, type Transform } from '../../state/useSceneStore'
 import {
   evalModelTransform,
   evalValue,
-  evalVec3,
   KEY_MERGE_EPS,
   keyOutgoingBezier,
   keysForObjectChannel,
@@ -39,13 +38,14 @@ import {
   type ValueRange,
 } from '../../lib/lanePlot'
 import { insertChannelKeyAt } from '../../lib/timelineKey'
-import { writeFov, writeObjectTransform, writeRoll, writeStaticPose } from '../../lib/autoKey'
+import { writeFov, writeObjectTransform, writeRoll, writeVec3Axis } from '../../lib/autoKey'
 import { timeToX } from '../../lib/timeView'
-import { CAMERA_CHANNELS, FX_PARAM_CHANNELS } from '../cameraChannels'
-import { Slider, XYZInput } from '../primitives'
+import { CAMERA_AXIS_TRACKS, CAMERA_CHANNELS, FX_PARAM_CHANNELS } from '../cameraChannels'
+import { NumberInput, Slider, XYZInput } from '../primitives'
+import { axisIndexOf, vec3GroupOf, type Vec3AxisChannel } from '../../lib/vec3Axes'
 import { normalizeSamples, sampleOverTime, TrackCurve } from '../TrackCurve'
 import type { KeyableFocus } from '../../lib/keyAtPlayhead'
-import { TimeViewCtx, timeFromEvent } from './timelineShared'
+import { TimeViewCtx, timeFromEvent, TRACK_ADD_CLASS, TRACK_LABEL_CLASS } from './timelineShared'
 
 function Keyframe({
   id,
@@ -373,7 +373,7 @@ function ClipRange({
 }
 
 function TrackValues({ children }: { children: ReactNode }) {
-  return <div className="mt-0.5">{children}</div>
+  return <div className="min-w-0">{children}</div>
 }
 
 function Track({
@@ -464,9 +464,9 @@ function Track({
     Boolean(target.closest('[data-timeline-key],[data-ease-handle],[data-bezier-handle]'))
 
   return (
-    <div className={`flex items-center gap-2 ${values ? 'h-14' : 'h-10'}`} data-track={trackId}>
+    <div className={`flex items-stretch gap-2 ${values ? 'h-16' : 'h-11'}`} data-track={trackId}>
       <div
-        className={`w-44 shrink-0 rounded-md px-2 py-1 text-left text-[11px] ${
+        className={`${TRACK_LABEL_CLASS} flex flex-col justify-center gap-1.5 rounded-md px-2.5 py-2 text-left text-[11px] ${
           highlighted ? 'bg-accent text-white' : 'text-ink-dim hover:bg-panel-2 hover:text-ink'
         }`}
       >
@@ -588,25 +588,45 @@ function Track({
         )}
       </div>
       {note ? (
-        <span className="w-6 shrink-0" />
-      ) : selectedOnTrack && selectedId ? (
-        <button
-          data-delete-key
-          onClick={() => onDelete(selectedId)}
-          title="Delete selected keyframe (Delete)"
-          className="w-6 shrink-0 rounded-md py-1 text-[13px] leading-none text-ink-dim hover:bg-panel-2 hover:text-ink"
-        >
-          ×
-        </button>
+        <span className={TRACK_ADD_CLASS} aria-hidden />
       ) : (
-        <button
-          data-add-key
-          onClick={onAdd}
-          title={addTitle}
-          className="w-6 shrink-0 rounded-md py-1 text-[13px] leading-none text-ink-dim hover:bg-panel-2 hover:text-ink"
-        >
-          +
-        </button>
+        <div className={`${TRACK_ADD_CLASS} flex flex-col justify-center gap-0.5`}>
+          <button
+            type="button"
+            data-add-key
+            onClick={onAdd}
+            title={addTitle}
+            aria-label={addTitle}
+            className="rounded-md px-1 py-0.5 text-[10px] leading-tight text-ink-dim hover:bg-panel-2 hover:text-ink"
+          >
+            Add key
+          </button>
+          <button
+            type="button"
+            data-delete-key
+            disabled={!selectedOnTrack || !selectedId}
+            onClick={() => {
+              if (selectedId) onDelete(selectedId)
+            }}
+            title={
+              selectedOnTrack && selectedId
+                ? 'Remove selected keyframe (Delete)'
+                : 'Select a keyframe on this track to remove it'
+            }
+            aria-label={
+              selectedOnTrack && selectedId
+                ? 'Remove selected keyframe'
+                : 'Remove keyframe (select one on this track first)'
+            }
+            className={`rounded-md px-1 py-0.5 text-[10px] leading-tight ${
+              selectedOnTrack && selectedId
+                ? 'text-ink-dim hover:bg-panel-2 hover:text-ink'
+                : 'cursor-not-allowed text-ink-dim/40'
+            }`}
+          >
+            Remove
+          </button>
+        </div>
       )}
     </div>
   )
@@ -707,13 +727,13 @@ export function TimelineTracks(props: {
   fovKeys: ReturnType<typeof useRigStore.getState>['fovKeys']
   rollKeys: ReturnType<typeof useRigStore.getState>['rollKeys']
   intensityKeys: ReturnType<typeof useRigStore.getState>['intensityKeys']
-  targetKeys: ReturnType<typeof useRigStore.getState>['targetKeys']
-  lookOffsetKeys: ReturnType<typeof useRigStore.getState>['lookOffsetKeys']
-  staticPosKeys: ReturnType<typeof useRigStore.getState>['staticPosKeys']
-  staticRotKeys: ReturnType<typeof useRigStore.getState>['staticRotKeys']
+  axisKeys: Record<Vec3AxisChannel, ReturnType<typeof useRigStore.getState>['fovKeys']>
+  axisPlots: Partial<Record<Vec3AxisChannel, { curve: number[]; range: ValueRange }>>
   staticPose: ReturnType<typeof useRigStore.getState>['staticPose']
   fov: number
   roll: number
+  target: ReturnType<typeof useRigStore.getState>['target']
+  lookOffset: ReturnType<typeof useRigStore.getState>['lookOffset']
   targetObjectId: string | null
   cameraNoise: ReturnType<typeof useRigStore.getState>['cameraNoise']
   objects: ReturnType<typeof useSceneStore.getState>['objects']
@@ -722,10 +742,6 @@ export function TimelineTracks(props: {
   progressPlot: { curve: number[]; range: ValueRange }
   fovPlot: { curve: number[]; range: ValueRange }
   rollPlot: { curve: number[]; range: ValueRange }
-  targetPlot: { curve: number[]; range: ValueRange }
-  lookOffsetPlot: { curve: number[]; range: ValueRange }
-  staticPosPlot: { curve: number[]; range: ValueRange }
-  staticRotPlot: { curve: number[]; range: ValueRange }
   intensityPlot: { curve: number[]; range: ValueRange }
   fxParamBag: {
     fadeIn: ReturnType<typeof useRigStore.getState>['fadeInKeys']
@@ -745,13 +761,13 @@ export function TimelineTracks(props: {
     fovKeys,
     rollKeys,
     intensityKeys,
-    targetKeys,
-    lookOffsetKeys,
-    staticPosKeys,
-    staticRotKeys,
+    axisKeys,
+    axisPlots,
     staticPose,
     fov,
     roll,
+    target,
+    lookOffset,
     targetObjectId,
     cameraNoise,
     objects,
@@ -760,10 +776,6 @@ export function TimelineTracks(props: {
     progressPlot,
     fovPlot,
     rollPlot,
-    targetPlot,
-    lookOffsetPlot,
-    staticPosPlot,
-    staticRotPlot,
     intensityPlot,
     fxParamBag,
     fxParamPlots,
@@ -773,11 +785,30 @@ export function TimelineTracks(props: {
   const channelPlots = {
     fov: fovPlot,
     roll: rollPlot,
-    target: targetPlot,
-    lookOffset: lookOffsetPlot,
+  }
+  const tracking = Boolean(
+    targetObjectId && objects.some((object) => object.id === targetObjectId),
+  )
+  const axisRest = (id: Vec3AxisChannel) => {
+    const i = axisIndexOf(id)
+    const group = vec3GroupOf(id)
+    switch (group) {
+      case 'staticPos':
+        return staticPose.position[i]
+      case 'staticRot':
+        return staticPose.rotation[i]
+      case 'lookOffset':
+        return lookOffset[i]
+      case 'target':
+        return target[i]
+      default: {
+        const _never: never = group
+        return _never
+      }
+    }
   }
   return (
-        <div className="flex flex-col gap-1 pt-1">
+        <div className="flex flex-col gap-2 pb-1 pt-1.5">
           {cameraKind !== 'static' && (
           <Track
             label="Camera"
@@ -806,111 +837,6 @@ export function TimelineTracks(props: {
             onSelectKey={(id) => selectRigKey('progress', id)}
             defaultEase={ease}
           />
-          )}
-          {cameraKind === 'static' && staticPosKeys.length > 0 && (
-            <Track
-              label="Camera · Position"
-              trackId="staticPos"
-              selectId="cinema-camera"
-              color="#60a5fa"
-              focus="staticPos"
-              onFocus={() => useEditorStore.getState().setKeyableFocus('staticPos')}
-              values={
-                <XYZInput
-                  value={evalVec3(t, staticPosKeys, staticPose.position, ease)}
-                  onChange={(axis, value) => {
-                    const next = [...evalVec3(t, staticPosKeys, staticPose.position, ease)] as [
-                      number,
-                      number,
-                      number,
-                    ]
-                    next[axis] = value
-                    writeStaticPose({ position: next })
-                  }}
-                />
-              }
-              keys={staticPosKeys.map((k) => ({
-                id: k.id,
-                time: k.time,
-                title: `${(k.time * duration).toFixed(1)}s — Position`,
-                value: k.value[1],
-                ease: k.ease,
-                easeBezier: k.easeBezier,
-                easeIn: k.easeIn,
-                easeOut: k.easeOut,
-              }))}
-              onMove={(keyId, time) =>
-                useRigStore.getState().updateChannelKeyTime('staticPos', keyId, time)
-              }
-              onDelete={(keyId) => {
-                useRigStore.getState().removeChannelKey('staticPos', keyId)
-                useEditorStore.getState().selectKeyframe(null)
-              }}
-              curve={staticPosPlot.curve}
-              valueRange={staticPosPlot.range}
-              onMoveValue={(id, value) => useRigStore.getState().setKeyValue('staticPos', id, value)}
-              onBezier={(id, bezier) => useRigStore.getState().setKeyBezier('staticPos', id, bezier)}
-              onAdd={() => insertChannelKeyAt('staticPos', useRigStore.getState().t)}
-              onAddAt={(time) => insertChannelKeyAt('staticPos', time)}
-              addTitle="Add a camera position keyframe at the playhead"
-              onSpacing={(id, side, w) => applyChannelSpacing('staticPos', id, side, w)}
-              selectedId={rigSelectedId(selectedKeyframe, 'staticPos')}
-              onSelectKey={(id) => selectRigKey('staticPos', id)}
-              defaultEase={ease}
-            />
-          )}
-          {cameraKind === 'static' && staticRotKeys.length > 0 && (
-            <Track
-              label="Camera · Rotation"
-              trackId="staticRot"
-              selectId="cinema-camera"
-              color="#60a5fa"
-              focus="staticRot"
-              onFocus={() => useEditorStore.getState().setKeyableFocus('staticRot')}
-              values={
-                <XYZInput
-                  step={1}
-                  value={evalVec3(t, staticRotKeys, staticPose.rotation, ease)}
-                  onChange={(axis, value) => {
-                    const next = [...evalVec3(t, staticRotKeys, staticPose.rotation, ease)] as [
-                      number,
-                      number,
-                      number,
-                    ]
-                    next[axis] = value
-                    writeStaticPose({ rotation: next })
-                  }}
-                />
-              }
-              keys={staticRotKeys.map((k) => ({
-                id: k.id,
-                time: k.time,
-                title: `${(k.time * duration).toFixed(1)}s — Rotation`,
-                value: k.value[1],
-                ease: k.ease,
-                easeBezier: k.easeBezier,
-                easeIn: k.easeIn,
-                easeOut: k.easeOut,
-              }))}
-              onMove={(keyId, time) =>
-                useRigStore.getState().updateChannelKeyTime('staticRot', keyId, time)
-              }
-              onDelete={(keyId) => {
-                useRigStore.getState().removeChannelKey('staticRot', keyId)
-                useEditorStore.getState().selectKeyframe(null)
-              }}
-              curve={staticRotPlot.curve}
-              valueRange={staticRotPlot.range}
-              onMoveValue={(id, value) => useRigStore.getState().setKeyValue('staticRot', id, value)}
-              onBezier={(id, bezier) => useRigStore.getState().setKeyBezier('staticRot', id, bezier)}
-              onAdd={() => insertChannelKeyAt('staticRot', useRigStore.getState().t)}
-              onAddAt={(time) => insertChannelKeyAt('staticRot', time)}
-              addTitle="Add a camera rotation keyframe at the playhead"
-              onSpacing={(id, side, w) => applyChannelSpacing('staticRot', id, side, w)}
-              selectedId={rigSelectedId(selectedKeyframe, 'staticRot')}
-              onSelectKey={(id) => selectRigKey('staticRot', id)}
-              defaultEase={ease}
-            />
           )}
           {cameraNoise.enabled && (
             <Track
@@ -1004,19 +930,8 @@ export function TimelineTracks(props: {
               )
             })}
           {CAMERA_CHANNELS.map((channel) => {
-            const tracking = Boolean(
-              targetObjectId && objects.some((object) => object.id === targetObjectId),
-            )
-            if (tracking && channel.id === 'target') return null
-            if (!tracking && channel.id === 'lookOffset') return null
-            const keys = channel.pick({ fovKeys, rollKeys, targetKeys, lookOffsetKeys })
+            const keys = channel.pick({ fovKeys, rollKeys })
             const plot = channelPlots[channel.id]
-            const valueOf = (id: string) => {
-              if (channel.id === 'fov') return fovKeys.find((k) => k.id === id)?.value
-              if (channel.id === 'roll') return rollKeys.find((k) => k.id === id)?.value
-              if (channel.id === 'target') return targetKeys.find((k) => k.id === id)?.value[1]
-              return lookOffsetKeys.find((k) => k.id === id)?.value[1]
-            }
             return (
               <Track
                 key={channel.id}
@@ -1036,7 +951,7 @@ export function TimelineTracks(props: {
                       format={(v) => `${Math.round(v)}°`}
                       onChange={(v) => writeFov(v)}
                     />
-                  ) : channel.id === 'roll' ? (
+                  ) : (
                     <Slider
                       value={evalValue(t, rollKeys, roll, ease)}
                       min={-180}
@@ -1045,22 +960,17 @@ export function TimelineTracks(props: {
                       format={(v) => `${Math.round(v)}°`}
                       onChange={(v) => writeRoll(v)}
                     />
-                  ) : undefined
+                  )
                 }
                 keys={keys.map((k) => {
-                  const full =
-                    channel.id === 'fov'
-                      ? fovKeys.find((item) => item.id === k.id)
-                      : channel.id === 'roll'
-                        ? rollKeys.find((item) => item.id === k.id)
-                        : channel.id === 'target'
-                          ? targetKeys.find((item) => item.id === k.id)
-                          : lookOffsetKeys.find((item) => item.id === k.id)
+                  const full = channel.id === 'fov'
+                    ? fovKeys.find((item) => item.id === k.id)
+                    : rollKeys.find((item) => item.id === k.id)
                   return {
                     id: k.id,
                     time: k.time,
-                    title: `${(k.time * duration).toFixed(1)}s — ${channel.label} ${channel.describe(k)}`,
-                    value: valueOf(k.id),
+                    title: `${(k.time * duration).toFixed(1)}s — ${channel.label}`,
+                    value: full?.value,
                     ease: full?.ease,
                     easeBezier: full?.easeBezier,
                     easeIn: k.easeIn,
@@ -1080,9 +990,7 @@ export function TimelineTracks(props: {
                   const clamped =
                     channel.id === 'fov'
                       ? clampChannelValue('fov', value)
-                      : channel.id === 'roll'
-                        ? clampChannelValue('roll', value)
-                        : value
+                      : clampChannelValue('roll', value)
                   useRigStore.getState().setKeyValue(channel.id, id, clamped)
                 }}
                 onBezier={(id, bezier) => useRigStore.getState().setKeyBezier(channel.id, id, bezier)}
@@ -1092,6 +1000,62 @@ export function TimelineTracks(props: {
                 onSpacing={(id, side, w) => applyChannelSpacing(channel.id, id, side, w)}
                 selectedId={rigSelectedId(selectedKeyframe, channel.id)}
                 onSelectKey={(id) => selectRigKey(channel.id, id)}
+                defaultEase={ease}
+              />
+            )
+          })}
+          {CAMERA_AXIS_TRACKS.map((track) => {
+            if (track.when === 'static' && cameraKind !== 'static') return null
+            if (track.when === 'target' && tracking) return null
+            if (track.when === 'offset' && !tracking) return null
+            const keys = axisKeys[track.id]
+            if (keys.length === 0) return null
+            const plot = axisPlots[track.id]
+            const group = vec3GroupOf(track.id)
+            const axis = axisIndexOf(track.id)
+            return (
+              <Track
+                key={track.id}
+                trackId={track.id}
+                label={track.label}
+                selectId="cinema-camera"
+                color="#60a5fa"
+                focus={track.id}
+                onFocus={() => useEditorStore.getState().setKeyableFocus(track.id)}
+                values={
+                  <NumberInput
+                    step={track.format === 'degrees' ? 1 : 0.1}
+                    value={evalValue(t, keys, axisRest(track.id), ease)}
+                    onChange={(value) => writeVec3Axis(group, axis, value)}
+                  />
+                }
+                keys={keys.map((k) => ({
+                  id: k.id,
+                  time: k.time,
+                  title: `${(k.time * duration).toFixed(1)}s — ${track.label}`,
+                  value: k.value,
+                  ease: k.ease,
+                  easeBezier: k.easeBezier,
+                  easeIn: k.easeIn,
+                  easeOut: k.easeOut,
+                }))}
+                onMove={(keyId, time) =>
+                  useRigStore.getState().updateChannelKeyTime(track.id, keyId, time)
+                }
+                onDelete={(keyId) => {
+                  useRigStore.getState().removeChannelKey(track.id, keyId)
+                  useEditorStore.getState().selectKeyframe(null)
+                }}
+                curve={plot?.curve}
+                valueRange={plot?.range}
+                onMoveValue={(id, value) => useRigStore.getState().setKeyValue(track.id, id, value)}
+                onBezier={(id, bezier) => useRigStore.getState().setKeyBezier(track.id, id, bezier)}
+                onAdd={() => insertChannelKeyAt(track.id, useRigStore.getState().t)}
+                onAddAt={(time) => insertChannelKeyAt(track.id, time)}
+                addTitle={`Add a ${track.label} keyframe at the playhead`}
+                onSpacing={(id, side, w) => applyChannelSpacing(track.id, id, side, w)}
+                selectedId={rigSelectedId(selectedKeyframe, track.id)}
+                onSelectKey={(id) => selectRigKey(track.id, id)}
                 defaultEase={ease}
               />
             )
@@ -1206,9 +1170,11 @@ export function TimelineTracks(props: {
             )
           })}
           {objects.every((object) => object.follow || object.keys.length === 0) &&
-            staticPosKeys.length === 0 &&
-            staticRotKeys.length === 0 && (
-              <p className="px-2 py-3 text-[11px] text-ink-dim">Select an object, then + Animate</p>
+            CAMERA_AXIS_TRACKS.every((track) => axisKeys[track.id].length === 0) && (
+              <p className="mt-1 border-t border-line/70 px-2.5 py-2.5 text-[11px] leading-5 text-ink-dim">
+                FOV and Roll use Add key on each row. To animate a scene object: select it, then +
+                Property.
+              </p>
             )}
         </div>
   )

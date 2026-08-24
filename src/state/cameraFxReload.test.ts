@@ -58,4 +58,18 @@ describe('camera FX reload', () => {
     expect(useRigStore.getState().cameraNoise.enabled).toBe(true)
     expect(useRigStore.getState().intensityKeys).toHaveLength(2)
   })
+
+  it('defaults missing snapshot fps to 30 and keeps duration in seconds', () => {
+    applyRigSnapshot({ ...makeEmptyRigSnapshot(), fps: undefined, duration: 8 })
+    expect(useRigStore.getState().fps).toBe(30)
+    expect(useRigStore.getState().duration).toBe(8)
+
+    applyRigSnapshot({ ...makeEmptyRigSnapshot(), duration: 8, fps: 24 })
+    const saved = getRigSnapshot()
+    expect(saved.fps).toBe(24)
+    applyRigSnapshot(makeEmptyRigSnapshot())
+    applyRigSnapshot(saved)
+    expect(useRigStore.getState().fps).toBe(24)
+    expect(useRigStore.getState().duration).toBe(8)
+  })
 })

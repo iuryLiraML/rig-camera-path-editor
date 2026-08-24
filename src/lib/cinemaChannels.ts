@@ -1,7 +1,7 @@
 import type { CameraNoise } from './cameraNoise'
 import type { CinemaChannels } from './evaluateCinemaPose'
 import type { EaseKind } from './easing'
-import type { ModelKey, ProgressKey, ValueKey, Vec3Key } from './keyframes'
+import type { ModelKey, ProgressKey, ValueKey } from './keyframes'
 import type { LookAtMode } from './evaluateCinemaPose'
 import type { PathSpace } from './pathSpace'
 import type { FollowConfig, Transform, Vec3 } from '../state/useSceneStore'
@@ -19,11 +19,19 @@ export function cinemaChannelsFromRig(
     ampPosKeys?: ValueKey[]
     ampRotKeys?: ValueKey[]
     freqKeys?: ValueKey[]
-    targetKeys: Vec3Key[]
+    targetXKeys?: ValueKey[]
+    targetYKeys?: ValueKey[]
+    targetZKeys?: ValueKey[]
     lookOffset?: Vec3
-    lookOffsetKeys?: Vec3Key[]
-    staticPosKeys?: Vec3Key[]
-    staticRotKeys?: Vec3Key[]
+    lookOffsetXKeys?: ValueKey[]
+    lookOffsetYKeys?: ValueKey[]
+    lookOffsetZKeys?: ValueKey[]
+    staticPosXKeys?: ValueKey[]
+    staticPosYKeys?: ValueKey[]
+    staticPosZKeys?: ValueKey[]
+    staticRotXKeys?: ValueKey[]
+    staticRotYKeys?: ValueKey[]
+    staticRotZKeys?: ValueKey[]
     fov: number
     roll: number
     target: Vec3
@@ -57,11 +65,19 @@ export function cinemaChannelsFromRig(
     ampPosKeys: rig.ampPosKeys,
     ampRotKeys: rig.ampRotKeys,
     freqKeys: rig.freqKeys,
-    targetKeys: rig.targetKeys,
+    targetXKeys: rig.targetXKeys ?? [],
+    targetYKeys: rig.targetYKeys ?? [],
+    targetZKeys: rig.targetZKeys ?? [],
     lookOffset: rig.lookOffset ?? [0, 0, 0],
-    lookOffsetKeys: rig.lookOffsetKeys ?? [],
-    staticPosKeys: rig.staticPosKeys ?? [],
-    staticRotKeys: rig.staticRotKeys ?? [],
+    lookOffsetXKeys: rig.lookOffsetXKeys ?? [],
+    lookOffsetYKeys: rig.lookOffsetYKeys ?? [],
+    lookOffsetZKeys: rig.lookOffsetZKeys ?? [],
+    staticPosXKeys: rig.staticPosXKeys ?? [],
+    staticPosYKeys: rig.staticPosYKeys ?? [],
+    staticPosZKeys: rig.staticPosZKeys ?? [],
+    staticRotXKeys: rig.staticRotXKeys ?? [],
+    staticRotYKeys: rig.staticRotYKeys ?? [],
+    staticRotZKeys: rig.staticRotZKeys ?? [],
     fov: rig.fov,
     roll: rig.roll,
     target: rig.target,

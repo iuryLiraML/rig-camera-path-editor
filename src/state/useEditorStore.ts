@@ -1,5 +1,11 @@
 import { create } from 'zustand'
 import type { KeyableFocus } from '../lib/keyAtPlayhead'
+import {
+  DEFAULT_COMPOSITION_GUIDES,
+  toggleCompositionGuide,
+  type CompositionGuideId,
+  type CompositionGuides,
+} from '../lib/compositionGuides'
 import { clampTimeView, FULL_TIME_VIEW, type TimeView } from '../lib/timeView'
 import { usePathStore } from './usePathStore'
 import type { RigChannel } from './useRigStore'
@@ -88,8 +94,6 @@ interface EditorState {
   cameraPanel: CameraPanel
   /** Import Assets modal. */
   showImportModal: boolean
-  /** Dense GLBs waiting for Keep as-is / Remesh. */
-  importRetopoQueue: { objectId: string; name: string; triangles: number }[]
   /** Object ids that refuse transform (Lock on the object bar). */
   lockedIds: string[]
   /** Visualize Generate media toggle — still vs motion reference. */
@@ -126,8 +130,14 @@ interface EditorState {
   timelineGraph: boolean
   /** which camera channel the graph is focused on */
   graphChannel: RigChannel
-  /** ? cheat sheet */
+  /** keyboard cheat-sheet overlay */
   showShortcuts: boolean
+  /** Look-through fly is previewing rest pose until Add pose / Record / scrub. */
+  lookThroughLivePose: boolean
+  /** Drone take: time advances and fly writes pose keys. */
+  flyRecording: boolean
+  /** On-lens composition guides while looking through. */
+  compositionGuides: CompositionGuides
   setTool: (tool: Tool) => void
   setProjection: (projection: Projection) => void
   select: (id: SelectableId | null) => void
@@ -156,7 +166,6 @@ interface EditorState {
   setObjectBarPanel: (panel: ObjectBarPanel) => void
   setCameraPanel: (panel: CameraPanel) => void
   setShowImportModal: (on: boolean) => void
-  setImportRetopoQueue: (queue: { objectId: string; name: string; triangles: number }[]) => void
   toggleLock: (id: string) => void
   setVisualizeMedia: (media: VisualizeMedia) => void
   setDirectorExpanded: (on: boolean) => void
@@ -184,6 +193,9 @@ interface EditorState {
   setGraphChannel: (channel: RigChannel) => void
   setShowShortcuts: (on: boolean) => void
   toggleShortcuts: () => void
+  setLookThroughLivePose: (on: boolean) => void
+  setFlyRecording: (on: boolean) => void
+  toggleCompositionGuide: (id: CompositionGuideId) => void
 }
 
 export const useEditorStore = create<EditorState>((set) => ({
@@ -208,7 +220,6 @@ export const useEditorStore = create<EditorState>((set) => ({
   objectBarPanel: 'none',
   cameraPanel: 'closed',
   showImportModal: false,
-  importRetopoQueue: [],
   lockedIds: [],
   visualizeMedia: 'still',
   directorExpanded: false,
@@ -231,12 +242,15 @@ export const useEditorStore = create<EditorState>((set) => ({
   gridSize: 0.5,
   timelineEasing: false,
   easingLinked: true,
-  timelineHeight: 240,
+  timelineHeight: 312,
   timelineView: FULL_TIME_VIEW,
   selectedKeyframe: null,
   timelineGraph: false,
   graphChannel: 'progress',
   showShortcuts: false,
+  lookThroughLivePose: false,
+  flyRecording: false,
+  compositionGuides: { ...DEFAULT_COMPOSITION_GUIDES },
   setTool: (tool) => set({ tool }),
   setProjection: (projection) => set({ projection }),
   select: (selection) => {
@@ -262,7 +276,12 @@ export const useEditorStore = create<EditorState>((set) => ({
       objectBarPanel: s.selection?.startsWith('obj:') ? 'transform' : s.objectBarPanel,
     })),
   setPlayMode: (playMode) => set({ playMode }),
-  setCameraView: (cameraView) => set({ cameraView }),
+  setCameraView: (cameraView) =>
+    set(
+      cameraView
+        ? { cameraView }
+        : { cameraView, flyRecording: false, lookThroughLivePose: false },
+    ),
   setRecording: (recording, kind = 'video') =>
     set({ recording, recordingKind: recording ? kind : null }),
   setActiveShotId: (activeShotId) => set({ activeShotId }),
@@ -306,9 +325,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   toggleAddDrawer: () => set((s) => ({ showAddDrawer: !s.showAddDrawer })),
   setObjectBarPanel: (objectBarPanel) => set({ objectBarPanel }),
   setCameraPanel: (cameraPanel) => set({ cameraPanel }),
-  setShowImportModal: (showImportModal) =>
-    set(showImportModal ? { showImportModal } : { showImportModal: false, importRetopoQueue: [] }),
-  setImportRetopoQueue: (importRetopoQueue) => set({ importRetopoQueue }),
+  setShowImportModal: (showImportModal) => set({ showImportModal }),
   toggleLock: (id) =>
     set((s) => ({
       lockedIds: s.lockedIds.includes(id)
@@ -357,4 +374,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   setGraphChannel: (graphChannel) => set({ graphChannel }),
   setShowShortcuts: (showShortcuts) => set({ showShortcuts }),
   toggleShortcuts: () => set((s) => ({ showShortcuts: !s.showShortcuts })),
+  setLookThroughLivePose: (lookThroughLivePose) => set({ lookThroughLivePose }),
+  setFlyRecording: (flyRecording) => set({ flyRecording }),
+  toggleCompositionGuide: (id) =>
+    set((s) => ({ compositionGuides: toggleCompositionGuide(s.compositionGuides, id) })),
 }))

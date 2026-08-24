@@ -100,3 +100,16 @@ input[type='color']::-moz-color-swatch {
   border: none;
   border-radius: 3px;
 }
+
+/* Indeterminate remesh bar — a sliding chunk, not a fake 0–100. */
+@keyframes remesh-indeterminate {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(380%);
+  }
+}
+.remesh-bar-indeterminate {
+  animation: remesh-indeterminate 1.4s ease-in-out infinite;
+}

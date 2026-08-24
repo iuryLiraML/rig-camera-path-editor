@@ -12,7 +12,8 @@ import { useSceneStore } from '../../state/useSceneStore'
 import { usePathStore } from '../../state/usePathStore'
 import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
-import { applyCanvasAspect } from '../../lib/staticCamera'
+import { evalValue } from '../../lib/keyframes'
+import { applyCanvasAspect, applyPoseToObject } from '../../lib/staticCamera'
 import { isTechMode } from '../RenderPasses'
 import { isCinemaViewport } from '../../lib/workspaceChrome'
 import { CAMERA_ICON_COLOR, CAMERA_ICON_SELECTED } from '../viewportLook'
@@ -83,6 +84,7 @@ export function CinemaCamera() {
 
   const camRef = useRef<THREE.PerspectiveCamera>(null)
   const bodyRef = useRef<THREE.Group>(null)
+  const lastT = useRef<number | null>(null)
 
   const curve = useMemo(() => buildCurve(anchors, closed, rounding), [anchors, closed, rounding])
   const ready = Boolean(curve) || cameraKind === 'static'
@@ -95,9 +97,20 @@ export function CinemaCamera() {
     cinemaCameraRef.current = cam
     if (!cam || !ready) return
     const rig = useRigStore.getState()
+    const editor = useEditorStore.getState()
+
+    if (
+      editor.lookThroughLivePose &&
+      !editor.flyRecording &&
+      (rig.playing ||
+        editor.playMode ||
+        (lastT.current !== null && Math.abs(rig.t - lastT.current) > 1e-4))
+    ) {
+      editor.setLookThroughLivePose(false)
+    }
 
     let t = rig.t
-    if (rig.playing) {
+    if (rig.playing && !editor.flyRecording) {
       t += delta / rig.duration
       if (t > 1) {
         if (rig.loop) t %= 1
@@ -107,6 +120,35 @@ export function CinemaCamera() {
         }
       }
       rig.setT(t)
+    }
+    lastT.current = useRigStore.getState().t
+
+    if (
+      editor.lookThroughLivePose &&
+      editor.cameraView &&
+      !editor.playMode &&
+      !rig.playing &&
+      rig.cameraKind === 'static'
+    ) {
+      applyPoseToObject(cam, rig.staticPose)
+      const rollDeg = evalValue(rig.t, rig.rollKeys, rig.roll, rig.ease)
+      if (Math.abs(rollDeg) > 1e-4) {
+        cam.rotateZ(rollDeg * THREE.MathUtils.DEG2RAD)
+      }
+      const body = bodyRef.current
+      if (body) {
+        body.position.copy(cam.position)
+        body.quaternion.copy(cam.quaternion)
+      }
+      if (cinema) {
+        applyCanvasAspect(cam, state.size.width, state.size.height)
+      }
+      const fovNow = evalValue(rig.t, rig.fovKeys, rig.fov, rig.ease)
+      if (Math.abs(cam.fov - fovNow) > 1e-3) {
+        cam.fov = fovNow
+        cam.updateProjectionMatrix()
+      }
+      return
     }
 
     const pose = evaluateCinemaPose(

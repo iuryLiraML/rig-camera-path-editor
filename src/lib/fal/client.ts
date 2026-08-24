@@ -3,6 +3,8 @@ import { serverHasKey } from '../agent/serverKeys'
 
 export type FalSubscribeOpts = {
   signal?: AbortSignal
+  /** When true, Fal includes runner logs on queue updates (needed to parse real %). */
+  logs?: boolean
   onQueueUpdate?: (status: unknown) => void
 }
 
@@ -12,7 +14,7 @@ export type FalSubscribe = (
   opts?: FalSubscribeOpts,
 ) => Promise<unknown>
 
-export type FalUpload = (file: File) => Promise<string>
+export type FalUpload = (file: File, signal?: AbortSignal) => Promise<string>
 
 let credentials = ''
 let subscribeImpl: FalSubscribe | null = null
@@ -80,6 +82,7 @@ export async function subscribe<T>(
   const result = await client.subscribe(modelId, {
     input,
     abortSignal: opts?.signal,
+    logs: opts?.logs,
     onQueueUpdate: opts?.onQueueUpdate,
   })
   return result.data as T
@@ -107,7 +110,7 @@ export async function uploadFile(file: File, signal?: AbortSignal): Promise<stri
     throw new Error('Add your Fal API key in Settings first.')
   }
   throwIfAborted(signal)
-  if (uploadImpl) return uploadImpl(file)
+  if (uploadImpl) return uploadImpl(file, signal)
   if (file.size <= DATA_URI_LIMIT) return fileToDataUri(file)
   throwIfAborted(signal)
   return liveClient().storage.upload(file)

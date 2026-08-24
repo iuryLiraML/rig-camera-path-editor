@@ -1,12 +1,12 @@
-import {
-  evalProgress,
-  evalValue,
-  evalVec3,
-  keysForObjectChannel,
-  objectKeyChannel,
-} from './keyframes'
+import { evalProgress, evalValue, keysForObjectChannel, objectKeyChannel, type ValueKey } from './keyframes'
+import { evalSeparatedVec3, isVec3AxisChannel, VEC3_AXIS_CHANNELS, type Vec3GroupId } from './vec3Axes'
 import { useEditorStore, type SelectedTimelineKey } from '../state/useEditorStore'
-import { useRigStore, type RigChannel, type ScalarChannel } from '../state/useRigStore'
+import {
+  CHANNEL_FIELD,
+  useRigStore,
+  type RigChannel,
+  type ScalarChannel,
+} from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { requestPersistFlush } from './persistFlush'
 import { type EaseKind } from './easing'
@@ -16,72 +16,110 @@ import {
   isObjectKeyFocus,
   objectChannelsForFocus,
 } from './keyAtPlayhead'
+import type { Vec3 } from '../state/useSceneStore'
 
 export type { SelectedTimelineKey }
+
+function scalarAt(channel: ScalarChannel, rig: ReturnType<typeof useRigStore.getState>) {
+  const field = CHANNEL_FIELD[channel]
+  const keys = rig[field] as ValueKey[]
+  switch (channel) {
+    case 'fov':
+      return { keys, value: rig.fov }
+    case 'roll':
+      return { keys, value: rig.roll }
+    case 'intensity':
+      return { keys, value: rig.cameraNoise.intensity }
+    case 'fadeIn':
+      return { keys, value: rig.cameraNoise.fadeIn }
+    case 'fadeOut':
+      return { keys, value: rig.cameraNoise.fadeOut }
+    case 'ampPos':
+      return { keys, value: rig.cameraNoise.ampPos }
+    case 'ampRot':
+      return { keys, value: rig.cameraNoise.ampRot }
+    case 'freq':
+      return { keys, value: rig.cameraNoise.freq }
+    case 'staticPosX':
+    case 'staticPosY':
+    case 'staticPosZ':
+      return { keys, value: rig.staticPose.position[axisOf(channel)] }
+    case 'staticRotX':
+    case 'staticRotY':
+    case 'staticRotZ':
+      return { keys, value: rig.staticPose.rotation[axisOf(channel)] }
+    case 'lookOffsetX':
+    case 'lookOffsetY':
+    case 'lookOffsetZ':
+      return { keys, value: rig.lookOffset[axisOf(channel)] }
+    case 'targetX':
+    case 'targetY':
+    case 'targetZ':
+      return { keys, value: rig.target[axisOf(channel)] }
+    default: {
+      const _never: never = channel
+      return _never
+    }
+  }
+}
+
+function axisOf(channel: ScalarChannel): 0 | 1 | 2 {
+  if (channel.endsWith('X')) return 0
+  if (channel.endsWith('Y')) return 1
+  return 2
+}
+
+export function evalRigVec3Group(
+  group: Vec3GroupId,
+  rig = useRigStore.getState(),
+  time = rig.t,
+): Vec3 {
+  const [x, y, z] = VEC3_AXIS_CHANNELS[group]
+  const fallback =
+    group === 'staticPos'
+      ? rig.staticPose.position
+      : group === 'staticRot'
+        ? rig.staticPose.rotation
+        : group === 'lookOffset'
+          ? rig.lookOffset
+          : rig.target
+  return evalSeparatedVec3(
+    time,
+    rig[CHANNEL_FIELD[x]] as ValueKey[],
+    rig[CHANNEL_FIELD[y]] as ValueKey[],
+    rig[CHANNEL_FIELD[z]] as ValueKey[],
+    fallback,
+    rig.ease,
+  )
+}
+
+export function vec3GroupHasKeys(
+  group: Vec3GroupId,
+  rig = useRigStore.getState(),
+): boolean {
+  return VEC3_AXIS_CHANNELS[group].some(
+    (channel) => (rig[CHANNEL_FIELD[channel]] as ValueKey[]).length > 0,
+  )
+}
 
 /** Insert (or merge) a key on one camera channel at an arbitrary time. */
 export function insertChannelKeyAt(channel: RigChannel, time: number) {
   const rig = useRigStore.getState()
   const t = Math.min(1, Math.max(0, time))
-  switch (channel) {
-    case 'progress':
-      rig.upsertProgressKey(t, evalProgress(t, rig.progressKeys, rig.ease))
-      break
-    case 'target':
-      rig.upsertTargetKey(t, evalVec3(t, rig.targetKeys, rig.target, rig.ease))
-      break
-    case 'lookOffset':
-      rig.upsertLookOffsetKey(t, evalVec3(t, rig.lookOffsetKeys, rig.lookOffset, rig.ease))
-      break
-    case 'staticPos':
-      rig.upsertStaticPosKey(t, evalVec3(t, rig.staticPosKeys, rig.staticPose.position, rig.ease))
-      break
-    case 'staticRot':
-      rig.upsertStaticRotKey(t, evalVec3(t, rig.staticRotKeys, rig.staticPose.rotation, rig.ease))
-      break
-    case 'fov':
-    case 'roll':
-    case 'intensity':
-    case 'fadeIn':
-    case 'fadeOut':
-    case 'ampPos':
-    case 'ampRot':
-    case 'freq': {
-      const { keys, value } = scalarAt(channel, rig)
-      rig.upsertChannelKey(channel, t, evalValue(t, keys, value, rig.ease))
-      break
-    }
-    default: {
-      const _never: never = channel
-      return _never
-    }
+  if (channel === 'progress') {
+    rig.upsertProgressKey(t, evalProgress(t, rig.progressKeys, rig.ease))
+  } else {
+    const { keys, value } = scalarAt(channel, rig)
+    rig.upsertChannelKey(channel, t, evalValue(t, keys, value, rig.ease))
   }
   requestPersistFlush()
 }
 
-function scalarAt(channel: ScalarChannel, rig: ReturnType<typeof useRigStore.getState>) {
-  switch (channel) {
-    case 'fov':
-      return { keys: rig.fovKeys, value: rig.fov }
-    case 'roll':
-      return { keys: rig.rollKeys, value: rig.roll }
-    case 'intensity':
-      return { keys: rig.intensityKeys, value: rig.cameraNoise.intensity }
-    case 'fadeIn':
-      return { keys: rig.fadeInKeys, value: rig.cameraNoise.fadeIn }
-    case 'fadeOut':
-      return { keys: rig.fadeOutKeys, value: rig.cameraNoise.fadeOut }
-    case 'ampPos':
-      return { keys: rig.ampPosKeys, value: rig.cameraNoise.ampPos }
-    case 'ampRot':
-      return { keys: rig.ampRotKeys, value: rig.cameraNoise.ampRot }
-    case 'freq':
-      return { keys: rig.freqKeys, value: rig.cameraNoise.freq }
-    default: {
-      const _never: never = channel
-      return _never
-    }
-  }
+export function insertVec3GroupAt(group: Vec3GroupId, time?: number) {
+  const rig = useRigStore.getState()
+  const t = Math.min(1, Math.max(0, time ?? rig.t))
+  rig.upsertVec3GroupKey(group, t, evalRigVec3Group(group, rig, t))
+  requestPersistFlush()
 }
 
 export function deleteSelectedTimelineKey(): boolean {
@@ -144,7 +182,7 @@ export function deleteKeyframeAtPlayhead(): boolean {
   }
 
   if (isKeyChannel(focus)) {
-    const field = channelField(focus)
+    const field = CHANNEL_FIELD[focus]
     const keys = rig[field] as { id: string; time: number }[]
     const key = findKeyAtTime(keys, rig.t)
     if (!key) return false
@@ -157,7 +195,7 @@ export function deleteKeyframeAtPlayhead(): boolean {
 }
 
 export function selectRigKeyAtTime(channel: RigChannel, time: number) {
-  const field = channelField(channel)
+  const field = CHANNEL_FIELD[channel]
   const keys = useRigStore.getState()[field] as { id: string; time: number }[]
   const key = findKeyAtTime(keys, time)
   if (!key) return
@@ -173,7 +211,7 @@ export function selectedKeyEase(): EaseKind | null {
     return key?.ease ?? useRigStore.getState().ease
   }
   const rig = useRigStore.getState()
-  const field = channelField(sel.channel)
+  const field = CHANNEL_FIELD[sel.channel]
   const keys = rig[field] as { id: string; ease?: EaseKind }[]
   const key = keys.find((item) => item.id === sel.id)
   return key?.ease ?? rig.ease
@@ -189,37 +227,4 @@ export function setSelectedKeyEase(ease: EaseKind) {
   useRigStore.getState().setKeyEase(sel.channel, sel.id, ease)
 }
 
-function channelField(channel: RigChannel) {
-  switch (channel) {
-    case 'fov':
-      return 'fovKeys' as const
-    case 'roll':
-      return 'rollKeys' as const
-    case 'intensity':
-      return 'intensityKeys' as const
-    case 'fadeIn':
-      return 'fadeInKeys' as const
-    case 'fadeOut':
-      return 'fadeOutKeys' as const
-    case 'ampPos':
-      return 'ampPosKeys' as const
-    case 'ampRot':
-      return 'ampRotKeys' as const
-    case 'freq':
-      return 'freqKeys' as const
-    case 'target':
-      return 'targetKeys' as const
-    case 'lookOffset':
-      return 'lookOffsetKeys' as const
-    case 'staticPos':
-      return 'staticPosKeys' as const
-    case 'staticRot':
-      return 'staticRotKeys' as const
-    case 'progress':
-      return 'progressKeys' as const
-    default: {
-      const _never: never = channel
-      return _never
-    }
-  }
-}
+export { isVec3AxisChannel }

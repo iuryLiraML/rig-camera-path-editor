@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, fireEvent, render } from '@testing-library/react'
 import { CameraRigHud } from './CameraRigHud'
 import { ViewportFooter } from './ViewportFooter'
+import { DEFAULT_COMPOSITION_GUIDES } from '../lib/compositionGuides'
 import { useEditorStore } from '../state/useEditorStore'
 import { CAMERA_PATH_ID, makeAnchor, usePathStore } from '../state/usePathStore'
 import { useRigStore } from '../state/useRigStore'
+import { emptyVec3AxisKeyState } from '../lib/vec3Axes'
 
 function seedPathCamera() {
   usePathStore.setState({
@@ -30,6 +32,10 @@ afterEach(() => {
     cameraView: false,
     playMode: false,
     workspaceMode: 'compose',
+    flyRecording: false,
+    lookThroughLivePose: false,
+    compositionGuides: { ...DEFAULT_COMPOSITION_GUIDES },
+    cameraPanel: 'closed',
   })
   useRigStore.setState({
     cameraKind: 'path',
@@ -38,10 +44,7 @@ afterEach(() => {
     fovKeys: [],
     rollKeys: [],
     progressKeys: [],
-    staticPosKeys: [],
-    staticRotKeys: [],
-    targetKeys: [],
-    lookOffsetKeys: [],
+    ...emptyVec3AxisKeyState(),
   })
   usePathStore.setState({
     paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
@@ -79,7 +82,15 @@ describe('CameraRigHud', () => {
     expect(container.textContent).toContain('WASD')
     expect(container.textContent).toContain('Add pose')
     expect(container.textContent).toContain('Remove pose')
+    expect(container.textContent).toContain('Record fly')
     expect(container.textContent).toContain('Exit camera')
+    expect(container.textContent).toContain('Camera settings')
+    expect(container.textContent).toContain('Roll')
+    expect(container.querySelector('[data-testid="look-through-roll"]')).toBeTruthy()
+    expect(container.textContent).toContain('Thirds')
+    expect(container.textContent).toContain('Safe')
+    expect(container.querySelector('[data-testid="composition-guides"]')).toBeTruthy()
+    expect(container.querySelector('[data-testid="film-gate"]')).toBeTruthy()
     expect(container.textContent).not.toContain('Esc exits')
   })
 
@@ -113,19 +124,50 @@ describe('CameraRigHud', () => {
     const { getByTitle } = render(<CameraRigHud />)
     fireEvent.click(getByTitle('Set a pose keyframe at the playhead (I)'))
     expect(useRigStore.getState().cameraKind).toBe('static')
-    expect(useRigStore.getState().staticPosKeys.length).toBeGreaterThan(0)
+    expect(useRigStore.getState().staticPosXKeys.length).toBeGreaterThan(0)
     expect(useEditorStore.getState().cameraView).toBe(true)
   })
 
-  it('marks the look-through frame as recording once a camera track exists', () => {
+  it('does not mark look-through as recording just because a camera track exists', () => {
     seedPathCamera()
     useRigStore.getState().upsertChannelKey('fov', 0, 45)
     useEditorStore.setState({ cameraView: true })
     const { container } = render(<CameraRigHud />)
+    expect(container.textContent).not.toContain('REC')
+    expect(
+      container.querySelector('[data-testid="look-through-frame"]')?.getAttribute('data-recording'),
+    ).toBe('false')
+  })
+
+  it('marks the look-through frame as recording during a fly take', () => {
+    useRigStore.setState({ cameraKind: 'static', lookAtMode: 'free' })
+    useEditorStore.setState({ selection: 'cinema-camera', cameraView: true, flyRecording: true })
+    const { container } = render(<CameraRigHud />)
     expect(container.textContent).toContain('REC')
+    expect(container.textContent).toContain('Stop record')
     expect(
       container.querySelector('[data-testid="look-through-frame"]')?.getAttribute('data-recording'),
     ).toBe('true')
+  })
+
+  it('Record fly starts a drone take', () => {
+    useRigStore.setState({ cameraKind: 'static', lookAtMode: 'free' })
+    useEditorStore.setState({ selection: 'cinema-camera', cameraView: true })
+    const { getByTitle } = render(<CameraRigHud />)
+    fireEvent.click(getByTitle('Fly the camera like a drone and key the take as time plays'))
+    expect(useEditorStore.getState().flyRecording).toBe(true)
+    expect(useRigStore.getState().staticPosXKeys.length).toBeGreaterThan(0)
+  })
+
+  it('guide chips toggle the on-lens overlay', () => {
+    useRigStore.setState({ cameraKind: 'static', lookAtMode: 'free' })
+    useEditorStore.setState({ selection: 'cinema-camera', cameraView: true })
+    const { getByTitle } = render(<CameraRigHud />)
+    expect(useEditorStore.getState().compositionGuides.golden).toBe(false)
+    fireEvent.click(getByTitle('Show golden guide'))
+    expect(useEditorStore.getState().compositionGuides.golden).toBe(true)
+    fireEvent.click(getByTitle('Hide thirds guide'))
+    expect(useEditorStore.getState().compositionGuides.thirds).toBe(false)
   })
 
   it('exits look-through from the center Exit camera button', () => {
@@ -134,6 +176,26 @@ describe('CameraRigHud', () => {
     const { getByTitle } = render(<CameraRigHud />)
     fireEvent.click(getByTitle('Back to the editor camera (Esc)'))
     expect(useEditorStore.getState().cameraView).toBe(false)
+  })
+
+  it('opens camera adjustments from look-through', () => {
+    useRigStore.setState({ cameraKind: 'static', lookAtMode: 'free' })
+    useEditorStore.setState({ selection: 'cinema-camera', cameraView: true, cameraPanel: 'closed' })
+    const { getByTitle } = render(<CameraRigHud />)
+    fireEvent.click(getByTitle('Camera settings'))
+    expect(useEditorStore.getState().cameraPanel).toBe('adjust')
+    fireEvent.click(getByTitle('Camera settings'))
+    expect(useEditorStore.getState().cameraPanel).toBe('closed')
+  })
+
+  it('writes roll from the look-through slider', () => {
+    useRigStore.setState({ cameraKind: 'static', lookAtMode: 'free', roll: 0 })
+    useEditorStore.setState({ selection: 'cinema-camera', cameraView: true })
+    const { getByLabelText } = render(<CameraRigHud />)
+    fireEvent.change(getByLabelText('Roll'), { target: { value: '12' } })
+    expect(useRigStore.getState().roll).toBe(12)
+    fireEvent.keyDown(getByLabelText('Roll wheel'), { key: 'ArrowRight' })
+    expect(useRigStore.getState().roll).toBe(13)
   })
 })
 

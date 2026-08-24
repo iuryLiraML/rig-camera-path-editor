@@ -80,19 +80,19 @@ export function applyCameraPreset(kind: PresetKind) {
     case 'pan': {
       const hold: Vec3 = [center.x + r * 1.1, h + r * 0.35, center.z + r * 0.15]
       path.setPath([hold, [hold[0] + 0.02, hold[1], hold[2]]], false)
-      rig.clearChannel('target')
+      rig.clearVec3Group('target')
       rig.setLookAtMode('target')
-      rig.upsertTargetKey(0, [center.x - size.x * 0.6, center.y, center.z])
-      rig.upsertTargetKey(1, [center.x + size.x * 0.6, center.y, center.z])
+      rig.upsertVec3GroupKey('target', 0, [center.x - size.x * 0.6, center.y, center.z])
+      rig.upsertVec3GroupKey('target', 1, [center.x + size.x * 0.6, center.y, center.z])
       break
     }
     case 'tilt': {
       const hold: Vec3 = [center.x + r * 1.1, h + r * 0.4, center.z + r * 1.1]
       path.setPath([hold, [hold[0] + 0.02, hold[1], hold[2]]], false)
-      rig.clearChannel('target')
+      rig.clearVec3Group('target')
       rig.setLookAtMode('target')
-      rig.upsertTargetKey(0, [center.x, Math.max(0.1, center.y - size.y * 0.4), center.z])
-      rig.upsertTargetKey(1, [center.x, center.y + size.y * 0.6, center.z])
+      rig.upsertVec3GroupKey('target', 0, [center.x, Math.max(0.1, center.y - size.y * 0.4), center.z])
+      rig.upsertVec3GroupKey('target', 1, [center.x, center.y + size.y * 0.6, center.z])
       break
     }
     case 'zoom': {

@@ -4,6 +4,7 @@ import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { useRigStore } from '../state/useRigStore'
 import { identityTransform } from '../state/useSceneStore'
 import { setCameraPathSpace, setTrackObjectId } from './pathSpaceBind'
+import { emptyVec3AxisKeyState } from './vec3Axes'
 import type { ObjectMotion } from './objectMotion'
 
 const car: { id: string } & ObjectMotion = {
@@ -85,7 +86,7 @@ describe('setTrackObjectId', () => {
     useRigStore.setState({
       targetObjectId: null,
       lookOffset: [0, 0, 0],
-      lookOffsetKeys: [],
+      ...emptyVec3AxisKeyState(),
     })
     setTrackObjectId('person', scene)
     expect(useRigStore.getState().targetObjectId).toBe('person')
@@ -100,11 +101,15 @@ describe('setTrackObjectId', () => {
     useRigStore.setState({
       targetObjectId: 'car',
       lookOffset: [0, 1.6, 0],
-      lookOffsetKeys: [{ id: 'k', time: 0, value: [0, 1.6, 0] }],
+      lookOffsetXKeys: [{ id: 'kx', time: 0, value: 0 }],
+      lookOffsetYKeys: [{ id: 'ky', time: 0, value: 1.6 }],
+      lookOffsetZKeys: [{ id: 'kz', time: 0, value: 0 }],
     })
     setTrackObjectId(null, { objects: [car], paths: usePathStore.getState().paths })
     expect(useRigStore.getState().targetObjectId).toBeNull()
     expect(useRigStore.getState().lookOffset).toEqual([0, 0, 0])
-    expect(useRigStore.getState().lookOffsetKeys).toEqual([])
+    expect(useRigStore.getState().lookOffsetXKeys).toEqual([])
+    expect(useRigStore.getState().lookOffsetYKeys).toEqual([])
+    expect(useRigStore.getState().lookOffsetZKeys).toEqual([])
   })
 })

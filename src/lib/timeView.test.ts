@@ -1,11 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import {
   clampTimeView,
+  durationFromFrameCount,
   formatTimecode,
   FULL_TIME_VIEW,
   MIN_TIME_SPAN,
+  normalizeShotFps,
   panTimeView,
   rulerMarks,
+  shotFrameCount,
   snapToFrame,
   timeInView,
   timeToFrame,
@@ -134,7 +137,30 @@ describe('wheelZoomFactor', () => {
 })
 
 describe('TIMELINE_FPS', () => {
-  it('matches the MP4 export rate', () => {
+  it('defaults to 30 so existing shots do not jump', () => {
     expect(TIMELINE_FPS).toBe(30)
+    expect(normalizeShotFps(undefined)).toBe(30)
+    expect(normalizeShotFps(23.976)).toBe(30)
+    expect(normalizeShotFps(24)).toBe(24)
+    expect(normalizeShotFps(60)).toBe(60)
+  })
+})
+
+describe('durationFromFrameCount', () => {
+  it('turns 240 frames into 8 s at 30 fps', () => {
+    expect(shotFrameCount(8)).toBe(240)
+    expect(durationFromFrameCount(240)).toBeCloseTo(8)
+  })
+
+  it('keeps 8 s and yields 192 frames at 24 fps', () => {
+    expect(shotFrameCount(8, 24)).toBe(192)
+    expect(durationFromFrameCount(192, 24)).toBeCloseTo(8)
+  })
+
+  it('clamps below 1 s and above 30 s', () => {
+    expect(durationFromFrameCount(10)).toBe(1)
+    expect(durationFromFrameCount(5000)).toBe(30)
+    expect(durationFromFrameCount(10, 24)).toBe(1)
+    expect(durationFromFrameCount(5000, 24)).toBe(30)
   })
 })

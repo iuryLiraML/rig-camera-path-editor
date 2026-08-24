@@ -31,6 +31,7 @@ import {
   useCameraOptionsStore,
 } from '../../state/useCameraOptionsStore'
 import { setCameraPathSpace, setTrackObjectId } from '../pathSpaceBind'
+import { vec3GroupHasKeys } from '../timelineKey'
 import { getLiftAttachment } from '../fal/attachment'
 import { liftAttachedStill } from '../fal/pipeline'
 import { readFalSettings } from '../fal/settings'
@@ -595,7 +596,7 @@ const EXECUTORS: Record<string, Executor> = {
     if (objectId) {
       const object = scene.objects.find((item) => item.id === objectId)
       if (!object) return `No object with id "${objectId}".`
-      if (input.mode !== 'motion') rig.clearChannel('target')
+      if (input.mode !== 'motion') rig.clearVec3Group('target')
       setTrackObjectId(object.id, scene)
     } else if (input.object_id === '' || (input.mode === 'target' && input.target && input.path_space !== 'object')) {
       setTrackObjectId(null, scene)
@@ -606,7 +607,7 @@ const EXECUTORS: Record<string, Executor> = {
     if (hasOffset) {
       const offset = asVec3(input.offset)
       const live = useRigStore.getState()
-      if (live.lookOffsetKeys.length > 0) live.upsertLookOffsetKey(live.t, offset)
+      if (vec3GroupHasKeys('lookOffset', live)) live.upsertVec3GroupKey('lookOffset', live.t, offset)
       else live.setLookOffset(offset)
     }
     if (input.path_space === 'object') {

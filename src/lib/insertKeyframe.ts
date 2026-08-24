@@ -1,43 +1,46 @@
 import {
   findKeyAtTime,
+  KEY_CHANNELS,
   objectChannelsForFocus,
   resolveKeyTargets,
   type KeyableFocus,
+  type KeyChannel,
 } from './keyAtPlayhead'
-import { insertChannelKeyAt, selectRigKeyAtTime } from './timelineKey'
+import { insertChannelKeyAt, insertVec3GroupAt, selectRigKeyAtTime } from './timelineKey'
 import { requestPersistFlush } from './persistFlush'
-import { keysForObjectChannel, OBJECT_CHANNEL_LABELS } from './keyframes'
+import { keysForObjectChannel, OBJECT_CHANNEL_LABELS, type ValueKey } from './keyframes'
 import { useEditorStore } from '../state/useEditorStore'
-import { useRigStore } from '../state/useRigStore'
+import { CHANNEL_FIELD, useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
 
 export function insertKeyframeAtPlayhead() {
   const editor = useEditorStore.getState()
   const rig = useRigStore.getState()
   rig.setPlaying(false)
-  const animated = (
-    [
-      rig.progressKeys.length > 0 ? 'progress' : null,
-      rig.fovKeys.length > 0 ? 'fov' : null,
-      rig.rollKeys.length > 0 ? 'roll' : null,
-      rig.intensityKeys.length > 0 ? 'intensity' : null,
-      rig.fadeInKeys.length > 0 ? 'fadeIn' : null,
-      rig.fadeOutKeys.length > 0 ? 'fadeOut' : null,
-      rig.ampPosKeys.length > 0 ? 'ampPos' : null,
-      rig.ampRotKeys.length > 0 ? 'ampRot' : null,
-      rig.freqKeys.length > 0 ? 'freq' : null,
-      rig.targetKeys.length > 0 ? 'target' : null,
-      rig.lookOffsetKeys.length > 0 ? 'lookOffset' : null,
-      rig.staticPosKeys.length > 0 ? 'staticPos' : null,
-      rig.staticRotKeys.length > 0 ? 'staticRot' : null,
-    ] as const
-  ).filter((channel): channel is NonNullable<typeof channel> => channel !== null)
+
+  if (!editor.keyableFocus && !editor.selection?.startsWith('obj:') && rig.cameraKind === 'static') {
+    const anyAxis = KEY_CHANNELS.some((channel) => {
+      if (channel === 'progress') return rig.progressKeys.length > 0
+      return (rig[CHANNEL_FIELD[channel]] as ValueKey[]).length > 0
+    })
+    if (!anyAxis) {
+      insertVec3GroupAt('staticPos')
+      selectRigKeyAtTime('staticPosX', rig.t)
+      useSceneStore.getState().showNotice('Keyframe set (Position)')
+      return
+    }
+  }
+
+  const animated = KEY_CHANNELS.filter((channel): channel is KeyChannel => {
+    if (channel === 'progress') return rig.progressKeys.length > 0
+    return (rig[CHANNEL_FIELD[channel]] as ValueKey[]).length > 0
+  })
 
   const { channels, object, objectChannels } = resolveKeyTargets(
     editor.keyableFocus,
     editor.selection,
     [...animated],
-    rig.cameraKind === 'static' ? 'staticPos' : 'progress',
+    'progress',
   )
 
   if (object) {

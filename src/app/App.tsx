@@ -24,6 +24,7 @@ import { syncActiveProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
 import { redo, undo, historyIsDirty } from '../lib/history'
 import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
+import { stopFlyRecord } from '../lib/flyRecord'
 import { insertPoseKeyframeAtPlayhead } from '../lib/poseKeyframe'
 import {
   applyDeleteShortcut,
@@ -35,7 +36,7 @@ import {
   isTextEditing,
 } from '../lib/editorShortcuts'
 import { applyTogglePlayback } from '../lib/playback'
-import { importDroppedModels, openDenseImportQueue, undoLastMeshRevision } from '../lib/sceneIO'
+import { importDroppedModels, undoLastMeshRevision } from '../lib/sceneIO'
 import { useProjectStore } from '../state/useProjectStore'
 import { resolveWorkspace } from './resolveWorkspace'
 import { ModeSwitcher } from '../ui/ModeSwitcher'
@@ -44,6 +45,7 @@ import { AddObjectDrawer } from '../ui/AddObjectDrawer'
 import { ObjectBar } from '../ui/ObjectBar'
 import { NavLegend } from '../ui/NavLegend'
 import { ImportAssetsModal } from '../ui/ImportAssetsModal'
+import { RemeshJobOverlay } from '../ui/RemeshProgressBar'
 import { CameraBar } from '../ui/CameraBar'
 import { CameraAdjustPanel } from '../ui/CameraAdjustPanel'
 import { ShortcutsOverlay } from '../ui/ShortcutsOverlay'
@@ -136,6 +138,7 @@ function useShortcuts() {
         case 'i':
         case 'I':
           e.preventDefault()
+          if (editor.flyRecording) break
           if (editor.cameraView && editor.workspaceMode !== 'visualize') {
             insertPoseKeyframeAtPlayhead()
           } else {
@@ -144,6 +147,7 @@ function useShortcuts() {
           break
         case ' ':
           e.preventDefault()
+          if (editor.flyRecording) break
           if (cameraReady()) applyTogglePlayback()
           break
         case '1':
@@ -175,6 +179,8 @@ function useShortcuts() {
             editor.setCameraPanel('closed')
           } else if (editor.directorExpanded) {
             editor.setDirectorExpanded(false)
+          } else if (editor.flyRecording) {
+            stopFlyRecord()
           } else if (editor.cameraView && editor.workspaceMode !== 'visualize') {
             editor.setCameraView(false)
           } else if (editor.tool === 'pen') {
@@ -252,7 +258,7 @@ function EditorWorkspace() {
       showNotice('Unsupported file — drop a .glb or .gltf')
       return
     }
-    void importDroppedModels(models).then((heavies) => openDenseImportQueue(heavies))
+    void importDroppedModels(models)
   }
 
   return (
@@ -299,6 +305,7 @@ function EditorWorkspace() {
       {chrome.objectBar && <ObjectBar />}
       {chrome.addDrawer && <AddObjectDrawer />}
       <ImportAssetsModal />
+      <RemeshJobOverlay />
       <ShortcutsOverlay />
 
       {playMode && !recording && (

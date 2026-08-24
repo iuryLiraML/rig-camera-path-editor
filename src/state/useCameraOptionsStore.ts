@@ -30,6 +30,7 @@ export function makeEmptyRigSnapshot(): RigSnapshot {
     closed: false,
     drawPlaneY: 1.2,
     duration: 6,
+    fps: 30,
     smoothness: 0.6,
     rounding: 0.8,
     loop: true,
@@ -56,6 +57,7 @@ function isPristineRig(rig: RigSnapshot) {
     rig.target[2] === 0 &&
     rig.roll === 0 &&
     rig.fov === 45 &&
+    (rig.fps ?? 30) === 30 &&
     rig.progressKeys.length === 0 &&
     (rig.cameraKind ?? 'path') === 'path'
   )

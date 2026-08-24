@@ -1,7 +1,20 @@
 import * as THREE from 'three'
 import { afterEach, describe, expect, it } from 'vitest'
 import { makeObject, useSceneStore } from '../state/useSceneStore'
-import { countTriangles, objectNeedsRetopo, RETOPO_TRIANGLES, undoLastMeshRevision, clearMeshRevisionsForTests, pushMeshRevisionForTests } from './sceneIO'
+import {
+  countTriangles,
+  objectNeedsRetopo,
+  RETOPO_TRIANGLES,
+  FAL_REMESH_MAX_BYTES,
+  undoLastMeshRevision,
+  clearMeshRevisionsForTests,
+  pushMeshRevisionForTests,
+  denseImportDecision,
+  denseRemeshStartCopy,
+  denseRemeshNeedsKeyCopy,
+  remeshTooLargeCopy,
+  formatTriangleCount,
+} from './sceneIO'
 import { setHistoryClockForTests } from './history'
 
 function meshWithTriangles(count: number) {
@@ -47,5 +60,47 @@ describe('retopo thresholds', () => {
     pushMeshRevisionForTests('car', new ArrayBuffer(8), 0)
     setHistoryClockForTests(2)
     expect(undoLastMeshRevision('car')).toBe(false)
+  })
+})
+
+describe('auto-remesh import decision', () => {
+  it('formats triangle counts the way the notices do', () => {
+    expect(formatTriangleCount(240_000)).toBe('240k triangles')
+    expect(formatTriangleCount(90_000)).toBe('90k triangles')
+    expect(formatTriangleCount(2_000_000)).toBe('2.0M triangles')
+  })
+
+  it('auto-sends dense meshes when Fal is ready', () => {
+    expect(denseImportDecision('Car', 240_000, 12_000, true)).toEqual({
+      action: 'remesh',
+      notice: denseRemeshStartCopy('Car', 240_000),
+    })
+    expect(denseRemeshStartCopy('Car', 240_000)).toBe(
+      '"Car" is dense (240k triangles). Remeshing with Tripo…',
+    )
+  })
+
+  it('skips the viewport when there is no Fal key', () => {
+    expect(denseImportDecision('Car', 240_000, 12_000, false)).toEqual({
+      action: 'skip',
+      notice: denseRemeshNeedsKeyCopy('Car', 240_000),
+    })
+    expect(denseRemeshNeedsKeyCopy('Car', 240_000)).toBe(
+      '"Car" is dense (240k triangles). Add a Fal key in Settings to remesh.',
+    )
+  })
+
+  it('refuses files over the Fal 150 MB cap', () => {
+    expect(denseImportDecision('Car', 240_000, FAL_REMESH_MAX_BYTES + 1, true)).toEqual({
+      action: 'skip',
+      notice: remeshTooLargeCopy('Car'),
+    })
+    expect(remeshTooLargeCopy('Car')).toBe('"Car" is too large to remesh (max 150 MB).')
+  })
+
+  it('imports clay-friendly meshes without remesh', () => {
+    expect(denseImportDecision('Car', RETOPO_TRIANGLES, FAL_REMESH_MAX_BYTES + 1, false)).toEqual({
+      action: 'import',
+    })
   })
 })

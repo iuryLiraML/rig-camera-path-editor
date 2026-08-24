@@ -32,10 +32,18 @@ export const KEY_CHANNELS = [
   'ampPos',
   'ampRot',
   'freq',
-  'target',
-  'lookOffset',
-  'staticPos',
-  'staticRot',
+  'staticPosX',
+  'staticPosY',
+  'staticPosZ',
+  'staticRotX',
+  'staticRotY',
+  'staticRotZ',
+  'lookOffsetX',
+  'lookOffsetY',
+  'lookOffsetZ',
+  'targetX',
+  'targetY',
+  'targetZ',
 ] as const
 
 export type KeyChannel = (typeof KEY_CHANNELS)[number]

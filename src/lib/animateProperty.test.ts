@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { animateMenuItems, animateProperty } from './animateProperty'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
+import { emptyVec3AxisKeyState } from './vec3Axes'
 import { useSceneStore } from '../state/useSceneStore'
 
 beforeEach(() => {
@@ -15,8 +16,7 @@ beforeEach(() => {
     t: 0.4,
     cameraKind: 'path',
     staticPose: { position: [4, 2, 6], rotation: [0, 10, 0] },
-    staticPosKeys: [],
-    staticRotKeys: [],
+    ...emptyVec3AxisKeyState(),
     fovKeys: [],
     rollKeys: [],
   })
@@ -31,10 +31,14 @@ describe('animateMenuItems', () => {
     ])
   })
 
-  it('lists Position / Rotation / FOV / Roll for a Free camera', () => {
+  it('lists Position / Rotation axes / FOV / Roll for a Free camera', () => {
     expect(animateMenuItems('cinema-camera', 'static').map((item) => item.label)).toEqual([
-      'Position',
-      'Rotation',
+      'Position X',
+      'Position Y',
+      'Position Z',
+      'Rotation X',
+      'Rotation Y',
+      'Rotation Z',
       'FOV',
       'Roll',
     ])
@@ -61,11 +65,11 @@ describe('animateProperty', () => {
   it('adds a Free-camera Position key at the playhead', () => {
     useRigStore.setState({ cameraKind: 'static' })
     useEditorStore.setState({ selection: 'cinema-camera' })
-    animateProperty({ kind: 'rig', channel: 'staticPos', label: 'Position' })
-    const keys = useRigStore.getState().staticPosKeys
+    animateProperty({ kind: 'rig', channel: 'staticPosX', label: 'Position X' })
+    const keys = useRigStore.getState().staticPosXKeys
     expect(keys).toHaveLength(1)
     expect(keys[0].time).toBeCloseTo(0.4, 5)
-    expect(keys[0].value).toEqual([4, 2, 6])
-    expect(useEditorStore.getState().keyableFocus).toBe('staticPos')
+    expect(keys[0].value).toBe(4)
+    expect(useEditorStore.getState().keyableFocus).toBe('staticPosX')
   })
 })

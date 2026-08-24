@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { Timeline } from './Timeline'
 import { CAMERA_PATH_ID, makeAnchor, usePathStore } from '../state/usePathStore'
 import { useEditorStore } from '../state/useEditorStore'
+import { emptyVec3AxisKeyState } from '../lib/vec3Axes'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
 
@@ -68,9 +69,10 @@ afterEach(() => {
     progressKeys: [],
     fovKeys: [],
     rollKeys: [],
-    staticPosKeys: [],
-    staticRotKeys: [],
+    ...emptyVec3AxisKeyState(),
     cameraKind: 'path',
+    duration: 6,
+    fps: 30,
   })
 })
 
@@ -108,14 +110,14 @@ describe('Timeline', () => {
     expect(container.querySelector('svg[viewBox="0 0 100 100"] polyline')).not.toBeNull()
   })
 
-  it('hides interval handles until Easing is on', () => {
+  it('hides interval handles until Spacing is on', () => {
     setAnchors(3)
     const { container } = render(<Timeline />)
     expect(container.querySelector('[data-ease-handle]')).toBeNull()
-    expect(container.textContent).toContain('Easing')
+    expect(container.textContent).toContain('Spacing')
   })
 
-  it('draws interval handles on the camera track when Easing is on', () => {
+  it('draws interval handles on the camera track when Spacing is on', () => {
     setAnchors(3)
     useEditorStore.setState({ timelineEasing: true })
     const { container } = render(<Timeline />)
@@ -164,12 +166,13 @@ describe('Timeline', () => {
     expect(useRigStore.getState().fovKeys.length).toBe(1)
   })
 
-  it('adds a key from the + button at the playhead', () => {
+  it('adds a key from Add key at the playhead', () => {
     setAnchors(3)
     useRigStore.setState({ t: 0.3, fov: 50 })
     const { container } = render(<Timeline />)
     const add = container.querySelector('[data-track="fov"] [data-add-key]')
     expect(add).not.toBeNull()
+    expect(add?.textContent).toBe('Add key')
     fireEvent.click(add!)
     const keys = useRigStore.getState().fovKeys
     expect(keys).toHaveLength(1)
@@ -177,11 +180,30 @@ describe('Timeline', () => {
     expect(keys[0].value).toBeCloseTo(50, 5)
   })
 
+  it('shows Remove disabled until a key on that track is selected', () => {
+    setAnchors(3)
+    useRigStore.setState({
+      fovKeys: [{ id: 'fov-a', time: 0.2, value: 40 }],
+    })
+    const { container, rerender } = render(<Timeline />)
+    const remove = () =>
+      container.querySelector('[data-track="fov"] [data-delete-key]') as HTMLButtonElement
+    expect(remove()).not.toBeNull()
+    expect(remove().disabled).toBe(true)
+    useEditorStore.setState({
+      selectedKeyframe: { kind: 'rig', channel: 'fov', id: 'fov-a' },
+    })
+    rerender(<Timeline />)
+    expect(remove().disabled).toBe(false)
+    fireEvent.click(remove())
+    expect(useRigStore.getState().fovKeys).toHaveLength(0)
+  })
+
   it('zooms time on wheel over the dock and shows the frame count', () => {
     setAnchors(3)
-    useRigStore.setState({ t: 0, duration: 6 })
-    const { container } = render(<Timeline />)
-    expect(container.textContent).toContain('180f')
+    useRigStore.setState({ t: 0, duration: 6, fps: 30 })
+    const { container, getByLabelText } = render(<Timeline />)
+    expect((getByLabelText('Shot duration in frames') as HTMLInputElement).value).toBe('180')
     expect(container.textContent).toMatch(/0:00/)
     const dock = container.querySelector('[data-timeline-dock]')
     expect(dock).not.toBeNull()
@@ -244,13 +266,43 @@ describe('Timeline', () => {
     expect(container.querySelector('[data-bezier-handle="1"]')).not.toBeNull()
   })
 
-  it('shows + Animate and the empty-state copy instead of a mute object row', () => {
+  it('edits shot duration from seconds and frames fields', () => {
+    setAnchors(3)
+    useRigStore.setState({ duration: 8, fps: 30 })
+    const { getByLabelText } = render(<Timeline />)
+    const seconds = getByLabelText('Shot duration in seconds') as HTMLInputElement
+    const frames = getByLabelText('Shot duration in frames') as HTMLInputElement
+    expect(seconds.value).toBe('8')
+    expect(frames.value).toBe('240')
+    fireEvent.change(seconds, { target: { value: '4' } })
+    expect(useRigStore.getState().duration).toBe(4)
+    fireEvent.change(frames, { target: { value: '240' } })
+    expect(useRigStore.getState().duration).toBeCloseTo(8)
+  })
+
+  it('keeps duration in seconds when fps changes and recomputes frames', () => {
+    setAnchors(3)
+    useRigStore.setState({ duration: 8, fps: 30 })
+    const { getByLabelText, getByRole } = render(<Timeline />)
+    const frames = getByLabelText('Shot duration in frames') as HTMLInputElement
+    const rate = getByLabelText('Shot frame rate')
+    expect(frames.value).toBe('240')
+    expect(rate.textContent).toContain('30')
+    fireEvent.click(rate)
+    fireEvent.click(getByRole('option', { name: '24' }))
+    expect(useRigStore.getState().fps).toBe(24)
+    expect(useRigStore.getState().duration).toBe(8)
+    expect(getByLabelText('Shot duration in frames')).toHaveProperty('value', '192')
+  })
+
+  it('shows + Property and the empty-state copy instead of a mute object row', () => {
     setAnchors(3)
     const { container, getByText } = render(<Timeline />)
     expect(container.querySelector('[data-animate-menu]')).toBeTruthy()
-    expect(container.textContent).toContain('Select an object, then + Animate')
+    expect(container.textContent).toContain('select it, then +')
+    expect(container.textContent).toContain('Property')
     expect(container.textContent).not.toContain('Save the current pose at the playhead')
-    fireEvent.click(getByText('+ Animate'))
+    fireEvent.click(getByText('+ Property'))
     expect(container.textContent).not.toContain('Position')
   })
 
@@ -260,7 +312,7 @@ describe('Timeline', () => {
     const id = useSceneStore.getState().objects[0].id
     useEditorStore.setState({ selection: `obj:${id}` })
     const { getByText, getAllByText } = render(<Timeline />)
-    fireEvent.click(getByText('+ Animate'))
+    fireEvent.click(getByText('+ Property'))
     expect(getAllByText('Position').length).toBeGreaterThan(0)
     fireEvent.click(getAllByText('Position')[0])
     expect(useSceneStore.getState().objects[0].keys.some((k) => k.channel === 'position')).toBe(true)

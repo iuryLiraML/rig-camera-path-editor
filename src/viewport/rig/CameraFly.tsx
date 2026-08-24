@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { detachCinemaToStatic } from '../../lib/addStaticCamera'
 import { evaluatedStaticPose, nudgeFov, writeStaticPose } from '../../lib/autoKey'
+import { shouldSampleFlyKey, stopFlyRecord } from '../../lib/flyRecord'
 import { applyFly } from '../../lib/staticCamera'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useRigStore } from '../../state/useRigStore'
@@ -23,6 +24,40 @@ function flyIntent(key: string): string | null {
   return null
 }
 
+function commitFlyPose(
+  editor: ReturnType<typeof useEditorStore.getState>,
+  moving: boolean,
+  forward: number,
+  right: number,
+  up: number,
+  yawDelta: number,
+  pitchDelta: number,
+  delta: number,
+  recording: boolean,
+  keys: Set<string>,
+  speed: number,
+  lastKeyed: { current: number | null },
+) {
+  const rig = useRigStore.getState()
+  const live = editor.lookThroughLivePose
+  const source = live || recording ? rig.staticPose : evaluatedStaticPose(rig)
+  const next = moving
+    ? applyFly(source, {
+        forward,
+        right,
+        up,
+        yawDelta,
+        pitchDelta,
+        speed: speed * (keys.has('shift') ? SHIFT_MULT : 1),
+        dt: Math.min(0.05, delta),
+      })
+    : source
+  const sample = recording && shouldSampleFlyKey(rig.t, lastKeyed.current)
+  writeStaticPose(next, { key: sample })
+  if (sample) lastKeyed.current = rig.t
+  if (!live) editor.setLookThroughLivePose(true)
+}
+
 function prepareFly() {
   const rig = useRigStore.getState()
   if (rig.cameraKind !== 'static') {
@@ -37,8 +72,8 @@ function prepareFly() {
 /**
  * Blender-style walk/fly while looking through any cinema camera. WASD or
  * arrows move, Q/E down/up, Shift sprints, LMB or RMB looks, wheel changes
- * speed (Shift+wheel nudges FOV). A path camera detaches on the first move
- * so CinemaCamera stays a pure function of t.
+ * speed (Shift+wheel nudges FOV). A path camera detaches on the first move.
+ * Fly writes the rest pose only; pose keys come from Add pose or Record fly.
  */
 export function CameraFly() {
   const gl = useThree((s) => s.gl)
@@ -47,6 +82,12 @@ export function CameraFly() {
   const yawAcc = useRef(0)
   const pitchAcc = useRef(0)
   const speed = useRef(BASE_SPEED)
+  const lastKeyed = useRef<number | null>(null)
+  const flyRecording = useEditorStore((s) => s.flyRecording)
+
+  useEffect(() => {
+    lastKeyed.current = flyRecording ? useRigStore.getState().t : null
+  }, [flyRecording])
 
   useEffect(() => {
     const el = gl.domElement
@@ -77,6 +118,9 @@ export function CameraFly() {
         /* already released */
       }
     }
+    const onPointerCancel = () => {
+      looking.current = false
+    }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       if (useRigStore.getState().playing || useEditorStore.getState().playMode) return
@@ -103,6 +147,7 @@ export function CameraFly() {
     el.addEventListener('pointerdown', onPointerDown)
     el.addEventListener('pointermove', onPointerMove)
     el.addEventListener('pointerup', onPointerUp)
+    el.addEventListener('pointercancel', onPointerCancel)
     el.addEventListener('wheel', onWheel, { passive: false })
     window.addEventListener('keydown', onKeyDown)
     window.addEventListener('keyup', onKeyUp)
@@ -111,6 +156,7 @@ export function CameraFly() {
       el.removeEventListener('pointerdown', onPointerDown)
       el.removeEventListener('pointermove', onPointerMove)
       el.removeEventListener('pointerup', onPointerUp)
+      el.removeEventListener('pointercancel', onPointerCancel)
       el.removeEventListener('wheel', onWheel)
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('keyup', onKeyUp)
@@ -120,6 +166,8 @@ export function CameraFly() {
   }, [gl])
 
   useFrame((_, delta) => {
+    const editor = useEditorStore.getState()
+    const recording = editor.flyRecording
     const k = keys.current
     const forward = (k.has('w') ? 1 : 0) - (k.has('s') ? 1 : 0)
     const right = (k.has('d') ? 1 : 0) - (k.has('a') ? 1 : 0)
@@ -128,23 +176,53 @@ export function CameraFly() {
     const pitchDelta = looking.current ? pitchAcc.current : 0
     yawAcc.current = 0
     pitchAcc.current = 0
-    if (forward === 0 && right === 0 && up === 0 && yawDelta === 0 && pitchDelta === 0) return
+    const moving = forward !== 0 || right !== 0 || up !== 0 || yawDelta !== 0 || pitchDelta !== 0
 
-    const editor = useEditorStore.getState()
     if (useRigStore.getState().playing || editor.playMode) return
+    if (!recording && !moving) return
+
     prepareFly()
     const rig = useRigStore.getState()
-    const live = evaluatedStaticPose(rig)
-    const next = applyFly(live, {
+    if (recording) {
+      let t = rig.t + delta / Math.max(0.001, rig.duration)
+      if (t >= 1) {
+        t = 1
+        rig.setT(t)
+        commitFlyPose(
+          editor,
+          moving,
+          forward,
+          right,
+          up,
+          yawDelta,
+          pitchDelta,
+          delta,
+          true,
+          k,
+          speed.current,
+          lastKeyed,
+        )
+        lastKeyed.current = null
+        stopFlyRecord()
+        return
+      }
+      rig.setT(t)
+    }
+
+    commitFlyPose(
+      editor,
+      moving,
       forward,
       right,
       up,
       yawDelta,
       pitchDelta,
-      speed: speed.current * (k.has('shift') ? SHIFT_MULT : 1),
-      dt: Math.min(0.05, delta),
-    })
-    writeStaticPose(next)
+      delta,
+      recording,
+      k,
+      speed.current,
+      lastKeyed,
+    )
   })
 
   return null

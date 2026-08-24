@@ -6,6 +6,7 @@ import {
 } from './timelineKey'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
+import { emptyVec3AxisKeyState } from './vec3Axes'
 import { useSceneStore } from '../state/useSceneStore'
 
 beforeEach(() => {
@@ -29,10 +30,7 @@ beforeEach(() => {
     ampPosKeys: [],
     ampRotKeys: [],
     freqKeys: [],
-    targetKeys: [],
-    lookOffsetKeys: [],
-    staticPosKeys: [],
-    staticRotKeys: [],
+    ...emptyVec3AxisKeyState(),
   })
 })
 
@@ -48,13 +46,12 @@ describe('insertChannelKeyAt', () => {
   it('adds a Free-camera position key from the rest pose', () => {
     useRigStore.setState({
       staticPose: { position: [2, 3, 4], rotation: [0, 0, 0] },
-      staticPosKeys: [],
     })
-    insertChannelKeyAt('staticPos', 0.25)
-    const keys = useRigStore.getState().staticPosKeys
+    insertChannelKeyAt('staticPosX', 0.25)
+    const keys = useRigStore.getState().staticPosXKeys
     expect(keys).toHaveLength(1)
     expect(keys[0].time).toBeCloseTo(0.25, 5)
-    expect(keys[0].value).toEqual([2, 3, 4])
+    expect(keys[0].value).toBe(2)
   })
 })
 
@@ -82,10 +79,10 @@ describe('deleteKeyframeAtPlayhead', () => {
   })
 
   it('removes a Free-camera rotation key at the playhead', () => {
-    insertChannelKeyAt('staticRot', 0.4)
-    useEditorStore.setState({ keyableFocus: 'staticRot' })
+    insertChannelKeyAt('staticRotX', 0.4)
+    useEditorStore.setState({ keyableFocus: 'staticRotX' })
     expect(deleteKeyframeAtPlayhead()).toBe(true)
-    expect(useRigStore.getState().staticRotKeys).toHaveLength(0)
+    expect(useRigStore.getState().staticRotXKeys).toHaveLength(0)
   })
 
   it('removes an object pose key when Transform is open', () => {

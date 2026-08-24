@@ -18,7 +18,7 @@ export async function remeshGlb(opts: {
       quad: false,
       bake: false,
     },
-    { signal: opts.signal, onQueueUpdate: opts.onQueueUpdate },
+    { signal: opts.signal, logs: true, onQueueUpdate: opts.onQueueUpdate },
   )
   return requireModelGlb(data, TRIPO_REMESH)
 }

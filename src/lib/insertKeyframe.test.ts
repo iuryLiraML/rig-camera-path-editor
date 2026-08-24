@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { insertKeyframeAtPlayhead } from './insertKeyframe'
+import { emptyVec3AxisKeyState } from './vec3Axes'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
@@ -23,8 +24,7 @@ beforeEach(() => {
     fovKeys: [],
     rollKeys: [],
     progressKeys: [],
-    targetKeys: [],
-    lookOffsetKeys: [],
+    ...emptyVec3AxisKeyState(),
     cameraNoise: {
       ...useRigStore.getState().cameraNoise,
       intensity: 0.7,
@@ -65,17 +65,17 @@ describe('insertKeyframeAtPlayhead', () => {
     expect(keys[0].value).toBeCloseTo(0.8, 5)
   })
 
-  it('writes a lookOffset key when that channel is focused', () => {
+  it('writes a lookOffset Y key when that channel is focused', () => {
     useRigStore.setState({
       lookOffset: [0, 1.2, 0],
-      lookOffsetKeys: [],
+      ...emptyVec3AxisKeyState(),
     })
-    useEditorStore.setState({ keyableFocus: 'lookOffset' })
+    useEditorStore.setState({ keyableFocus: 'lookOffsetY' })
     insertKeyframeAtPlayhead()
-    const keys = useRigStore.getState().lookOffsetKeys
+    const keys = useRigStore.getState().lookOffsetYKeys
     expect(keys).toHaveLength(1)
     expect(keys[0].time).toBeCloseTo(0.4, 5)
-    expect(keys[0].value[1]).toBeCloseTo(1.2, 5)
+    expect(keys[0].value).toBeCloseTo(1.2, 5)
   })
 
   it('writes all transform channels when an object is selected', () => {

@@ -21,6 +21,8 @@ import { resetHistory, historyClock, historyIsDirty } from './history'
 import type { ModelKey } from './keyframes'
 import { prepareImportedRoot } from './prepareImport'
 import { VIEWPORT_BG_DEFAULT_TOP } from '../viewport/viewportBackground'
+import { configureFal, falUsable } from './fal/client'
+import { readFalSettings } from './fal/settings'
 
 /** legacy (pre-projects) localStorage key — still read for migration */
 export const LEGACY_META_KEY = 'rig-scene-objects'
@@ -28,6 +30,70 @@ export const LEGACY_META_KEY = 'rig-scene-objects'
 export const RETOPO_TRIANGLES = 80_000
 /** stronger FPS copy in the import warning */
 export const HEAVY_TRIANGLES = 1_500_000
+/** Tripo remesh input cap (fal.ai mesh_url). */
+export const FAL_REMESH_MAX_BYTES = 150 * 1024 * 1024
+
+type DenseRemeshEnqueue = (objectId: string, buffer: ArrayBuffer) => void
+let denseRemeshEnqueue: DenseRemeshEnqueue | null = null
+
+/** meshJobs registers this so import can auto-send without a circular import. */
+export function setDenseRemeshEnqueue(fn: DenseRemeshEnqueue | null) {
+  denseRemeshEnqueue = fn
+}
+
+export function formatTriangleCount(triangles: number): string {
+  if (triangles >= 1_000_000) return `${(triangles / 1e6).toFixed(1)}M triangles`
+  if (triangles >= 1000) return `${Math.round(triangles / 1000)}k triangles`
+  return `${triangles} triangles`
+}
+
+export function denseRemeshStartCopy(name: string, triangles: number): string {
+  return `"${name}" is dense (${formatTriangleCount(triangles)}). Remeshing with Tripo…`
+}
+
+export function denseRemeshNeedsKeyCopy(name: string, triangles: number): string {
+  return `"${name}" is dense (${formatTriangleCount(triangles)}). Add a Fal key in Settings to remesh.`
+}
+
+export function remeshTooLargeCopy(name: string): string {
+  return `"${name}" is too large to remesh (max 150 MB).`
+}
+
+export type DenseImportAction =
+  | { action: 'import' }
+  | { action: 'remesh'; notice: string }
+  | { action: 'skip'; notice: string }
+
+export function denseImportDecision(
+  name: string,
+  triangles: number,
+  byteSize: number,
+  falReady: boolean,
+): DenseImportAction {
+  if (triangles <= RETOPO_TRIANGLES) return { action: 'import' }
+  if (byteSize > FAL_REMESH_MAX_BYTES) return { action: 'skip', notice: remeshTooLargeCopy(name) }
+  if (!falReady) return { action: 'skip', notice: denseRemeshNeedsKeyCopy(name, triangles) }
+  return { action: 'remesh', notice: denseRemeshStartCopy(name, triangles) }
+}
+
+function falReady(): boolean {
+  configureFal(readFalSettings().falKey)
+  return falUsable()
+}
+
+export function disposeObject3D(root: THREE.Object3D) {
+  root.traverse((child) => {
+    if (child instanceof THREE.Mesh) child.geometry.dispose()
+  })
+}
+
+export function makeRemeshPlaceholderRoot(): THREE.Object3D {
+  const group = new THREE.Group()
+  const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2))
+  mesh.position.y = 0.6
+  group.add(mesh)
+  return group
+}
 
 // ---------------------------------------------------------------------------
 // Import
@@ -61,11 +127,23 @@ export function countTriangles(root: THREE.Object3D): number {
   return Math.round(total)
 }
 
+function addImportedObject(
+  name: string,
+  root: THREE.Object3D,
+  clips: THREE.AnimationClip[],
+): SceneObject {
+  const object = makeObject(name, root, { bufferKey: null, clips })
+  object.bufferKey = object.id
+  useSceneStore.getState().addObject(object)
+  useEditorStore.getState().select(`obj:${object.id}`)
+  return object
+}
+
 /** Imports GLB bytes as a new scene object and persists the buffer. */
 export async function importModelBuffer(
   buffer: ArrayBuffer,
   name: string,
-  opts: { announce?: boolean } = {},
+  opts: { announce?: boolean; autoRemesh?: boolean } = {},
 ): Promise<{
   objectId: string
   objectName: string
@@ -73,18 +151,44 @@ export async function importModelBuffer(
   triangles: number
 } | null> {
   const announce = opts.announce ?? true
+  const autoRemesh = opts.autoRemesh ?? false
   const scene = useSceneStore.getState()
   scene.setImporting(1)
   try {
     const { scene: root, clips } = await parseGLB(buffer)
     prepareImportedRoot(root)
-    normalizeModel(root)
-    const object = makeObject(name, root, { bufferKey: null, clips })
-    object.bufferKey = object.id
-    useSceneStore.getState().addObject(object)
-    useEditorStore.getState().select(`obj:${object.id}`)
-
     const triangles = countTriangles(root)
+
+    if (autoRemesh && triangles > RETOPO_TRIANGLES) {
+      disposeObject3D(root)
+      const decision = denseImportDecision(name, triangles, buffer.byteLength, falReady())
+      switch (decision.action) {
+        case 'skip':
+          scene.showNotice(decision.notice)
+          return null
+        case 'import':
+          return null
+        case 'remesh': {
+          const placeholder = addImportedObject(name, makeRemeshPlaceholderRoot(), [])
+          scene.showNotice(decision.notice)
+          denseRemeshEnqueue?.(placeholder.id, buffer)
+          return {
+            objectId: placeholder.id,
+            objectName: placeholder.name,
+            byteSize: buffer.byteLength,
+            triangles,
+          }
+        }
+        default: {
+          const _exhaustive: never = decision
+          return _exhaustive
+        }
+      }
+    }
+
+    normalizeModel(root)
+    const object = addImportedObject(name, root, clips)
+
     if (announce) {
       if (triangles > HEAVY_TRIANGLES) {
         scene.showNotice(
@@ -119,7 +223,7 @@ export async function importModelBuffer(
 /** Imports a .glb/.gltf file as a new scene object and persists its buffer. */
 export async function importModelFile(
   file: File,
-  opts: { announce?: boolean } = {},
+  opts: { announce?: boolean; autoRemesh?: boolean } = {},
 ): Promise<{
   objectId: string
   objectName: string
@@ -127,7 +231,7 @@ export async function importModelFile(
   triangles: number
 } | null> {
   const name = file.name.replace(/\.(glb|gltf)$/i, '')
-  return importModelBuffer(await file.arrayBuffer(), name, opts)
+  return importModelBuffer(await file.arrayBuffer(), name, { autoRemesh: true, ...opts })
 }
 
 const meshRevisions: { objectId: string; buffer: ArrayBuffer; clock: number }[] = []
@@ -196,36 +300,20 @@ export function openImportDialog() {
   useEditorStore.getState().setShowImportModal(true)
 }
 
-export type DenseImport = { objectId: string; name: string; triangles: number }
-
-/** Imports .glb/.gltf files and returns those dense enough to offer remesh. */
-export async function importDroppedModels(files: File[]): Promise<DenseImport[]> {
+/** Imports .glb/.gltf files; dense meshes auto-queue for Tripo remesh. */
+export async function importDroppedModels(files: File[]): Promise<void> {
   const models = files.filter((file) => /\.(glb|gltf)$/i.test(file.name))
   if (models.length === 0) {
     useSceneStore.getState().showNotice('Unsupported file — drop a .glb or .gltf')
-    return []
+    return
   }
-  const heavies: DenseImport[] = []
   for (const file of models) {
     const imported = await importModelFile(file, { announce: false })
     if (!imported) continue
-    if (imported.triangles > RETOPO_TRIANGLES) {
-      heavies.push({
-        objectId: imported.objectId,
-        name: imported.objectName,
-        triangles: imported.triangles,
-      })
-    } else {
+    if (imported.triangles <= RETOPO_TRIANGLES) {
       useSceneStore.getState().showNotice(`"${imported.objectName}" imported`)
     }
   }
-  return heavies
-}
-
-export function openDenseImportQueue(items: DenseImport[]) {
-  if (items.length === 0) return
-  useEditorStore.getState().setImportRetopoQueue(items)
-  useEditorStore.getState().setShowImportModal(true)
 }
 
 // ---------------------------------------------------------------------------

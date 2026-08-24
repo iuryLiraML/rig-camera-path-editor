@@ -5,7 +5,10 @@ import a `.glb`, draw (or one-click generate) a camera path, tune everything wit
 sliders and simple keyframes, and export a ready-to-post MP4.
 
 Built with Vite + React 19 + TypeScript, three.js (@react-three/fiber + drei),
-zustand and Tailwind CSS v4. 100% client-side — no backend.
+zustand and Tailwind CSS v4. This **public** tree is the client app Vercel builds
+(https://rig-camera-path-editor.vercel.app). The full private source (client +
+`server/` + docs) lives in [`rig-cloud`](https://github.com/iuryLiraML/rig-cloud)
+— see `docs/REPOS.md` there if you have access.
 
 ## Run
 

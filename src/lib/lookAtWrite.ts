@@ -1,5 +1,6 @@
 import { evalObjectWorldTransform, resolveTrackTarget } from './objectMotion'
 import { worldPointToLocal } from './pathSpace'
+import { writeVec3Group } from './autoKey'
 import { usePathStore } from '../state/usePathStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../state/useSceneStore'
@@ -15,11 +16,8 @@ export function writeLookAt(world: Vec3) {
   const track = resolveTrackTarget(rig.targetObjectId, scene.objects, scene.paths)
   if (track) {
     const parent = evalObjectWorldTransform(t, track.object, track.path, rig.ease)
-    const offset = worldPointToLocal(world, parent)
-    if (rig.lookOffsetKeys.length > 0) rig.upsertLookOffsetKey(t, offset)
-    else rig.setLookOffset(offset)
+    writeVec3Group('lookOffset', worldPointToLocal(world, parent))
     return
   }
-  if (rig.targetKeys.length > 0) rig.upsertTargetKey(t, world)
-  else rig.setTarget(world)
+  writeVec3Group('target', world)
 }

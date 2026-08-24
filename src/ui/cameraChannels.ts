@@ -1,57 +1,61 @@
-import type { ValueKey, Vec3Key } from '../lib/keyframes'
-import type { ScalarChannel } from '../state/useRigStore'
+import type { ValueKey } from '../lib/keyframes'
+import type { Vec3AxisChannel } from '../lib/vec3Axes'
+import { VEC3_AXIS_LABELS } from '../lib/vec3Axes'
 
 /**
- * The camera's animatable channels, shared by the timeline tracks and the right
- * panel so both name and format them the same way. Path position lives on the
- * "Camera" track itself; these are the lens and framing channels.
- * FX amount has its own clip track, not this list.
+ * Lens channels shared by the timeline tracks and the graph editor. Path
+ * position lives on the Camera track; pose / look-at axes are listed in
+ * CAMERA_AXIS_TRACKS so each dimension can be keyed on its own.
  */
 export interface CameraChannel {
-  id: 'fov' | 'roll' | 'target' | 'lookOffset'
+  id: 'fov' | 'roll'
   label: string
-  pick: (keys: {
-    fovKeys: ValueKey[]
-    rollKeys: ValueKey[]
-    targetKeys: Vec3Key[]
-    lookOffsetKeys: Vec3Key[]
-  }) => { id: string; time: number; easeIn?: number; easeOut?: number }[]
-  describe: (key: { id: string }) => string
+  pick: (keys: { fovKeys: ValueKey[]; rollKeys: ValueKey[] }) => ValueKey[]
 }
-
-const deg = (v: number) => `${Math.round(v)}°`
 
 export const CAMERA_CHANNELS: CameraChannel[] = [
   {
     id: 'fov',
     label: 'FOV',
     pick: (k) => k.fovKeys,
-    describe: () => '',
   },
   {
     id: 'roll',
     label: 'Roll',
     pick: (k) => k.rollKeys,
-    describe: () => '',
-  },
-  {
-    id: 'target',
-    label: 'Look-At',
-    pick: (k) => k.targetKeys,
-    describe: () => '',
-  },
-  {
-    id: 'lookOffset',
-    label: 'Look-At offset',
-    pick: (k) => k.lookOffsetKeys,
-    describe: () => '',
   },
 ]
+
+export type CameraAxisWhen = 'static' | 'target' | 'offset'
+
+export type CameraAxisTrack = {
+  id: Vec3AxisChannel
+  label: string
+  format: 'look' | 'degrees'
+  when: CameraAxisWhen
+}
+
+export const CAMERA_AXIS_TRACKS: CameraAxisTrack[] = [
+  { id: 'staticPosX', label: `Camera · ${VEC3_AXIS_LABELS.staticPosX}`, format: 'look', when: 'static' },
+  { id: 'staticPosY', label: `Camera · ${VEC3_AXIS_LABELS.staticPosY}`, format: 'look', when: 'static' },
+  { id: 'staticPosZ', label: `Camera · ${VEC3_AXIS_LABELS.staticPosZ}`, format: 'look', when: 'static' },
+  { id: 'staticRotX', label: `Camera · ${VEC3_AXIS_LABELS.staticRotX}`, format: 'degrees', when: 'static' },
+  { id: 'staticRotY', label: `Camera · ${VEC3_AXIS_LABELS.staticRotY}`, format: 'degrees', when: 'static' },
+  { id: 'staticRotZ', label: `Camera · ${VEC3_AXIS_LABELS.staticRotZ}`, format: 'degrees', when: 'static' },
+  { id: 'targetX', label: VEC3_AXIS_LABELS.targetX, format: 'look', when: 'target' },
+  { id: 'targetY', label: VEC3_AXIS_LABELS.targetY, format: 'look', when: 'target' },
+  { id: 'targetZ', label: VEC3_AXIS_LABELS.targetZ, format: 'look', when: 'target' },
+  { id: 'lookOffsetX', label: VEC3_AXIS_LABELS.lookOffsetX, format: 'look', when: 'offset' },
+  { id: 'lookOffsetY', label: VEC3_AXIS_LABELS.lookOffsetY, format: 'look', when: 'offset' },
+  { id: 'lookOffsetZ', label: VEC3_AXIS_LABELS.lookOffsetZ, format: 'look', when: 'offset' },
+]
+
+const deg = (v: number) => `${Math.round(v)}°`
 
 export { deg as formatDegrees }
 
 export type FxParamChannel = {
-  id: Exclude<ScalarChannel, 'fov' | 'roll' | 'intensity'>
+  id: 'fadeIn' | 'fadeOut' | 'ampPos' | 'ampRot' | 'freq'
   label: string
 }
 

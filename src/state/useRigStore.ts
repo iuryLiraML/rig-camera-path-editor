@@ -2,6 +2,13 @@ import { create } from 'zustand'
 import type { Vec3 } from './useSceneStore'
 import { KEY_MERGE_EPS, type ProgressKey, type ValueKey, type Vec3Key } from '../lib/keyframes'
 import { clamp01 } from '../lib/intervalSpacing'
+import {
+  composeVec3Keys,
+  hydrateVec3Group,
+  VEC3_AXIS_CHANNELS,
+  type Vec3AxisChannel,
+  type Vec3GroupId,
+} from '../lib/vec3Axes'
 
 function stripSpacing<K extends { easeIn?: number; easeOut?: number }>(key: K): K {
   const next = { ...key }
@@ -16,6 +23,7 @@ import {
   type CameraNoise,
 } from '../lib/cameraNoise'
 import { DEFAULT_EASE, easeForSmoothness, type EaseKind } from '../lib/easing'
+import { clampShotDuration, DEFAULT_SHOT_FPS, normalizeShotFps, type ShotFps } from '../lib/timeView'
 import { CAMERA_PATH_ID, makeAnchor, usePathStore, type MotionPath, type PathAnchor } from './usePathStore'
 import type { PathSpace } from '../lib/pathSpace'
 
@@ -43,10 +51,10 @@ export type ScalarChannel =
   | 'ampPos'
   | 'ampRot'
   | 'freq'
-export type Vec3Channel = 'target' | 'lookOffset' | 'staticPos' | 'staticRot'
-export type RigChannel = ScalarChannel | Vec3Channel | 'progress'
+  | Vec3AxisChannel
+export type RigChannel = ScalarChannel | 'progress'
 
-const CHANNEL_FIELD = {
+export const CHANNEL_FIELD = {
   fov: 'fovKeys',
   roll: 'rollKeys',
   intensity: 'intensityKeys',
@@ -55,16 +63,104 @@ const CHANNEL_FIELD = {
   ampPos: 'ampPosKeys',
   ampRot: 'ampRotKeys',
   freq: 'freqKeys',
-  target: 'targetKeys',
-  lookOffset: 'lookOffsetKeys',
-  staticPos: 'staticPosKeys',
-  staticRot: 'staticRotKeys',
   progress: 'progressKeys',
-} as const
+  staticPosX: 'staticPosXKeys',
+  staticPosY: 'staticPosYKeys',
+  staticPosZ: 'staticPosZKeys',
+  staticRotX: 'staticRotXKeys',
+  staticRotY: 'staticRotYKeys',
+  staticRotZ: 'staticRotZKeys',
+  lookOffsetX: 'lookOffsetXKeys',
+  lookOffsetY: 'lookOffsetYKeys',
+  lookOffsetZ: 'lookOffsetZKeys',
+  targetX: 'targetXKeys',
+  targetY: 'targetYKeys',
+  targetZ: 'targetZKeys',
+} as const satisfies Record<RigChannel, string>
 
 let keySeq = 0
 const makeKeyId = (channel: string, time: number) =>
   `${channel}-${Math.round(time * 1e4)}-${keySeq++}`
+
+function axisKeysFromData(data: Record<string, unknown>) {
+  const pos = hydrateVec3Group(data, 'staticPos')
+  const rot = hydrateVec3Group(data, 'staticRot')
+  const offset = hydrateVec3Group(data, 'lookOffset')
+  const target = hydrateVec3Group(data, 'target')
+  return {
+    staticPosXKeys: pos.x,
+    staticPosYKeys: pos.y,
+    staticPosZKeys: pos.z,
+    staticRotXKeys: rot.x,
+    staticRotYKeys: rot.y,
+    staticRotZKeys: rot.z,
+    lookOffsetXKeys: offset.x,
+    lookOffsetYKeys: offset.y,
+    lookOffsetZKeys: offset.z,
+    targetXKeys: target.x,
+    targetYKeys: target.y,
+    targetZKeys: target.z,
+  }
+}
+
+function axisKeysDump(s: {
+  ease: EaseKind
+  staticPose: StaticPose
+  lookOffset: Vec3
+  target: Vec3
+  staticPosXKeys: ValueKey[]
+  staticPosYKeys: ValueKey[]
+  staticPosZKeys: ValueKey[]
+  staticRotXKeys: ValueKey[]
+  staticRotYKeys: ValueKey[]
+  staticRotZKeys: ValueKey[]
+  lookOffsetXKeys: ValueKey[]
+  lookOffsetYKeys: ValueKey[]
+  lookOffsetZKeys: ValueKey[]
+  targetXKeys: ValueKey[]
+  targetYKeys: ValueKey[]
+  targetZKeys: ValueKey[]
+}) {
+  return {
+    staticPosXKeys: s.staticPosXKeys,
+    staticPosYKeys: s.staticPosYKeys,
+    staticPosZKeys: s.staticPosZKeys,
+    staticRotXKeys: s.staticRotXKeys,
+    staticRotYKeys: s.staticRotYKeys,
+    staticRotZKeys: s.staticRotZKeys,
+    lookOffsetXKeys: s.lookOffsetXKeys,
+    lookOffsetYKeys: s.lookOffsetYKeys,
+    lookOffsetZKeys: s.lookOffsetZKeys,
+    targetXKeys: s.targetXKeys,
+    targetYKeys: s.targetYKeys,
+    targetZKeys: s.targetZKeys,
+    staticPosKeys: composeVec3Keys(
+      s.staticPosXKeys,
+      s.staticPosYKeys,
+      s.staticPosZKeys,
+      s.staticPose.position,
+      s.ease,
+      'staticPos',
+    ),
+    staticRotKeys: composeVec3Keys(
+      s.staticRotXKeys,
+      s.staticRotYKeys,
+      s.staticRotZKeys,
+      s.staticPose.rotation,
+      s.ease,
+      'staticRot',
+    ),
+    lookOffsetKeys: composeVec3Keys(
+      s.lookOffsetXKeys,
+      s.lookOffsetYKeys,
+      s.lookOffsetZKeys,
+      s.lookOffset,
+      s.ease,
+      'lookOffset',
+    ),
+    targetKeys: composeVec3Keys(s.targetXKeys, s.targetYKeys, s.targetZKeys, s.target, s.ease, 'target'),
+  }
+}
 
 /** rough inverse of easeForSmoothness, so a snapshot stays readable by old builds */
 function smoothnessForEase(ease: EaseKind): number {
@@ -105,6 +201,11 @@ export interface RigSnapshot {
   closed: boolean
   drawPlaneY: number
   duration: number
+  /**
+   * Shot timebase in frames per second. Animation is still a function of t (0..1);
+   * fps only maps seconds ↔ frames for the ruler and MP4. Absent on old JSON → 30.
+   */
+  fps?: ShotFps
   /** legacy 0..1 smoothness, still written so an older build can read a shot */
   smoothness: number
   /** the default animation curve (supersedes smoothness) */
@@ -135,6 +236,18 @@ export interface RigSnapshot {
   lookOffsetKeys?: Vec3Key[]
   staticPosKeys?: Vec3Key[]
   staticRotKeys?: Vec3Key[]
+  staticPosXKeys?: ValueKey[]
+  staticPosYKeys?: ValueKey[]
+  staticPosZKeys?: ValueKey[]
+  staticRotXKeys?: ValueKey[]
+  staticRotYKeys?: ValueKey[]
+  staticRotZKeys?: ValueKey[]
+  lookOffsetXKeys?: ValueKey[]
+  lookOffsetYKeys?: ValueKey[]
+  lookOffsetZKeys?: ValueKey[]
+  targetXKeys?: ValueKey[]
+  targetYKeys?: ValueKey[]
+  targetZKeys?: ValueKey[]
   cameraNoise?: CameraNoise
   /** Scene object the look-at target follows; null = fixed / keyed XYZ */
   targetObjectId?: string | null
@@ -150,6 +263,8 @@ interface RigState {
   /** the path the cinema camera follows (always CAMERA_PATH_ID) */
   cameraPathId: string
   duration: number
+  /** Composition timebase. Duration stays in seconds when this changes. */
+  fps: ShotFps
   /**
    * Default animation curve for every channel; a keyframe can override it for
    * the segment it starts. Replaces the old 0..1 smoothness slider, so there is
@@ -174,11 +289,19 @@ interface RigState {
   ampPosKeys: ValueKey[]
   ampRotKeys: ValueKey[]
   freqKeys: ValueKey[]
-  targetKeys: Vec3Key[]
+  targetXKeys: ValueKey[]
+  targetYKeys: ValueKey[]
+  targetZKeys: ValueKey[]
   lookOffset: Vec3
-  lookOffsetKeys: Vec3Key[]
-  staticPosKeys: Vec3Key[]
-  staticRotKeys: Vec3Key[]
+  lookOffsetXKeys: ValueKey[]
+  lookOffsetYKeys: ValueKey[]
+  lookOffsetZKeys: ValueKey[]
+  staticPosXKeys: ValueKey[]
+  staticPosYKeys: ValueKey[]
+  staticPosZKeys: ValueKey[]
+  staticRotXKeys: ValueKey[]
+  staticRotYKeys: ValueKey[]
+  staticRotZKeys: ValueKey[]
   cameraNoise: CameraNoise
   targetObjectId: string | null
   pathSpace: PathSpace
@@ -195,10 +318,8 @@ interface RigState {
   removeProgressKey: (id: string) => void
   clearProgressKeys: () => void
   upsertChannelKey: (channel: ScalarChannel, time: number, value: number) => void
-  upsertTargetKey: (time: number, value: Vec3) => void
-  upsertLookOffsetKey: (time: number, value: Vec3) => void
-  upsertStaticPosKey: (time: number, value: Vec3) => void
-  upsertStaticRotKey: (time: number, value: Vec3) => void
+  upsertVec3GroupKey: (group: Vec3GroupId, time: number, value: Vec3) => void
+  clearVec3Group: (group: Vec3GroupId) => void
   removeChannelKey: (channel: RigChannel, id: string) => void
   updateChannelKeyTime: (channel: RigChannel, id: string, time: number) => void
   setKeyValue: (channel: RigChannel, id: string, value: number) => void
@@ -221,6 +342,7 @@ interface RigState {
   setCameraPath: (pathId: string) => void
   setEase: (ease: EaseKind) => void
   setDuration: (seconds: number) => void
+  setFps: (fps: number) => void
   /** legacy entry point: the agent tool, camera generators and old files */
   setSmoothness: (s: number) => void
   setLoop: (loop: boolean) => void
@@ -238,6 +360,7 @@ interface RigState {
 export const useRigStore = create<RigState>()((set, get) => ({
       cameraPathId: CAMERA_PATH_ID,
       duration: 6,
+      fps: DEFAULT_SHOT_FPS,
       ease: DEFAULT_EASE as EaseKind,
       loop: true,
       lookAtMode: 'target' as LookAtMode,
@@ -255,11 +378,19 @@ export const useRigStore = create<RigState>()((set, get) => ({
       ampPosKeys: [] as ValueKey[],
       ampRotKeys: [] as ValueKey[],
       freqKeys: [] as ValueKey[],
-      targetKeys: [] as Vec3Key[],
+      targetXKeys: [] as ValueKey[],
+      targetYKeys: [] as ValueKey[],
+      targetZKeys: [] as ValueKey[],
       lookOffset: [0, 0, 0] as Vec3,
-      lookOffsetKeys: [] as Vec3Key[],
-      staticPosKeys: [] as Vec3Key[],
-      staticRotKeys: [] as Vec3Key[],
+      lookOffsetXKeys: [] as ValueKey[],
+      lookOffsetYKeys: [] as ValueKey[],
+      lookOffsetZKeys: [] as ValueKey[],
+      staticPosXKeys: [] as ValueKey[],
+      staticPosYKeys: [] as ValueKey[],
+      staticPosZKeys: [] as ValueKey[],
+      staticRotXKeys: [] as ValueKey[],
+      staticRotYKeys: [] as ValueKey[],
+      staticRotZKeys: [] as ValueKey[],
       cameraNoise: { ...DEFAULT_CAMERA_NOISE },
       targetObjectId: null as string | null,
       pathSpace: 'world' as PathSpace,
@@ -308,45 +439,20 @@ export const useRigStore = create<RigState>()((set, get) => ({
           } as unknown as Partial<RigState>
         }),
 
-      upsertTargetKey: (time, value) =>
-        set((s) => {
-          const existing = s.targetKeys.find((k) => Math.abs(k.time - time) < KEY_MERGE_EPS)
-          return {
-            targetKeys: existing
-              ? s.targetKeys.map((k) => (k.id === existing.id ? { ...k, value } : k))
-              : [...s.targetKeys, { id: makeKeyId('target', time), time, value }],
-          }
-        }),
+      upsertVec3GroupKey: (group, time, value) => {
+        const channels = VEC3_AXIS_CHANNELS[group]
+        const rig = get()
+        for (let i = 0; i < 3; i++) rig.upsertChannelKey(channels[i], time, value[i])
+      },
 
-      upsertLookOffsetKey: (time, value) =>
-        set((s) => {
-          const existing = s.lookOffsetKeys.find((k) => Math.abs(k.time - time) < KEY_MERGE_EPS)
-          return {
-            lookOffsetKeys: existing
-              ? s.lookOffsetKeys.map((k) => (k.id === existing.id ? { ...k, value } : k))
-              : [...s.lookOffsetKeys, { id: makeKeyId('lookOffset', time), time, value }],
-          }
-        }),
-
-      upsertStaticPosKey: (time, value) =>
-        set((s) => {
-          const existing = s.staticPosKeys.find((k) => Math.abs(k.time - time) < KEY_MERGE_EPS)
-          return {
-            staticPosKeys: existing
-              ? s.staticPosKeys.map((k) => (k.id === existing.id ? { ...k, value } : k))
-              : [...s.staticPosKeys, { id: makeKeyId('staticPos', time), time, value }],
-          }
-        }),
-
-      upsertStaticRotKey: (time, value) =>
-        set((s) => {
-          const existing = s.staticRotKeys.find((k) => Math.abs(k.time - time) < KEY_MERGE_EPS)
-          return {
-            staticRotKeys: existing
-              ? s.staticRotKeys.map((k) => (k.id === existing.id ? { ...k, value } : k))
-              : [...s.staticRotKeys, { id: makeKeyId('staticRot', time), time, value }],
-          }
-        }),
+      clearVec3Group: (group) => {
+        const channels = VEC3_AXIS_CHANNELS[group]
+        set({
+          [CHANNEL_FIELD[channels[0]]]: [],
+          [CHANNEL_FIELD[channels[1]]]: [],
+          [CHANNEL_FIELD[channels[2]]]: [],
+        } as unknown as Partial<RigState>)
+      },
 
       removeChannelKey: (channel, id) =>
         set((s) => {
@@ -375,14 +481,6 @@ export const useRigStore = create<RigState>()((set, get) => ({
                 k.id === id ? { ...k, progress: clamp01(value) } : k,
               ),
             }
-          }
-          if (channel === 'target' || channel === 'lookOffset' || channel === 'staticPos' || channel === 'staticRot') {
-            const keys = s[field] as Vec3Key[]
-            return {
-              [field]: keys.map((k) =>
-                k.id === id ? { ...k, value: [k.value[0], value, k.value[2]] as Vec3 } : k,
-              ),
-            } as unknown as Partial<RigState>
           }
           const keys = s[field] as ValueKey[]
           return {
@@ -460,10 +558,18 @@ export const useRigStore = create<RigState>()((set, get) => ({
           ampPosKeys: s.ampPosKeys.map(stripSpacing),
           ampRotKeys: s.ampRotKeys.map(stripSpacing),
           freqKeys: s.freqKeys.map(stripSpacing),
-          targetKeys: s.targetKeys.map(stripSpacing),
-          lookOffsetKeys: s.lookOffsetKeys.map(stripSpacing),
-          staticPosKeys: s.staticPosKeys.map(stripSpacing),
-          staticRotKeys: s.staticRotKeys.map(stripSpacing),
+          targetXKeys: s.targetXKeys.map(stripSpacing),
+          targetYKeys: s.targetYKeys.map(stripSpacing),
+          targetZKeys: s.targetZKeys.map(stripSpacing),
+          lookOffsetXKeys: s.lookOffsetXKeys.map(stripSpacing),
+          lookOffsetYKeys: s.lookOffsetYKeys.map(stripSpacing),
+          lookOffsetZKeys: s.lookOffsetZKeys.map(stripSpacing),
+          staticPosXKeys: s.staticPosXKeys.map(stripSpacing),
+          staticPosYKeys: s.staticPosYKeys.map(stripSpacing),
+          staticPosZKeys: s.staticPosZKeys.map(stripSpacing),
+          staticRotXKeys: s.staticRotXKeys.map(stripSpacing),
+          staticRotYKeys: s.staticRotYKeys.map(stripSpacing),
+          staticRotZKeys: s.staticRotZKeys.map(stripSpacing),
         })),
 
       clearChannel: (channel) =>
@@ -475,7 +581,8 @@ export const useRigStore = create<RigState>()((set, get) => ({
         set({ cameraPathId: pathId })
       },
       setEase: (ease) => set({ ease }),
-      setDuration: (duration) => set({ duration: Math.min(30, Math.max(1, duration)) }),
+      setDuration: (duration) => set({ duration: clampShotDuration(duration) }),
+      setFps: (fps) => set({ fps: normalizeShotFps(fps) }),
       setSmoothness: (s) => set({ ease: easeForSmoothness(s) }),
       setLoop: (loop) => set({ loop }),
       setLookAtMode: (lookAtMode) => set({ lookAtMode }),
@@ -494,7 +601,9 @@ export const useRigStore = create<RigState>()((set, get) => ({
                 lookAtMode: get().lookAtMode,
                 pathSpace: 'world' as const,
                 lookOffset: [0, 0, 0] as Vec3,
-                lookOffsetKeys: [],
+                lookOffsetXKeys: [],
+                lookOffsetYKeys: [],
+                lookOffsetZKeys: [],
               },
         ),
       setPathSpace: (pathSpace) => {
@@ -518,6 +627,7 @@ export const useRigStore = create<RigState>()((set, get) => ({
             closed: cam?.closed ?? false,
             rounding: cam?.rounding ?? 0.8,
             duration: s.duration,
+            fps: s.fps,
             ease: s.ease,
             loop: s.loop,
             lookAtMode: s.lookAtMode,
@@ -533,11 +643,7 @@ export const useRigStore = create<RigState>()((set, get) => ({
             ampPosKeys: s.ampPosKeys,
             ampRotKeys: s.ampRotKeys,
             freqKeys: s.freqKeys,
-            targetKeys: s.targetKeys,
-            lookOffset: s.lookOffset,
-            lookOffsetKeys: s.lookOffsetKeys,
-            staticPosKeys: s.staticPosKeys,
-            staticRotKeys: s.staticRotKeys,
+            ...axisKeysDump(s),
             cameraNoise: s.cameraNoise,
             targetObjectId: s.targetObjectId,
             pathSpace: s.pathSpace,
@@ -561,7 +667,8 @@ export const useRigStore = create<RigState>()((set, get) => ({
           })
           usePathStore.setState({ selectedAnchorId: null, selectedAnchorIds: [], selectedHandle: 'none' })
           set({
-            duration: typeof data.duration === 'number' ? data.duration : 6,
+            duration: typeof data.duration === 'number' ? clampShotDuration(data.duration) : 6,
+            fps: normalizeShotFps(data.fps),
             ease: readEase(data),
             loop: data.loop ?? true,
             lookAtMode: data.lookAtMode ?? 'target',
@@ -577,11 +684,8 @@ export const useRigStore = create<RigState>()((set, get) => ({
             ampPosKeys: Array.isArray(data.ampPosKeys) ? data.ampPosKeys : [],
             ampRotKeys: Array.isArray(data.ampRotKeys) ? data.ampRotKeys : [],
             freqKeys: Array.isArray(data.freqKeys) ? data.freqKeys : [],
-            targetKeys: Array.isArray(data.targetKeys) ? data.targetKeys : [],
+            ...axisKeysFromData(data),
             lookOffset: readVec3(data.lookOffset, [0, 0, 0]),
-            lookOffsetKeys: Array.isArray(data.lookOffsetKeys) ? data.lookOffsetKeys : [],
-            staticPosKeys: Array.isArray(data.staticPosKeys) ? data.staticPosKeys : [],
-            staticRotKeys: Array.isArray(data.staticRotKeys) ? data.staticRotKeys : [],
             cameraNoise: normalizeCameraNoise(data.cameraNoise),
             targetObjectId: typeof data.targetObjectId === 'string' ? data.targetObjectId : null,
             pathSpace: data.pathSpace === 'object' ? 'object' : 'world',
@@ -620,6 +724,7 @@ export function getRigSnapshot(): RigSnapshot {
       closed: cam?.closed ?? false,
       drawPlaneY: usePathStore.getState().drawPlaneY,
       duration: s.duration,
+      fps: s.fps,
       smoothness: smoothnessForEase(s.ease),
       ease: s.ease,
       rounding: cam?.rounding ?? 0.8,
@@ -638,11 +743,8 @@ export function getRigSnapshot(): RigSnapshot {
       ampPosKeys: s.ampPosKeys,
       ampRotKeys: s.ampRotKeys,
       freqKeys: s.freqKeys,
-      targetKeys: s.targetKeys,
+      ...axisKeysDump(s),
       lookOffset: s.lookOffset,
-      lookOffsetKeys: s.lookOffsetKeys,
-      staticPosKeys: s.staticPosKeys,
-      staticRotKeys: s.staticRotKeys,
       cameraNoise: s.cameraNoise,
       targetObjectId: s.targetObjectId,
       pathSpace: s.pathSpace,
@@ -685,7 +787,8 @@ export function applyRigSnapshot(snapshot: RigSnapshot) {
   })
   useRigStore.setState({
     cameraPathId: targetPathId,
-    duration: snap.duration,
+    duration: clampShotDuration(snap.duration),
+    fps: normalizeShotFps(snap.fps),
     ease: readEase(snap),
     loop: snap.loop,
     lookAtMode: snap.lookAtMode,
@@ -701,11 +804,8 @@ export function applyRigSnapshot(snapshot: RigSnapshot) {
     ampPosKeys: snap.ampPosKeys ?? [],
     ampRotKeys: snap.ampRotKeys ?? [],
     freqKeys: snap.freqKeys ?? [],
-    targetKeys: snap.targetKeys ?? [],
+    ...axisKeysFromData(snap as unknown as Record<string, unknown>),
     lookOffset: readVec3(snap.lookOffset, [0, 0, 0]),
-    lookOffsetKeys: snap.lookOffsetKeys ?? [],
-    staticPosKeys: snap.staticPosKeys ?? [],
-    staticRotKeys: snap.staticRotKeys ?? [],
     cameraNoise: normalizeCameraNoise(snap.cameraNoise),
     targetObjectId: snap.targetObjectId ?? null,
     pathSpace: snap.pathSpace === 'object' ? 'object' : 'world',

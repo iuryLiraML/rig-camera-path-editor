@@ -5,6 +5,7 @@ import { useEditorStore, type SelectableId } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { openImportDialog, resetScene } from '../lib/sceneIO'
 import { cancelMeshJob } from '../lib/meshJobs'
+import { RemeshProgressBar } from './RemeshProgressBar'
 import { createProject, deleteProject, switchProject } from '../lib/projects'
 import { useProjectStore } from '../state/useProjectStore'
 import { useRigStore } from '../state/useRigStore'
@@ -75,6 +76,7 @@ function ObjectTreeItem({
   }, [confirming])
 
   return (
+    <div className="flex flex-col gap-0.5">
     <div
       className={`group flex w-full items-center gap-1 rounded-md pr-1 transition-colors ${
         selected ? 'bg-accent text-white' : 'text-ink hover:bg-panel-2'
@@ -136,6 +138,12 @@ function ObjectTreeItem({
           <TrashIcon size={12} />
         </button>
       )}
+    </div>
+    {remeshJob && (
+      <div className="px-2 pb-1">
+        <RemeshProgressBar progress={remeshJob.progress} />
+      </div>
+    )}
     </div>
   )
 }

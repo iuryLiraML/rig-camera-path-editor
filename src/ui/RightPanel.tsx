@@ -22,7 +22,6 @@ import {
   OBJECT_CHANNEL_LABELS,
   evalProgress,
   evalValue,
-  evalVec3,
   objectKeyChannel,
   type ValueKey,
 } from '../lib/keyframes'
@@ -50,10 +49,11 @@ import {
   Slider,
   XYZInput,
 } from './primitives'
-import { insertChannelKeyAt } from '../lib/timelineKey'
-import { writeFov, writeRoll, writeStaticPose } from '../lib/autoKey'
+import { writeFov, writeRoll } from '../lib/autoKey'
 import { SettingsIcon } from './icons'
 import { PoseKeyButton } from './PoseKeyButton'
+import { Vec3GroupFields } from './Vec3GroupFields'
+import { evalSeparatedVec3 } from '../lib/vec3Axes'
 
 function PanelButton({
   label,
@@ -758,7 +758,7 @@ function TrackObjectRow() {
             setTrackObjectId(null, scene)
             return
           }
-          rig.clearChannel('target')
+          rig.clearVec3Group('target')
           setTrackObjectId(id, scene)
         }}
         className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
@@ -791,9 +791,19 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
   const ampPosKeys = useRigStore((s) => s.ampPosKeys)
   const ampRotKeys = useRigStore((s) => s.ampRotKeys)
   const freqKeys = useRigStore((s) => s.freqKeys)
-  const targetKeys = useRigStore((s) => s.targetKeys)
   const lookOffset = useRigStore((s) => s.lookOffset)
-  const lookOffsetKeys = useRigStore((s) => s.lookOffsetKeys)
+  const lookOffsetXKeys = useRigStore((s) => s.lookOffsetXKeys)
+  const lookOffsetYKeys = useRigStore((s) => s.lookOffsetYKeys)
+  const lookOffsetZKeys = useRigStore((s) => s.lookOffsetZKeys)
+  const targetXKeys = useRigStore((s) => s.targetXKeys)
+  const targetYKeys = useRigStore((s) => s.targetYKeys)
+  const targetZKeys = useRigStore((s) => s.targetZKeys)
+  const staticPosXKeys = useRigStore((s) => s.staticPosXKeys)
+  const staticPosYKeys = useRigStore((s) => s.staticPosYKeys)
+  const staticPosZKeys = useRigStore((s) => s.staticPosZKeys)
+  const staticRotXKeys = useRigStore((s) => s.staticRotXKeys)
+  const staticRotYKeys = useRigStore((s) => s.staticRotYKeys)
+  const staticRotZKeys = useRigStore((s) => s.staticRotZKeys)
   const cameraNoise = useRigStore((s) => s.cameraNoise)
   const [fxMore, setFxMore] = useState(false)
   const [inspectorMore, setInspectorMore] = useState(false)
@@ -803,8 +813,6 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
   const cameraCount = useCameraOptionsStore((s) => s.options.length)
   const cameraKind = useRigStore((s) => s.cameraKind)
   const staticPose = useRigStore((s) => s.staticPose)
-  const staticPosKeys = useRigStore((s) => s.staticPosKeys)
-  const staticRotKeys = useRigStore((s) => s.staticRotKeys)
   const tracking = Boolean(targetObjectId && objects.some((object) => object.id === targetObjectId))
   const rig = useRigStore.getState()
   const isStatic = cameraKind === 'static'
@@ -819,10 +827,31 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
   const ampPosNow = evalValue(t, ampPosKeys, cameraNoise.ampPos, ease)
   const ampRotNow = evalValue(t, ampRotKeys, cameraNoise.ampRot, ease)
   const freqNow = evalValue(t, freqKeys, cameraNoise.freq, ease)
-  const targetNow = evalVec3(t, targetKeys, target, ease)
-  const lookOffsetNow = evalVec3(t, lookOffsetKeys, lookOffset, ease)
-  const staticPosNow = evalVec3(t, staticPosKeys, staticPose.position, ease)
-  const staticRotNow = evalVec3(t, staticRotKeys, staticPose.rotation, ease)
+  const targetNow = evalSeparatedVec3(t, targetXKeys, targetYKeys, targetZKeys, target, ease)
+  const lookOffsetNow = evalSeparatedVec3(
+    t,
+    lookOffsetXKeys,
+    lookOffsetYKeys,
+    lookOffsetZKeys,
+    lookOffset,
+    ease,
+  )
+  const staticPosNow = evalSeparatedVec3(
+    t,
+    staticPosXKeys,
+    staticPosYKeys,
+    staticPosZKeys,
+    staticPose.position,
+    ease,
+  )
+  const staticRotNow = evalSeparatedVec3(
+    t,
+    staticRotXKeys,
+    staticRotYKeys,
+    staticRotZKeys,
+    staticPose.rotation,
+    ease,
+  )
 
   const currentProgress = evalProgress(t, progressKeys, ease)
   const sortedKeys = [...progressKeys].sort((a, b) => a.time - b.time)
@@ -833,97 +862,123 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
     <>
       {showAdjust && (
         <>
-      <Section title="Placement">
+      <Section title="Camera">
         <Row label="Camera">
-          <Segmented
-            options={[
-              { value: 'path', label: 'On path' },
-              { value: 'static', label: 'Free' },
-            ]}
-            value={cameraKind}
-            onChange={(kind) => {
-              if (kind === 'static') switchActiveCameraToStatic()
-              else switchActiveCameraToPath()
-            }}
-          />
+          <div
+            className="min-w-0 flex-1"
+            title="Click the camera for the move gizmo (W move, E rotate). Look through, then WASD to fly."
+          >
+            <Segmented
+              options={[
+                { value: 'path', label: 'On path' },
+                { value: 'static', label: 'Free' },
+              ]}
+              value={cameraKind}
+              onChange={(kind) => {
+                if (kind === 'static') switchActiveCameraToStatic()
+                else switchActiveCameraToPath()
+              }}
+            />
+          </div>
         </Row>
-        {isStatic && (
+        {!isStatic && (
           <>
-            <p className="text-[10px] leading-relaxed text-ink-dim">
-              Click the camera to get the move gizmo (W move, E rotate). The
-              floor pad trucks, the diamond aims. Look through, then WASD to fly.
-            </p>
-            <Row label="Position">
-              <div className="flex items-center gap-2">
-                <XYZInput
-                  value={staticPosNow}
-                  keyed={hasKeyAtTime(staticPosKeys, t)}
-                  onFocusChange={(on) =>
-                    useEditorStore.getState().setKeyableFocus(on ? 'staticPos' : null)
-                  }
-                  onChange={(axis, v) => {
-                    const next = [...staticPosNow] as Vec3
-                    next[axis] = v
-                    writeStaticPose({ position: next })
-                  }}
-                />
-                <KeyButton
-                  active={staticPosKeys.length > 0}
-                  onKey={hasKeyAtTime(staticPosKeys, t)}
-                  onClick={() => {
-                    useEditorStore.getState().setKeyableFocus('staticPos')
-                    insertChannelKeyAt('staticPos', useRigStore.getState().t)
-                  }}
-                />
-              </div>
+            <PanelButton label="Path, presets & shape" onClick={openCameraPath} />
+            <Row label="On path">
+              <Slider
+                value={currentProgress}
+                keyed={hasKeyAtTime(progressKeys, t)}
+                onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'progress' : null)}
+                onChange={(p) => {
+                  const state = useRigStore.getState()
+                  state.setPlaying(false)
+                  state.upsertProgressKey(state.t, p)
+                }}
+                format={pct}
+              />
             </Row>
+            <ChannelKeys
+              channel="progress"
+              keys={sortedKeys}
+              duration={duration}
+              format={(k) =>
+                `${Math.round((sortedKeys.find((s) => s.id === k.id)?.progress ?? 0) * 100)}%`
+              }
+            />
+            {progressKeys.length > 0 && (
+              <PanelButton label="Clear keyframes" tone="danger" onClick={rig.clearProgressKeys} />
+            )}
           </>
         )}
       </Section>
-      <Section title="Animation">
-        <Row label="Duration">
-          <Slider value={duration} onChange={rig.setDuration} min={1} max={30} step={0.5} format={secs} />
-        </Row>
-        <Row label="Curve">
-          <EaseSelect value={ease} onChange={rig.setEase} />
-        </Row>
-      </Section>
-      {!isStatic && (
-      <Section title="Keyframes">
-        <PanelButton
-          label="Path, presets & shape"
-          onClick={openCameraPath}
-        />
-        <div className="text-[10px] leading-relaxed text-ink-dim">
-          Move the playhead, then drag the slider to pin where on the path the camera
-          should be at that moment.
-        </div>
-        <Row label="On path">
-          <Slider
-            value={currentProgress}
-            keyed={hasKeyAtTime(progressKeys, t)}
-            onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'progress' : null)}
-            onChange={(p) => {
-              const state = useRigStore.getState()
-              state.setPlaying(false)
-              state.upsertProgressKey(state.t, p)
-            }}
-            format={pct}
+      {isStatic && (
+        <Section title="Transform">
+          <Vec3GroupFields group="staticPos" values={staticPosNow} />
+          {lookAtMode === 'free' && (
+            <Vec3GroupFields group="staticRot" values={staticRotNow} step={1} />
+          )}
+        </Section>
+      )}
+      <Section title="Look">
+        <Row label="Mode">
+          <Segmented
+            options={
+              isStatic
+                ? [
+                    { value: 'free', label: 'Free' },
+                    { value: 'target', label: 'Target' },
+                  ]
+                : [
+                    { value: 'target', label: 'Target' },
+                    { value: 'path-tangent', label: 'Motion' },
+                  ]
+            }
+            value={lookAtMode}
+            onChange={(v) => rig.setLookAtMode(v)}
           />
         </Row>
-        <ChannelKeys
-          channel="progress"
-          keys={sortedKeys}
-          duration={duration}
-          format={(k) =>
-            `${Math.round((sortedKeys.find((s) => s.id === k.id)?.progress ?? 0) * 100)}%`
-          }
-        />
-        {progressKeys.length > 0 && (
-          <PanelButton label="Clear keyframes" tone="danger" onClick={rig.clearProgressKeys} />
+        {lookAtMode !== 'free' && <TrackObjectRow />}
+        {!isStatic && (
+          <>
+            <Row label="Path">
+              <Segmented
+                options={[
+                  { value: 'world', label: 'World' },
+                  { value: 'object', label: 'Object' },
+                ]}
+                value={pathSpace}
+                onChange={(space) =>
+                  setCameraPathSpace(space, {
+                    objects: useSceneStore.getState().objects,
+                    paths: usePathStore.getState().paths,
+                  })
+                }
+              />
+            </Row>
+            {pathSpace === 'object' && tracking && (
+              <p className="text-[10px] leading-relaxed text-ink-dim">
+                Path rides with the tracked object — chase, over-shoulder, hood-mount.
+              </p>
+            )}
+            {pathSpace === 'world' && !tracking && (
+              <p className="text-[10px] leading-relaxed text-ink-dim">
+                Track an object, then set Path to Object to ride with it.
+              </p>
+            )}
+          </>
+        )}
+        {lookAtMode === 'target' && tracking && (
+          <>
+            <p className="text-[10px] leading-relaxed text-ink-dim">
+              Target follows the object plus a local offset — head, label, over-shoulder.
+            </p>
+            <Vec3GroupFields group="lookOffset" values={lookOffsetNow} />
+          </>
+        )}
+        {lookAtMode === 'target' && !tracking && (
+          <Vec3GroupFields group="target" values={targetNow} />
         )}
       </Section>
-      )}
       <Section title="Lens">
         <Row label="FOV">
           <div className="flex items-center gap-2">
@@ -984,162 +1039,10 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
           format={(k) => deg(rollKeys.find((x) => x.id === k.id)?.value ?? 0)}
         />
       </Section>
-      <Section title="Look At">
-        <Row label="Mode">
-          <Segmented
-            options={
-              isStatic
-                ? [
-                    { value: 'free', label: 'Free' },
-                    { value: 'target', label: 'Target' },
-                  ]
-                : [
-                    { value: 'target', label: 'Target' },
-                    { value: 'path-tangent', label: 'Motion' },
-                  ]
-            }
-            value={lookAtMode}
-            onChange={(v) => rig.setLookAtMode(v)}
-          />
+      <Section title="Timing">
+        <Row label="Curve">
+          <EaseSelect value={ease} onChange={rig.setEase} />
         </Row>
-        {isStatic && lookAtMode === 'free' && (
-          <Row label="Rotation">
-            <div className="flex items-center gap-2">
-              <XYZInput
-                value={staticRotNow}
-                step={1}
-                keyed={hasKeyAtTime(staticRotKeys, t)}
-                onFocusChange={(on) =>
-                  useEditorStore.getState().setKeyableFocus(on ? 'staticRot' : null)
-                }
-                onChange={(axis, v) => {
-                  const next = [...staticRotNow] as Vec3
-                  next[axis] = v
-                  writeStaticPose({ rotation: next })
-                }}
-              />
-              <KeyButton
-                active={staticRotKeys.length > 0}
-                onKey={hasKeyAtTime(staticRotKeys, t)}
-                onClick={() => {
-                  useEditorStore.getState().setKeyableFocus('staticRot')
-                  insertChannelKeyAt('staticRot', useRigStore.getState().t)
-                }}
-              />
-            </div>
-          </Row>
-        )}
-        {lookAtMode !== 'free' && <TrackObjectRow />}
-        {!isStatic && (
-          <>
-            <Row label="Path">
-              <Segmented
-                options={[
-                  { value: 'world', label: 'World' },
-                  { value: 'object', label: 'Object' },
-                ]}
-                value={pathSpace}
-                onChange={(space) =>
-                  setCameraPathSpace(space, {
-                    objects: useSceneStore.getState().objects,
-                    paths: usePathStore.getState().paths,
-                  })
-                }
-              />
-            </Row>
-            {pathSpace === 'object' && tracking && (
-              <p className="text-[10px] leading-relaxed text-ink-dim">
-                Path rides with the tracked object — chase, over-shoulder, hood-mount.
-              </p>
-            )}
-            {pathSpace === 'world' && !tracking && (
-              <p className="text-[10px] leading-relaxed text-ink-dim">
-                Track an object, then set Path to Object to ride with it.
-              </p>
-            )}
-          </>
-        )}
-        {lookAtMode === 'target' && tracking && (
-          <>
-            <p className="text-[10px] leading-relaxed text-ink-dim">
-              Target follows the object plus a local offset — head, label, over-shoulder.
-            </p>
-            <Row label="Offset">
-              <div className="flex items-center gap-2">
-                <XYZInput
-                  value={lookOffsetNow}
-                  keyed={hasKeyAtTime(lookOffsetKeys, t)}
-                  onFocusChange={(on) =>
-                    useEditorStore.getState().setKeyableFocus(on ? 'lookOffset' : null)
-                  }
-                  onChange={(axis, v) => {
-                    const state = useRigStore.getState()
-                    const next = [...lookOffsetNow] as Vec3
-                    next[axis] = v
-                    if (state.lookOffsetKeys.length > 0) state.upsertLookOffsetKey(state.t, next)
-                    else state.setLookOffset(next)
-                  }}
-                />
-                <KeyButton
-                  active={lookOffsetKeys.length > 0}
-                  onKey={hasKeyAtTime(lookOffsetKeys, t)}
-                  onClick={() => {
-                    const state = useRigStore.getState()
-                    state.setPlaying(false)
-                    state.upsertLookOffsetKey(state.t, lookOffsetNow)
-                  }}
-                />
-              </div>
-            </Row>
-            <ChannelKeys
-              channel="lookOffset"
-              keys={lookOffsetKeys}
-              duration={duration}
-              format={(k) => {
-                const v = lookOffsetKeys.find((x) => x.id === k.id)?.value
-                return v ? v.map((n) => n.toFixed(1)).join(', ') : ''
-              }}
-            />
-          </>
-        )}
-        {lookAtMode === 'target' && !tracking && (
-          <>
-            <Row label="Target">
-              <div className="flex items-center gap-2">
-                <XYZInput
-                  value={targetNow}
-                  keyed={hasKeyAtTime(targetKeys, t)}
-                  onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'target' : null)}
-                  onChange={(axis, v) => {
-                    const state = useRigStore.getState()
-                    const next = [...targetNow] as Vec3
-                    next[axis] = v
-                    if (state.targetKeys.length > 0) state.upsertTargetKey(state.t, next)
-                    else state.setTarget(next)
-                  }}
-                />
-                <KeyButton
-                  active={targetKeys.length > 0}
-                  onKey={hasKeyAtTime(targetKeys, t)}
-                  onClick={() => {
-                    const state = useRigStore.getState()
-                    state.setPlaying(false)
-                    state.upsertTargetKey(state.t, targetNow)
-                  }}
-                />
-              </div>
-            </Row>
-            <ChannelKeys
-              channel="target"
-              keys={targetKeys}
-              duration={duration}
-              format={(k) => {
-                const v = targetKeys.find((x) => x.id === k.id)?.value
-                return v ? v.map((n) => n.toFixed(1)).join(', ') : ''
-              }}
-            />
-          </>
-        )}
       </Section>
         </>
       )}
@@ -1453,15 +1356,22 @@ function CameraFormatSection() {
 function TargetSections() {
   const target = useRigStore((s) => s.target)
   const lookOffset = useRigStore((s) => s.lookOffset)
-  const lookOffsetKeys = useRigStore((s) => s.lookOffsetKeys)
+  const lookOffsetXKeys = useRigStore((s) => s.lookOffsetXKeys)
+  const lookOffsetYKeys = useRigStore((s) => s.lookOffsetYKeys)
+  const lookOffsetZKeys = useRigStore((s) => s.lookOffsetZKeys)
   const t = useRigStore((s) => s.t)
   const ease = useRigStore((s) => s.ease)
-  const duration = useRigStore((s) => s.duration)
   const targetObjectId = useRigStore((s) => s.targetObjectId)
   const objects = useSceneStore((s) => s.objects)
   const tracking = Boolean(targetObjectId && objects.some((object) => object.id === targetObjectId))
-  const rig = useRigStore.getState()
-  const lookOffsetNow = evalVec3(t, lookOffsetKeys, lookOffset, ease)
+  const lookOffsetNow = evalSeparatedVec3(
+    t,
+    lookOffsetXKeys,
+    lookOffsetYKeys,
+    lookOffsetZKeys,
+    lookOffset,
+    ease,
+  )
   return (
     <Section title="Look-At Target">
       <TrackObjectRow />
@@ -1470,66 +1380,10 @@ function TargetSections() {
           <p className="text-[10px] leading-relaxed text-ink-dim">
             Target follows the object plus a local offset. Choose None to place a point again.
           </p>
-          <Row label="Offset">
-            <div className="flex items-center gap-2">
-              <XYZInput
-                value={lookOffsetNow}
-                keyed={hasKeyAtTime(lookOffsetKeys, t)}
-                onFocusChange={(on) =>
-                  useEditorStore.getState().setKeyableFocus(on ? 'lookOffset' : null)
-                }
-                onChange={(axis, v) => {
-                  const state = useRigStore.getState()
-                  const next = [...lookOffsetNow] as Vec3
-                  next[axis] = v
-                  if (state.lookOffsetKeys.length > 0) state.upsertLookOffsetKey(state.t, next)
-                  else state.setLookOffset(next)
-                }}
-              />
-              <KeyButton
-                active={lookOffsetKeys.length > 0}
-                onKey={hasKeyAtTime(lookOffsetKeys, t)}
-                onClick={() => {
-                  const state = useRigStore.getState()
-                  state.setPlaying(false)
-                  state.upsertLookOffsetKey(state.t, lookOffsetNow)
-                }}
-              />
-            </div>
-          </Row>
-          <ChannelKeys
-            channel="lookOffset"
-            keys={lookOffsetKeys}
-            duration={duration}
-            format={(k) => {
-              const v = lookOffsetKeys.find((x) => x.id === k.id)?.value
-              return v ? v.map((n) => n.toFixed(1)).join(', ') : ''
-            }}
-          />
+          <Vec3GroupFields group="lookOffset" values={lookOffsetNow} />
         </>
       ) : (
-        <>
-          <Row label="Height">
-            <Slider
-              value={target[1]}
-              onChange={(y) => rig.setTarget([target[0], y, target[2]])}
-              min={0}
-              max={8}
-              step={0.1}
-              format={meters}
-            />
-          </Row>
-          <Row label="Position">
-            <XYZInput
-              value={target}
-              onChange={(axis, v) => {
-                const next = [...target] as Vec3
-                next[axis] = v
-                rig.setTarget(next)
-              }}
-            />
-          </Row>
-        </>
+        <Vec3GroupFields group="target" values={target} />
       )}
     </Section>
   )

@@ -26,6 +26,7 @@ id_rsa*
 .vercel/
 .netlify/
 .claude/
+.cursor/
 .planning/
 
 # Logs & OS cruft

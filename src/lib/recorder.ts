@@ -11,8 +11,7 @@ import {
   sleepMs,
 } from './mp4Encode'
 import { renderBridge } from './renderBridge'
-
-const FPS = 30
+import { normalizeShotFps, shotFrameCount } from './timeView'
 
 /** output dimensions per aspect × resolution preset (all even, H.264-safe) */
 export function exportDimensions(
@@ -116,7 +115,8 @@ export async function encodePassVideos(): Promise<EncodedPass[] | null> {
 
   const level = avcCodecString(width, height)
   const duration = useRigStore.getState().duration
-  const totalFrames = Math.max(2, Math.round(duration * FPS))
+  const fps = normalizeShotFps(useRigStore.getState().fps)
+  const totalFrames = Math.max(2, shotFrameCount(duration, fps))
 
   let encodeError: unknown = null
   const files: EncodedPass[] = []
@@ -129,7 +129,7 @@ export async function encodePassVideos(): Promise<EncodedPass[] | null> {
 
       const muxer = new Muxer({
         target: new ArrayBufferTarget(),
-        video: { codec: 'avc', width, height, frameRate: FPS },
+        video: { codec: 'avc', width, height, frameRate: fps },
         fastStart: 'in-memory',
       })
       const encoder = new VideoEncoder({
@@ -143,7 +143,7 @@ export async function encodePassVideos(): Promise<EncodedPass[] | null> {
         width,
         height,
         bitrate: 10_000_000,
-        framerate: FPS,
+        framerate: fps,
       })
 
       try {
@@ -152,9 +152,9 @@ export async function encodePassVideos(): Promise<EncodedPass[] | null> {
           useRigStore.getState().setT(i / (totalFrames - 1))
           advance(performance.now())
           ctx.drawImage(canvas, 0, 0, width, height)
-          const timing = frameTimingUs(i, FPS)
+          const timing = frameTimingUs(i, fps)
           const frame = new VideoFrame(copy, timing)
-          encoder.encode(frame, { keyFrame: isKeyframe(i, FPS) })
+          encoder.encode(frame, { keyFrame: isKeyframe(i, fps) })
           frame.close()
 
           if (i % 3 === 0) {
@@ -196,7 +196,7 @@ export async function encodePassVideos(): Promise<EncodedPass[] | null> {
 
 /**
  * Exports the animation as MP4 (H.264) — one file per selected render pass
- * (clay/depth/outline/normals), all from the same deterministic 30 fps offline
+ * (clay/depth/outline/normals), all from the same deterministic shot-fps offline
  * render. Falls back to realtime WebM capture when WebCodecs is unavailable.
  */
 export async function exportVideo() {

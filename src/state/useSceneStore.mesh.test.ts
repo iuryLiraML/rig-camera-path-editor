@@ -34,7 +34,11 @@ describe('pending generate jobs', () => {
     const pending = useSceneStore.getState().pendingLifts
     expect(pending.map((lift) => lift.kind)).toEqual(['generate', 'remesh'])
     expect(pending[0]?.objectId).toBeUndefined()
+    expect(pending[0]?.progress).toBeNull()
     expect(pending[1]?.objectId).toBe('car-1')
+    expect(pending[1]?.progress).toBeNull()
+    useSceneStore.getState().setLiftProgress(remeshId, 0.4)
+    expect(useSceneStore.getState().pendingLifts[1]?.progress).toBe(0.4)
     useSceneStore.getState().endLift(generateId)
     useSceneStore.getState().endLift(remeshId)
     expect(useSceneStore.getState().pendingLifts).toEqual([])

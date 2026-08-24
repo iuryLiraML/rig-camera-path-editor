@@ -1,5 +1,6 @@
 import { useRef, type PointerEvent, type RefObject } from 'react'
 import { clampTimeView, timeToX, type TimeView } from '../../lib/timeView'
+import { TRACK_ADD_CLASS, TRACK_LABEL_CLASS } from './timelineShared'
 
 /** Full-shot overview bar. Drag the window to pan; click outside it to jump. */
 export function TimeNavigator({
@@ -14,7 +15,7 @@ export function TimeNavigator({
 
   return (
     <div className="flex h-3 shrink-0 items-center gap-2 pt-1">
-      <div className="w-44 shrink-0" />
+      <div className={TRACK_LABEL_CLASS} />
       <div
         ref={barRef}
         data-time-navigator
@@ -54,7 +55,7 @@ export function TimeNavigator({
           style={{ left: `${view.start * 100}%`, width: `${view.span * 100}%` }}
         />
       </div>
-      <div className="w-6 shrink-0" />
+      <div className={TRACK_ADD_CLASS} />
     </div>
   )
 }
@@ -76,7 +77,7 @@ export function TimelineRuler({
 }) {
   return (
     <div className="flex items-stretch gap-2">
-      <div className="w-44 shrink-0" />
+      <div className={TRACK_LABEL_CLASS} />
       <div className="relative min-w-0 flex-1 overflow-hidden">
         <div
           ref={rulerRef}
@@ -106,7 +107,7 @@ export function TimelineRuler({
           <div className="absolute bottom-0 left-0 right-0 h-px bg-line" />
         </div>
       </div>
-      <div className="w-6 shrink-0" />
+      <div className={TRACK_ADD_CLASS} />
     </div>
   )
 }

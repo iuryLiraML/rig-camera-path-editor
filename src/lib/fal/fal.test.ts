@@ -489,4 +489,17 @@ describe('remeshGlb', () => {
     expect(calls[0]?.input).toEqual({ mesh_url: 'https://source.glb', quad: false, bake: false })
     expect(calls[0]?.input).not.toHaveProperty('face_limit')
   })
+
+  it('asks Fal for runner logs so remesh can show real progress', async () => {
+    const optsSeen: Array<{ logs?: boolean } | undefined> = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (_modelId, _input, opts) => {
+        optsSeen.push(opts)
+        return { model_mesh: { url: 'https://retopo.glb' } }
+      },
+    })
+    await remeshGlb({ meshUrl: 'https://source.glb' })
+    expect(optsSeen[0]?.logs).toBe(true)
+  })
 })

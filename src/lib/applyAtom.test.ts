@@ -19,7 +19,6 @@ beforeEach(() => {
   useRigStore.setState({
     cameraPathId: CAMERA_PATH_ID,
     cameraKind: 'path',
-    targetKeys: [],
     fovKeys: [],
     progressKeys: [],
     roll: 0,
