@@ -83,6 +83,7 @@ export function CameraFly() {
   const pitchAcc = useRef(0)
   const speed = useRef(BASE_SPEED)
   const lastKeyed = useRef<number | null>(null)
+  const capturedPointer = useRef<number | null>(null)
   const flyRecording = useEditorStore((s) => s.flyRecording)
 
   useEffect(() => {
@@ -92,6 +93,16 @@ export function CameraFly() {
   useEffect(() => {
     const el = gl.domElement
 
+    const releaseCapture = () => {
+      if (capturedPointer.current === null) return
+      try {
+        el.releasePointerCapture(capturedPointer.current)
+      } catch {
+        /* already released */
+      }
+      capturedPointer.current = null
+    }
+
     const onContextMenu = (e: Event) => e.preventDefault()
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 && e.button !== 2) return
@@ -100,6 +111,7 @@ export function CameraFly() {
       pitchAcc.current = 0
       try {
         el.setPointerCapture(e.pointerId)
+        capturedPointer.current = e.pointerId
       } catch {
         /* synthetic pointer */
       }
@@ -112,14 +124,11 @@ export function CameraFly() {
     const onPointerUp = (e: PointerEvent) => {
       if (e.button !== 0 && e.button !== 2) return
       looking.current = false
-      try {
-        el.releasePointerCapture(e.pointerId)
-      } catch {
-        /* already released */
-      }
+      releaseCapture()
     }
     const onPointerCancel = () => {
       looking.current = false
+      releaseCapture()
     }
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
@@ -162,6 +171,7 @@ export function CameraFly() {
       window.removeEventListener('keyup', onKeyUp)
       looking.current = false
       keys.current.clear()
+      releaseCapture()
     }
   }, [gl])
 

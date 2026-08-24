@@ -47,6 +47,32 @@ export function sceneBounds(): THREE.Box3 | null {
   return any ? box : null
 }
 
+const BOUNDS_THROTTLE_FRAMES = 8
+let boundsCache: { box: THREE.Box3; atFrame: number; objectCount: number } | null = null
+
+export function invalidateSceneBoundsCache() {
+  boundsCache = null
+}
+
+/** sceneBounds() is O(objects) — throttle for depth/normals auto-range (every N frames). */
+export function sceneBoundsThrottled(frame: number): THREE.Box3 | null {
+  const objectCount = objectGroups.size
+  if (
+    boundsCache &&
+    boundsCache.objectCount === objectCount &&
+    frame - boundsCache.atFrame < BOUNDS_THROTTLE_FRAMES
+  ) {
+    return boundsCache.box
+  }
+  const fresh = sceneBounds()
+  if (!fresh) {
+    boundsCache = null
+    return null
+  }
+  boundsCache = { box: fresh, atFrame: frame, objectCount }
+  return fresh
+}
+
 function ObjectGizmo({
   groupRef,
   onChange,

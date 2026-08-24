@@ -35,6 +35,20 @@ describe('workspaceMode', () => {
     expect(useEditorStore.getState().cameraPanel).toBe('closed')
   })
 
+  it('exits look-through when leaving Compose', () => {
+    useEditorStore.setState({
+      workspaceMode: 'compose',
+      cameraView: true,
+      flyRecording: true,
+      lookThroughLivePose: true,
+    })
+    useEditorStore.getState().setWorkspaceMode('build')
+    const editor = useEditorStore.getState()
+    expect(editor.cameraView).toBe(false)
+    expect(editor.flyRecording).toBe(false)
+    expect(editor.lookThroughLivePose).toBe(false)
+  })
+
   it('keeps the Transform panel when moving Build → Compose', () => {
     useEditorStore.setState({
       workspaceMode: 'build',

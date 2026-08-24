@@ -69,11 +69,21 @@ export function LookThroughRollWheel() {
             const delta = pointerDeg(e.currentTarget, e.clientX, e.clientY) - start.originAngle
             writeRoll(start.originRoll + delta * (e.shiftKey ? FINE : 1))
           }}
-          onPointerUp={() => {
+          onPointerUp={(e) => {
             drag.current = null
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            } catch {
+              /* already released */
+            }
           }}
-          onPointerCancel={() => {
+          onPointerCancel={(e) => {
             drag.current = null
+            try {
+              e.currentTarget.releasePointerCapture(e.pointerId)
+            } catch {
+              /* already released */
+            }
           }}
           onDoubleClick={() => writeRoll(0)}
           onKeyDown={(e) => {

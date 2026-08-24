@@ -307,6 +307,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   setWorkspaceMode: (workspaceMode) =>
     set((s) => ({
       workspaceMode,
+      ...(workspaceMode !== 'compose' && s.cameraView
+        ? { cameraView: false, flyRecording: false, lookThroughLivePose: false }
+        : {}),
       tool:
         workspaceMode === 'visualize'
           ? 'select'

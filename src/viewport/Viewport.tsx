@@ -193,7 +193,7 @@ export function Viewport() {
       <directionalLight
         position={[4, 7, 4]}
         intensity={lightIntensity}
-        castShadow
+        castShadow={!tech}
         shadow-mapSize={[2048, 2048]}
         shadow-camera-left={-6}
         shadow-camera-right={6}
@@ -218,11 +218,13 @@ export function Viewport() {
       <CameraPreview />
       <PaneCompositor />
 
-      {/* invisible shadow catcher */}
-      <mesh rotation-x={-Math.PI / 2} receiveShadow raycast={ignoreRaycast}>
-        <planeGeometry args={[80, 80]} />
-        <shadowMaterial opacity={0.22} />
-      </mesh>
+      {/* invisible shadow catcher — clay only; tech modes use override materials */}
+      {!tech && (
+        <mesh rotation-x={-Math.PI / 2} receiveShadow raycast={ignoreRaycast}>
+          <planeGeometry args={[80, 80]} />
+          <shadowMaterial opacity={0.22} />
+        </mesh>
+      )}
 
       {showGrid && !cinema && !tech && <EditorGrid />}
 

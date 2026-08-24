@@ -1,9 +1,9 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { applyDepthUniforms, fitDepthRange, resolveDepthRange } from '../lib/depthRange'
 import { useEditorStore, type ViewMode } from '../state/useEditorStore'
-import { sceneBounds } from './SceneObjects'
+import { invalidateSceneBoundsCache, sceneBoundsThrottled } from './SceneObjects'
 
 export const isTechMode = (mode: ViewMode) => mode !== 'clay'
 
@@ -245,26 +245,33 @@ const boundsSize = new THREE.Vector3()
 export function ViewModeController() {
   const scene = useThree((s) => s.scene)
   const viewMode = useEditorStore((s) => s.viewMode)
+  const frameRef = useRef(0)
 
   useEffect(() => {
     scene.overrideMaterial =
       viewMode === 'depth' ? depthMaterial : viewMode === 'normals' ? normalsMaterial : null
+    invalidateSceneBoundsCache()
     return () => {
       scene.overrideMaterial = null
+      invalidateSceneBoundsCache()
     }
   }, [scene, viewMode])
 
   useFrame(({ camera }) => {
     const editor = useEditorStore.getState()
     if (editor.viewMode === 'clay') return
+    frameRef.current += 1
+
     let fitted: { near: number; far: number } | null = null
-    const box = sceneBounds()
-    if (box) {
-      box.getCenter(boundsCenter)
-      box.getSize(boundsSize)
-      const radius = Math.max(boundsSize.length() / 2, 1)
-      const dist = camera.position.distanceTo(boundsCenter)
-      fitted = fitDepthRange(dist, radius)
+    if (editor.depthRangeAuto) {
+      const box = sceneBoundsThrottled(frameRef.current)
+      if (box) {
+        box.getCenter(boundsCenter)
+        box.getSize(boundsSize)
+        const radius = Math.max(boundsSize.length() / 2, 1)
+        const dist = camera.position.distanceTo(boundsCenter)
+        fitted = fitDepthRange(dist, radius)
+      }
     }
     applyDepthUniforms(
       depthUniforms,
