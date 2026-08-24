@@ -21,12 +21,11 @@ export function ObjectBar() {
   const panel = useEditorStore((s) => s.objectBarPanel)
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const showOutliner = useEditorStore((s) => s.showOutliner)
-  const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
   const insets = useViewportInsets()
   const objectId = selection?.startsWith('obj:') ? selection.slice(4) : null
   const object = useSceneStore((s) => (objectId ? s.objects.find((o) => o.id === objectId) : null))
 
-  if (!objectId || !object || showAddDrawer) return null
+  if (!objectId || !object) return null
 
   const setPanel = (next: ObjectBarPanel) => {
     useEditorStore.getState().setObjectBarPanel(panel === next ? 'none' : next)

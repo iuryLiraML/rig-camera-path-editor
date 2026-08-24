@@ -5,8 +5,21 @@ import { cameraReady } from '../state/cameraPathLink'
 import { useLayoutStore } from '../state/useLayoutStore'
 import { editorOnlySet } from '../lib/editorOnly'
 import { cinemaCameraRef } from './rig/CinemaCamera'
-import { editorCameraRef } from './EditorCamera'
 import { renderOutline, renderSceneRegion } from './RenderPasses'
+import { clampPipRect, viewportInsets } from '../ui/viewportInsets'
+
+function placedPip(size: { width: number; height: number }) {
+  const editor = useEditorStore.getState()
+  const insets = viewportInsets(
+    editor.workspaceMode,
+    size.width,
+    !editor.playMode && editor.workspaceMode === 'compose',
+    size.height,
+    editor.timelineHeight,
+    { composeDock: editor.composeDock, showOutliner: editor.showOutliner },
+  )
+  return clampPipRect(editor.pipRect, insets, size.width, size.height)
+}
 
 /**
  * Renders the cinema-camera picture-in-picture into a scissored corner of the
@@ -22,7 +35,7 @@ export function CameraPreview() {
     const editor = useEditorStore.getState()
     const outline = editor.viewMode === 'outline'
 
-    if (editor.playMode) {
+    if (editor.playMode || editor.workspaceMode === 'visualize') {
       if (outline) renderOutline(gl, scene as THREE.Scene, camera, 0, 0, size.width, size.height)
       else gl.render(scene, camera)
       return
@@ -36,37 +49,20 @@ export function CameraPreview() {
       renderOutline(gl, scene as THREE.Scene, camera, 0, 0, size.width, size.height)
     }
 
-    // PiP is Compose chrome. Build/Visualize keep a full-bleed editor view.
+    // PiP is Compose chrome. Visualize owns the full-frame cinema render above.
     if (editor.workspaceMode !== 'compose') return
 
     const cam = cinemaCameraRef.current
     if (editor.cameraView) {
       // the corner gizmo (whose Hud pass draws the main frame in edit mode) is
-      // unmounted while looking through, so own the full-frame render here
+      // unmounted while looking through, so own the full-frame render here.
+      // No editor PiP — it sat on the take.
       if (!outline) gl.render(scene, camera)
-      // keep the PiP, but show the editor so the user still has a scene view
-      // (the cinema body would be hidden in the main viewport)
-      const editorCam = editorCameraRef.current
-      if (!editor.showPreview || !editorCam) return
-      const pip = editor.pipRect
-      const pw = Math.round(size.width * pip.fraction)
-      const ph = Math.round(size.height * pip.fraction)
-      const x = size.width - pw - pip.right
-      const y = pip.bottom
-      if (pw < 40 || ph < 40 || x < 0 || y + ph > size.height) return
-      const aspect = pw / ph
-      const persp = editorCam as THREE.PerspectiveCamera
-      if ('aspect' in persp && Math.abs(persp.aspect - aspect) > 1e-4) {
-        persp.aspect = aspect
-        persp.updateProjectionMatrix()
-      }
-      renderSceneRegion(gl, scene as THREE.Scene, editorCam, x, y, pw, ph, outline)
-      gl.setViewport(0, 0, size.width, size.height)
       return
     }
     if (!editor.showPreview || !cam || !cameraReady()) return
 
-    const pip = editor.pipRect
+    const pip = placedPip(size)
     const pw = Math.round(size.width * pip.fraction)
     const ph = Math.round(size.height * pip.fraction)
     const x = size.width - pw - pip.right

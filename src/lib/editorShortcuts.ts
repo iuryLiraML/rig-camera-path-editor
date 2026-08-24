@@ -4,6 +4,7 @@ import { usePathStore } from '../state/usePathStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { flushActiveProject } from './projects'
 import { isObjectKeyFocus } from './keyAtPlayhead'
+import { deletePoseKeyframeAtPlayhead } from './poseKeyframe'
 import { deleteKeyframeAtPlayhead, deleteSelectedTimelineKey } from './timelineKey'
 
 export function isTextEditing(): boolean {
@@ -62,6 +63,9 @@ export function applyDeleteShortcut(
   }
 
   if (editor.selection === 'cinema-camera' && !editor.playMode) {
+    if (editor.cameraView) {
+      return deletePoseKeyframeAtPlayhead()
+    }
     const cameras = useCameraOptionsStore.getState()
     if (cameras.options.length > 1) {
       cameras.removeOption(cameras.activeOptionId)
@@ -85,9 +89,10 @@ export function applyDeleteShortcut(
 export const SHORTCUT_ROWS: { keys: string; action: string }[] = [
   { keys: 'I', action: 'Key the focused property at the playhead' },
   { keys: 'Delete', action: 'Remove that key (then the object if none)' },
+  { keys: 'WASD / arrows', action: 'Fly the cinema camera (look-through)' },
   { keys: 'Space', action: 'Play / pause' },
   { keys: 'W E R', action: 'Move / rotate / scale (opens Transform)' },
-  { keys: 'T', action: 'Open Timeline (Compose)' },
+  { keys: 'T', action: 'Focus Timeline (Compose)' },
   { keys: 'Shift+T', action: 'Toggle Graph Editor' },
   { keys: '?', action: 'This list' },
   { keys: 'Ctrl/Cmd+S', action: 'Save now (also keep autosave)' },

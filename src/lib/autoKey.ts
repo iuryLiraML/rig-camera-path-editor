@@ -1,4 +1,4 @@
-import { evalVec3, type ObjectChannel } from './keyframes'
+import { evalValue, evalVec3, type ObjectChannel } from './keyframes'
 import { objectChannelIsAnimated } from './keyAtPlayhead'
 import { requestPersistFlush } from './persistFlush'
 import { useRigStore, type StaticPose } from '../state/useRigStore'
@@ -54,4 +54,51 @@ export function writeStaticPose(patch: Partial<StaticPose>) {
     wrote = true
   }
   if (wrote) requestPersistFlush()
+}
+
+function clampFov(fov: number) {
+  return Math.min(140, Math.max(5, fov))
+}
+
+/** Rest FOV always updates; a key writes only when that channel already has a track. */
+export function writeFov(fov: number) {
+  const next = clampFov(fov)
+  const rig = useRigStore.getState()
+  rig.setFov(next)
+  if (rig.fovKeys.length > 0) {
+    rig.upsertChannelKey('fov', rig.t, next)
+    requestPersistFlush()
+  }
+}
+
+/** Rest roll always updates; a key writes only when that channel already has a track. */
+export function writeRoll(roll: number) {
+  const rig = useRigStore.getState()
+  rig.setRoll(roll)
+  if (rig.rollKeys.length > 0) {
+    rig.upsertChannelKey('roll', rig.t, roll)
+    requestPersistFlush()
+  }
+}
+
+/** Scroll/nudge FOV from the evaluated value at the playhead, not the rest pose. */
+export function nudgeFov(delta: number) {
+  const rig = useRigStore.getState()
+  writeFov(evalValue(rig.t, rig.fovKeys, rig.fov, rig.ease) + delta)
+}
+
+/**
+ * Look-through is "recording" when a camera channel already has a track —
+ * later viewport/panel edits key that playhead, Cinema 4D-style.
+ */
+export function cinemaAutoKeyArmed(rig = useRigStore.getState()): boolean {
+  return (
+    rig.fovKeys.length > 0 ||
+    rig.rollKeys.length > 0 ||
+    rig.progressKeys.length > 0 ||
+    rig.staticPosKeys.length > 0 ||
+    rig.staticRotKeys.length > 0 ||
+    rig.targetKeys.length > 0 ||
+    rig.lookOffsetKeys.length > 0
+  )
 }

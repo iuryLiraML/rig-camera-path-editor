@@ -10,7 +10,7 @@ import { Toolbar } from '../ui/Toolbar'
 import { LeftPanel } from '../ui/LeftPanel'
 import { DirectorDock } from '../ui/DirectorDock'
 import { ViewportFooter } from '../ui/ViewportFooter'
-import { Timeline } from '../ui/Timeline'
+import { ComposeDock } from '../ui/composeDock/ComposeDock'
 import { OnboardingCard } from '../ui/OnboardingCard'
 import { CameraPreviewFrame } from '../ui/CameraPreviewFrame'
 import { CameraRigHud } from '../ui/CameraRigHud'
@@ -24,6 +24,7 @@ import { syncActiveProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
 import { redo, undo, historyIsDirty } from '../lib/history'
 import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
+import { insertPoseKeyframeAtPlayhead } from '../lib/poseKeyframe'
 import {
   applyDeleteShortcut,
   applyHelpShortcut,
@@ -45,8 +46,8 @@ import { NavLegend } from '../ui/NavLegend'
 import { ImportAssetsModal } from '../ui/ImportAssetsModal'
 import { CameraBar } from '../ui/CameraBar'
 import { CameraAdjustPanel } from '../ui/CameraAdjustPanel'
-import { SequenceStrip } from '../ui/SequenceStrip'
 import { ShortcutsOverlay } from '../ui/ShortcutsOverlay'
+import { VisualizeBar } from '../ui/visualize/VisualizeBar'
 
 function useShortcuts() {
   useEffect(() => {
@@ -65,13 +66,14 @@ function useShortcuts() {
       if (!isKeyableField() && (applyHelpShortcut(e) || applyTimelineShortcut(e))) return
       if (isKeyableField() && !isKeyableShortcut(e.key)) return
 
-      // looking through a free camera: WASD/QE fly — don't steal them for gizmos
+      // looking through: WASD / arrows / QE fly — don't steal them for gizmos
       if (
         editor.cameraView &&
-        rig.cameraKind === 'static' &&
         !e.ctrlKey &&
         !e.metaKey &&
-        ['w', 'a', 's', 'd', 'q', 'e'].includes(e.key.toLowerCase())
+        ['w', 'a', 's', 'd', 'q', 'e', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright'].includes(
+          e.key.toLowerCase(),
+        )
       ) {
         return
       }
@@ -134,7 +136,11 @@ function useShortcuts() {
         case 'i':
         case 'I':
           e.preventDefault()
-          insertKeyframeAtPlayhead()
+          if (editor.cameraView && editor.workspaceMode !== 'visualize') {
+            insertPoseKeyframeAtPlayhead()
+          } else {
+            insertKeyframeAtPlayhead()
+          }
           break
         case ' ':
           e.preventDefault()
@@ -163,15 +169,13 @@ function useShortcuts() {
             rig.setPlaying(false)
           } else if (editor.showImportModal) {
             editor.setShowImportModal(false)
-          } else if (editor.showAddDrawer) {
-            editor.setShowAddDrawer(false)
           } else if (editor.objectBarPanel !== 'none') {
             editor.setObjectBarPanel('none')
           } else if (editor.cameraPanel !== 'closed') {
             editor.setCameraPanel('closed')
           } else if (editor.directorExpanded) {
             editor.setDirectorExpanded(false)
-          } else if (editor.cameraView) {
+          } else if (editor.cameraView && editor.workspaceMode !== 'visualize') {
             editor.setCameraView(false)
           } else if (editor.tool === 'pen') {
             editor.setTool('select')
@@ -271,16 +275,14 @@ function EditorWorkspace() {
       )}
       {chrome.outliner && <LeftPanel />}
       {chrome.directorDock && <DirectorDock />}
-      <KeepMounted show={chrome.timeline}>
-        <Timeline />
-      </KeepMounted>
-      <KeepMounted show={chrome.sequence}>
-        <SequenceStrip />
+      <KeepMounted show={chrome.timeline || chrome.sequence}>
+        <ComposeDock />
       </KeepMounted>
       <KeepMounted show={chrome.footer}>
         <ViewportFooter center={chrome.cameraBar ? <CameraBar embedded /> : null} />
       </KeepMounted>
       {chrome.navLegend && <NavLegend />}
+      {chrome.visualizeRail && <VisualizeBar />}
       {chrome.onboarding && <OnboardingCard />}
       <KeepMounted show={chrome.pip}>
         <CameraPreviewFrame />

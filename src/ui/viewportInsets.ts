@@ -13,9 +13,14 @@ import {
 /** gutter used between every docked panel and the window edges */
 export const GUTTER = 12
 
-/** height of the floating footer row of pills (view modes, views, projection, split) */
+/** height of the floating footer row of pills (look, shading, views, layout) */
 export const FOOTER_ROW_HEIGHT = 32
-/** collapsed Director composer — ObjectBar / PiP sit above this */
+/**
+ * Half-size of the drei `GizmoViewport` (scale 22). `GizmoHelper` margin is
+ * the widget *centre*, not its corner — park it above the footer row, not on it.
+ */
+export const AXIS_GIZMO_RADIUS = 40
+/** @deprecated Director is a full-height rail; kept for older inset math. */
 export const DIRECTOR_COMPOSER_HEIGHT = 100
 /** floating Director column on the right of the free area */
 export const DIRECTOR_DOCK_WIDTH = 360
@@ -31,6 +36,10 @@ export const TIMELINE_HEIGHT_DEFAULT = 240
 export const TIMELINE_HEIGHT_MAX = 480
 export const TIMELINE_MIN = 108
 export const SEQUENCE_HEIGHT = 148
+/** Review bar in Visualize — shots / cameras / depth / export */
+export const VISUALIZE_DOCK_HEIGHT = 148
+/** Persistent Add-an-Object tray in Build */
+export const ADD_DRAWER_HEIGHT = 280
 export const MIN_FREE_WIDTH = 260
 export const MIN_FREE_HEIGHT = 140
 
@@ -44,9 +53,24 @@ export function toolbarSlot(insets: ViewportInsets, windowWidth: number): { righ
 }
 
 /**
- * CSS `right` for the Director column. Always hugs the window edge; Compose
- * reserves `rightWidth` so the toolbar and docks sit to its left instead of
- * painting on top of the chat.
+ * Axis gizmo sits on `contentBottom` (above the Compose footer, or the
+ * window gutter in Build). Look-through / help chips no longer take a band
+ * under it — those live on the footer or to the right of the widget.
+ */
+export function bottomLeftStack(insets: ViewportInsets) {
+  const gizmoBottom = insets.contentBottom
+  return {
+    gizmoMargin: [insets.left + AXIS_GIZMO_RADIUS, gizmoBottom + AXIS_GIZMO_RADIUS] as [
+      number,
+      number,
+    ],
+  }
+}
+
+/**
+ * CSS `right` for the Director column. Always hugs the window edge. Every
+ * workspace reserves `rightWidth` so the toolbar and docks sit to its left
+ * instead of painting on top of the chat.
  */
 export function directorDockSlot(insets: ViewportInsets): { right: number; width: number } {
   const width =
@@ -72,6 +96,30 @@ export function chromeBand(
 
 const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n))
 
+/**
+ * Keep the camera PiP inside the free viewport. Saved `pipRect` values (and the
+ * store default `right: 16`) otherwise land under the Director rail or on the
+ * timeline after a project hydrate.
+ */
+export function clampPipRect(
+  r: { right: number; bottom: number; fraction: number },
+  insets: ViewportInsets,
+  vw: number,
+  vh: number,
+) {
+  const w = r.fraction * vw
+  const h = r.fraction * vh
+  const dock = directorDockSlot(insets)
+  const minRight = dock.right + dock.width + GUTTER
+  const maxRight = Math.max(minRight, vw - insets.left - w)
+  const maxBottom = Math.max(insets.contentBottom, vh - GUTTER - h)
+  return {
+    ...r,
+    right: clamp(r.right, minRight, maxRight),
+    bottom: clamp(r.bottom, insets.contentBottom, maxBottom),
+  }
+}
+
 export interface ChromeSizeInput {
   mode: WorkspaceMode
   composeDock: ComposeDock
@@ -93,18 +141,17 @@ export function chromeSizes(
   switch (input.mode) {
     case 'build':
       leftWidth = input.showOutliner ? LEFT_PANEL_MAX : 0
+      rightWidth = DIRECTOR_DOCK_WIDTH
       break
     case 'compose':
       leftWidth = input.showOutliner ? LEFT_PANEL_MAX : 0
       rightWidth = DIRECTOR_DOCK_WIDTH
       if (input.timelineVisible) {
-        timelineHeight =
-          input.composeDock === 'sequence'
-            ? SEQUENCE_HEIGHT
-            : clamp(requestedHeight, TIMELINE_MIN, TIMELINE_HEIGHT_MAX)
+        timelineHeight = clamp(requestedHeight, TIMELINE_MIN, TIMELINE_HEIGHT_MAX)
       }
       break
     case 'visualize':
+      rightWidth = DIRECTOR_DOCK_WIDTH
       break
     default: {
       const _never: never = input.mode
@@ -134,7 +181,7 @@ export function chromeSizes(
     const freeH = windowHeight - verticalChrome
     if (freeH < MIN_FREE_HEIGHT) {
       timelineHeight = Math.max(
-        input.composeDock === 'sequence' ? SEQUENCE_HEIGHT : TIMELINE_MIN,
+        TIMELINE_MIN,
         timelineHeight - (MIN_FREE_HEIGHT - freeH),
       )
     }
@@ -161,13 +208,13 @@ export interface ViewportInsets {
   centre: number
   /**
    * First free y from the bottom for floating content that must clear the
-   * timeline dock and the footer pill row (Compose) or the floating composer
-   * (Build / Visualize).
+   * timeline dock and the footer pill row (Compose). Build / Visualize only
+   * need to clear the window gutter — Director is a reserved right rail.
    */
   contentBottom: number
   /**
-   * Distance from the window bottom to the Director composer. Compose docks
-   * the composer in the timeline row (`GUTTER`); Build / Visualize float it.
+   * Distance from the window bottom to the Director column. The rail is
+   * full-height in every workspace (`GUTTER` top and bottom).
    */
   dockBottom: number
   leftWidth: number
@@ -192,13 +239,20 @@ export function viewportInsets(
   })
   const left = leftWidth > 0 ? GUTTER + leftWidth + GUTTER : GUTTER
   const right = windowWidth - (rightWidth > 0 ? GUTTER + rightWidth + GUTTER : GUTTER)
-  const bottom = timelineVisible && timelineHeight > 0 ? GUTTER + timelineHeight + GUTTER : GUTTER
+  const visualizeDock = mode === 'visualize' ? VISUALIZE_DOCK_HEIGHT : 0
+  const bottom =
+    timelineVisible && timelineHeight > 0
+      ? GUTTER + timelineHeight + GUTTER
+      : visualizeDock > 0
+        ? GUTTER + visualizeDock + GUTTER
+        : GUTTER
   const footerBand = mode === 'compose' && timelineVisible ? FOOTER_ROW_HEIGHT + GUTTER : 0
+  const addDrawerBand = mode === 'build' ? ADD_DRAWER_HEIGHT + GUTTER : 0
   const composeDocked = mode === 'compose' && timelineVisible
-  const dockBottom = composeDocked ? GUTTER : bottom + GUTTER + footerBand
+  const dockBottom = GUTTER
   const contentBottom = composeDocked
     ? bottom + footerBand + GUTTER
-    : dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER
+    : bottom + addDrawerBand + GUTTER
   return {
     left,
     top: GUTTER + TOP_ROW_HEIGHT + GUTTER,

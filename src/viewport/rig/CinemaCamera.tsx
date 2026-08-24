@@ -14,6 +14,7 @@ import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
 import { applyCanvasAspect } from '../../lib/staticCamera'
 import { isTechMode } from '../RenderPasses'
+import { isCinemaViewport } from '../../lib/workspaceChrome'
 import { CAMERA_ICON_COLOR, CAMERA_ICON_SELECTED } from '../viewportLook'
 
 function ignoreRaycast() {
@@ -75,6 +76,8 @@ export function CinemaCamera() {
   const cameraKind = useRigStore((s) => s.cameraKind)
   const playMode = useEditorStore((s) => s.playMode)
   const cameraView = useEditorStore((s) => s.cameraView)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const cinema = isCinemaViewport(playMode, cameraView, workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const selected = useEditorStore((s) => s.selection === 'cinema-camera')
 
@@ -122,7 +125,7 @@ export function CinemaCamera() {
       body.position.copy(cam.position)
       body.quaternion.copy(cam.quaternion)
     }
-    if (playMode || cameraView) {
+    if (cinema) {
       applyCanvasAspect(cam, state.size.width, state.size.height)
     }
     if (Math.abs(cam.fov - pose.fov) > 1e-3) {
@@ -137,7 +140,7 @@ export function CinemaCamera() {
     <>
       <PerspectiveCamera
         ref={camRef}
-        makeDefault={playMode || cameraView}
+        makeDefault={cinema}
         fov={fov}
         near={0.05}
         far={200}
@@ -148,7 +151,7 @@ export function CinemaCamera() {
       <group
         ref={bodyRef}
         userData={{ pickKind: 'camera', pickId: 'cinema-camera' }}
-        visible={!playMode && !cameraView && !tech}
+        visible={!cinema && !tech}
         frustumCulled={false}
         onPointerDown={(e) => {
           if (e.button !== 0) return

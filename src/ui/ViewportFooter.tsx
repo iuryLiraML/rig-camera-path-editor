@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { useEditorStore, type Projection, type QuickView, type ViewMode } from '../state/useEditorStore'
 import { detectPreset, leafList, useLayoutStore, type LayoutPreset } from '../state/useLayoutStore'
+import { LookCluster } from './LookCluster'
 import { chromeBand, GUTTER, useViewportInsets, useWindowSize } from './viewportInsets'
 
 const VIEWS: { value: QuickView; label: string }[] = [
@@ -62,7 +63,8 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
         bottom: insets.bottom + GUTTER,
       }}
     >
-      <div className="pointer-events-auto flex min-w-0 flex-1 items-center justify-start">
+      <div className="pointer-events-auto flex min-w-0 flex-1 items-center justify-start gap-2">
+        <LookCluster />
         <div className="flex rounded-full bg-panel/90 p-0.5 shadow-lg backdrop-blur">
           {MODES.map((mode) => (
             <button
@@ -128,6 +130,14 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
             </span>
           )}
         </div>
+        <button
+          type="button"
+          title="Keyboard shortcuts (?)"
+          onClick={() => useEditorStore.getState().toggleShortcuts()}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-panel/90 text-[12px] text-ink-dim shadow-lg backdrop-blur hover:bg-panel-2 hover:text-ink"
+        >
+          ?
+        </button>
       </div>
     </div>
   )

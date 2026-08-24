@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
-import { TransformControls, useCursor } from '@react-three/drei'
+import { useCursor } from '@react-three/drei'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { aimObject } from '../lib/cameraOrientation'
 import { buildCurve, clamp01 } from '../lib/curve'
-import { useEditorOnly } from '../lib/editorOnly'
 import { evalModelTransform, type ObjectChannel } from '../lib/keyframes'
 import {
   applyObjectDrag,
@@ -17,11 +16,13 @@ import {
 } from '../lib/planeDrag'
 import { repairImportedShading } from '../lib/prepareImport'
 import { usePathStore } from '../state/usePathStore'
+import { pickKindOf } from '../lib/viewportPick'
 import { isSceneEditing } from '../lib/workspaceChrome'
 import { writeObjectTransform } from '../lib/autoKey'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneStore'
+import { GizmoControls } from './GizmoControls'
 import { isTechMode } from './RenderPasses'
 import { capturePointer, releasePointer } from './path/PenTool'
 
@@ -60,11 +61,8 @@ function ObjectGizmo({
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const gridSize = useEditorStore((s) => s.gridSize)
-  const ref = useRef<THREE.Object3D>(null)
-  useEditorOnly(ref)
   return (
-    <TransformControls
-      ref={ref as never}
+    <GizmoControls
       object={groupRef as React.RefObject<THREE.Group>}
       mode={gizmoMode}
       size={0.65}
@@ -271,7 +269,16 @@ function ObjectNode({ object }: { object: SceneObject }) {
         userData={{ pickKind: 'object', pickId: `obj:${object.id}` }}
         onPointerDown={(e) => {
           const editor = useEditorStore.getState()
+          if (editor.cameraView) return
           if (editor.tool !== 'select' || !isSceneEditing(editor.playMode, editor.workspaceMode) || e.button !== 0) return
+          if (
+            e.intersections.some((hit) => {
+              const kind = pickKindOf(hit.object)
+              return kind === 'gizmo' || kind === 'target'
+            })
+          ) {
+            return
+          }
           if (useEditorStore.getState().lockedIds.includes(object.id)) {
             e.stopPropagation()
             editor.select(`obj:${object.id}`)

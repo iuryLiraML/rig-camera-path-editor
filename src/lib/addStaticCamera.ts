@@ -39,16 +39,29 @@ export function addStaticCamera(): string {
   return id
 }
 
-/** Detach the active camera from its path, keeping the current cinema pose. */
-export function switchActiveCameraToStatic(): void {
+/**
+ * Detach the active camera from its path, keeping the current cinema pose.
+ * `stayInView` keeps look-through open so fly / pose keys can continue.
+ */
+export function detachCinemaToStatic(opts: { stayInView?: boolean } = {}): void {
   const state = useRigStore.getState()
+  if (state.cameraKind === 'static') return
   const pose = poseFromCinemaOrDefault()
   state.setStaticPose(pose)
   if (state.lookAtMode === 'path-tangent') {
     state.setLookAtMode('free')
   }
   state.setCameraKind('static')
+  if (opts.stayInView) {
+    useEditorStore.getState().select('cinema-camera')
+    return
+  }
   focusCameraRig()
+}
+
+/** Detach the active camera from its path, keeping the current cinema pose. */
+export function switchActiveCameraToStatic(): void {
+  detachCinemaToStatic()
 }
 
 export function switchActiveCameraToPath(): void {

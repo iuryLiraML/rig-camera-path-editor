@@ -578,6 +578,21 @@ export function createProject(name = 'New project', folderId: string | null = nu
   return serializeProjectTransition(() => createProjectNow(name, true, folderId))
 }
 
+export async function renameProject(projectId: string, name: string) {
+  const next = name.trim() || 'Untitled'
+  const store = useProjectStore.getState()
+  if (store.projectId === projectId) {
+    store.setName(next)
+    await saveActiveProject()
+    await refreshProjectList()
+    return
+  }
+  const record = await idbGet<ProjectRecord>(STORES.projects, projectId)
+  if (!record) return
+  await idbPut(STORES.projects, { ...record, name: next, updatedAt: Date.now() })
+  await refreshProjectList()
+}
+
 export async function moveProjectToFolder(projectId: string, folderId: string | null) {
   const store = useProjectStore.getState()
   if (store.projectId === projectId) {
@@ -682,15 +697,22 @@ export async function saveCurrentAsShot() {
   useSceneStore.getState().showNotice(`"${shot.name}" saved — it is in Sequence`)
 }
 
-export function loadShot(shot: Shot) {
-  useCameraOptionsStore.getState().createOption(shot.name, shot.rig)
+/** Restore a saved take onto the current camera. Does not spawn a new option. */
+export function applyShot(shot: Shot) {
+  applyRigSnapshot(shot.rig)
   const editor = useEditorStore.getState()
   editor.setExportAspect(shot.format.aspect)
   editor.setExportRes(shot.format.res)
   editor.setCustomSize(shot.format.custom)
+  editor.setActiveShotId(shot.id)
+}
+
+export function loadShot(shot: Shot) {
+  useCameraOptionsStore.getState().createOption(shot.name, shot.rig)
+  applyShot(shot)
+  const editor = useEditorStore.getState()
   editor.setAppView('editor')
   editor.select('camera-path')
-  editor.setActiveShotId(shot.id)
   useSceneStore.getState().showNotice(`"${shot.name}" loaded`)
 }
 

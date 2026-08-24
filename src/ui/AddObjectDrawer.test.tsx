@@ -17,6 +17,11 @@ afterEach(() => {
 })
 
 describe('AddObjectDrawer generate chip', () => {
+  it('stays open without a close control', () => {
+    const { queryByTitle } = render(<AddObjectDrawer />)
+    expect(queryByTitle('Close')).toBeNull()
+  })
+
   it('shows Generate beside Primitives and My assets', () => {
     const { container } = render(<AddObjectDrawer />)
     const chips = Array.from(container.querySelectorAll('button')).map((button) => button.textContent)

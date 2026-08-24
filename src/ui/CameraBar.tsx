@@ -1,17 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
+import { writeFov } from '../lib/autoKey'
+import { evalValue } from '../lib/keyframes'
 import { fovFromFocalLength, LENS_PRESETS, nearestLensPreset } from '../lib/lens'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
+import { ChannelKeyButton } from './ChannelKeyButton'
 import { ListIcon, PathNodesIcon, SettingsIcon } from './icons'
 import { useViewportInsets } from './viewportInsets'
 
 export function CameraBar({ embedded = false }: { embedded?: boolean }) {
   const fov = useRigStore((s) => s.fov)
+  const fovKeys = useRigStore((s) => s.fovKeys)
+  const t = useRigStore((s) => s.t)
+  const ease = useRigStore((s) => s.ease)
   const cameraPanel = useEditorStore((s) => s.cameraPanel)
   const insets = useViewportInsets()
   const [lensOpen, setLensOpen] = useState(false)
   const wrapRef = useRef<HTMLDivElement>(null)
-  const activeMm = nearestLensPreset(fov)
+  const activeMm = nearestLensPreset(evalValue(t, fovKeys, fov, ease))
 
   useEffect(() => {
     if (!lensOpen) return
@@ -35,7 +41,7 @@ export function CameraBar({ embedded = false }: { embedded?: boolean }) {
               key={preset.mm}
               type="button"
               onClick={() => {
-                useRigStore.getState().setFov(fovFromFocalLength(preset.mm))
+                writeFov(fovFromFocalLength(preset.mm))
                 setLensOpen(false)
               }}
               className={`flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-[11px] ${
@@ -74,6 +80,7 @@ export function CameraBar({ embedded = false }: { embedded?: boolean }) {
         >
           {activeMm}mm
         </button>
+        <ChannelKeyButton channel="fov" />
         <button
           type="button"
           title="Select the camera path"

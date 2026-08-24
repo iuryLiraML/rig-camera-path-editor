@@ -11,8 +11,8 @@ import {
   useLayoutStore,
 } from '../state/useLayoutStore'
 import { useEditorOnly } from '../lib/editorOnly'
-import { isPathEditing, isSceneEditing } from '../lib/workspaceChrome'
-import { FOOTER_ROW_HEIGHT, GUTTER, useViewportInsets } from '../ui/viewportInsets'
+import { isCinemaViewport, isPathEditing, isSceneEditing } from '../lib/workspaceChrome'
+import { AXIS_GIZMO_RADIUS, bottomLeftStack, useViewportInsets } from '../ui/viewportInsets'
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
 import { SceneObjects } from './SceneObjects'
@@ -147,8 +147,11 @@ export function Viewport() {
   const exportSize = useEditorStore((s) => s.exportSize)
   const viewMode = useEditorStore((s) => s.viewMode)
   const tech = isTechMode(viewMode)
+  const cinema = isCinemaViewport(playMode, cameraView, workspaceMode)
+  const lookThroughHud = cameraView && !playMode && workspaceMode !== 'visualize'
   const singlePane = useLayoutStore((s) => leafList(s.root).length <= 1)
   const insets = useViewportInsets()
+  const axisMargin = bottomLeftStack(insets).gizmoMargin
 
   const pointerDownAt = useRef<[number, number]>([0, 0])
 
@@ -173,6 +176,7 @@ export function Viewport() {
         const [x, y] = pointerDownAt.current
         const moved = Math.hypot(e.clientX - x, e.clientY - y)
         const editor = useEditorStore.getState()
+        if (editor.cameraView) return
         if (moved < 5 && editor.tool === 'select' && !editor.playMode) {
           editor.select(null)
         }
@@ -209,7 +213,7 @@ export function Viewport() {
       <PathEditor />
       <CinemaCamera />
       {staticCamera && <CameraRig />}
-      {cameraView && staticCamera && !playMode && <CameraFly />}
+      {lookThroughHud && <CameraFly />}
       <LookAtTarget />
       <CameraPreview />
       <PaneCompositor />
@@ -220,14 +224,14 @@ export function Viewport() {
         <shadowMaterial opacity={0.22} />
       </mesh>
 
-      {showGrid && !playMode && !tech && <EditorGrid />}
+      {showGrid && !cinema && !tech && <EditorGrid />}
 
-      {!playMode && !cameraView && singlePane && isSceneEditing(playMode, workspaceMode) && (
+      {!cinema && singlePane && isSceneEditing(playMode, workspaceMode) && (
         <GizmoHelper
           alignment="bottom-left"
           margin={[
-            Math.max(28, insets.left + 28),
-            Math.max(40, insets.bottom + GUTTER + FOOTER_ROW_HEIGHT + GUTTER + 56),
+            Math.max(AXIS_GIZMO_RADIUS, axisMargin[0]),
+            Math.max(AXIS_GIZMO_RADIUS, axisMargin[1]),
           ]}
         >
           <GizmoViewport

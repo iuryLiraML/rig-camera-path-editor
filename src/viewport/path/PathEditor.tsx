@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from 'react'
 import * as THREE from 'three'
-import { Line, TransformControls } from '@react-three/drei'
+import { Line } from '@react-three/drei'
+import { GizmoControls } from '../GizmoControls'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { centroidOf, snapshotAnchors } from '../../lib/anchorSelection'
 import { buildCurve, computeAutoHandles } from '../../lib/curve'
@@ -108,6 +109,7 @@ function AnchorGizmo({ anchor, isFirst }: { anchor: PathAnchor; isFirst: boolean
       frustumCulled={false}
       onPointerDown={(e) => {
         if (e.button !== 0) return
+        if (useEditorStore.getState().cameraView) return
         // while drawing, clicking the first anchor closes the loop
         if (tool === 'pen') {
           if (isFirst) {
@@ -159,6 +161,7 @@ function HandleGizmo({ anchor, which }: { anchor: PathAnchor; which: 'in' | 'out
         frustumCulled={false}
         onPointerDown={(e) => {
           if (e.button !== 0) return
+          if (useEditorStore.getState().cameraView) return
           usePathStore.getState().selectAnchor(anchor.id)
           usePathStore.getState().selectHandle(which)
           dragging.current = true
@@ -227,13 +230,10 @@ function PathTransformGizmo() {
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const gridSize = useEditorStore((s) => s.gridSize)
   const proxyRef = useRef<THREE.Group>(null)
-  const controlRef = useRef<THREE.Object3D>(null)
   const dragging = useRef(false)
   const groupDrag = useRef<{ snapshot: ReturnType<typeof snapshotAnchors>; startPivot: Vec3 } | null>(
     null,
   )
-  useEditorOnly(controlRef)
-
   const selected = useMemo(() => {
     const wanted = new Set(selectedAnchorIds)
     return anchors.filter((anchor) => wanted.has(anchor.id))
@@ -299,8 +299,7 @@ function PathTransformGizmo() {
     <>
       <group ref={proxyRef} />
       {!shiftHeld && selectedAnchorIds.length > 0 && (
-        <TransformControls
-          ref={controlRef as never}
+        <GizmoControls
           object={proxyRef as RefObject<THREE.Group>}
           mode={mode}
           size={0.65}

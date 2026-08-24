@@ -1,6 +1,6 @@
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import { TransformControls } from '@react-three/drei'
+import { GizmoControls } from '../GizmoControls'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
 import { evalVec3 } from '../../lib/keyframes'
 import { writeLookAt } from '../../lib/lookAtWrite'
@@ -13,6 +13,7 @@ import { applyPoseToObject, eulerDegFromQuaternion, poseFromObject } from '../..
 import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
 import { useRigStore } from '../../state/useRigStore'
+import { isCinemaViewport } from '../../lib/workspaceChrome'
 import { useEditorStore } from '../../state/useEditorStore'
 import { usePathStore } from '../../state/usePathStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
@@ -56,6 +57,7 @@ export function CameraRig() {
   const lookAtMode = useRigStore((s) => s.lookAtMode)
   const playMode = useEditorStore((s) => s.playMode)
   const cameraView = useEditorStore((s) => s.cameraView)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const selected = useEditorStore((s) => s.selection === 'cinema-camera')
   const tool = useEditorStore((s) => s.tool)
@@ -65,7 +67,6 @@ export function CameraRig() {
 
   const rootRef = useRef<THREE.Group>(null)
   const proxyRef = useRef<THREE.Group>(null)
-  const gizmoRef = useRef<THREE.Object3D>(null)
   const pickRef = useRef<THREE.Mesh>(null)
   const groundHandle = useRef<THREE.Group>(null)
   const targetHandle = useRef<THREE.Group>(null)
@@ -110,7 +111,6 @@ export function CameraRig() {
   }, [])
 
   useEditorOnly(rootRef)
-  useEditorOnly(gizmoRef)
   useEditorOnly(dropRef)
   useEditorOnly(aimRef)
   useScreenScale(pickRef, 0.07)
@@ -208,7 +208,9 @@ export function CameraRig() {
     releasePointer(e)
   }
 
-  if (cameraKind !== 'static' || playMode || cameraView || tech) return null
+  if (cameraKind !== 'static' || isCinemaViewport(playMode, cameraView, workspaceMode) || tech) {
+    return null
+  }
 
   // Rotating makes no sense while Target owns the orientation; scale never does.
   const mode = gizmoMode === 'rotate' && lookAtMode === 'free' ? 'rotate' : 'translate'
@@ -233,8 +235,7 @@ export function CameraRig() {
         </mesh>
       </group>
       {showGizmo && (
-        <TransformControls
-          ref={gizmoRef as never}
+        <GizmoControls
           object={proxyRef as React.RefObject<THREE.Group>}
           mode={mode}
           size={0.65}

@@ -7,6 +7,7 @@ import { lockOrbit, unlockOrbit } from '../lib/orbitLock'
 import { useShiftHeld } from '../lib/useShiftHeld'
 import { beginPickClick, hasInteractivePick } from '../lib/viewportPick'
 import { aimOrbitAtWorldOrigin } from '../lib/orbitHome'
+import { isCinemaViewport } from '../lib/workspaceChrome'
 import { useEditorStore } from '../state/useEditorStore'
 import { computeRects, paneAt, useLayoutStore } from '../state/useLayoutStore'
 import { cinemaCameraRef } from './rig/CinemaCamera'
@@ -38,13 +39,14 @@ export function EditorCamera() {
   const tool = useEditorStore((s) => s.tool)
   const playMode = useEditorStore((s) => s.playMode)
   const cameraView = useEditorStore((s) => s.cameraView)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const frameRequest = useEditorStore((s) => s.frameRequest)
   const homeRequest = useEditorStore((s) => s.homeRequest)
   const viewRequest = useEditorStore((s) => s.viewRequest)
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null
   const fallbackCam = useThree((s) => s.camera)
   const gl = useThree((s) => s.gl)
-  const editorCamActive = !playMode && !cameraView
+  const editorCamActive = !isCinemaViewport(playMode, cameraView, workspaceMode)
   const lastZoom = useRef(100)
   const perspRef = useRef<THREE.PerspectiveCamera>(null)
   const orthoRef = useRef<THREE.OrthographicCamera>(null)

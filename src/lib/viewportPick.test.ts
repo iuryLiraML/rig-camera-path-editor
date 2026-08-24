@@ -55,7 +55,24 @@ describe('viewportPick', () => {
       hit('object', 'obj:box', 1),
       hit('camera', 'cinema-camera', 1.1),
     ])
-    expect(preferTaggedHits(tagged)[0]?.kind).toBe('gizmo')
+    const ordered = preferTaggedHits(tagged)
+    expect(ordered).toHaveLength(1)
+    expect(ordered[0]?.kind).toBe('gizmo')
+  })
+
+  it('picks the look-at handle even when a mesh sits closer on the same ray', () => {
+    const tagged = tagHits([
+      hit('object', 'obj:knot', 1),
+      hit('target', 'look-at', 2.4),
+    ])
+    const ordered = preferTaggedHits(tagged)
+    expect(ordered).toHaveLength(1)
+    expect(ordered[0]?.id).toBe('look-at')
+  })
+
+  it('still picks a mesh when the look-at handle is not on the ray', () => {
+    const tagged = tagHits([hit('object', 'obj:knot', 1)])
+    expect(preferTaggedHits(tagged)[0]?.id).toBe('obj:knot')
   })
 
   it('prefers a scene object over a fat path line at the same depth', () => {

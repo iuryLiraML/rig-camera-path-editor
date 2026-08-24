@@ -33,7 +33,14 @@ vi.mock('./cloud/client', async (importOriginal) => {
   }
 })
 
-import { AUTOSAVE_MS, flushActiveProject, installPersistFlush, saveActiveProject, scheduleAutosave } from './projects'
+import {
+  AUTOSAVE_MS,
+  flushActiveProject,
+  installPersistFlush,
+  renameProject,
+  saveActiveProject,
+  scheduleAutosave,
+} from './projects'
 import { idbGet, idbGetAll, idbPut, STORES } from './idb'
 
 beforeEach(() => {
@@ -137,6 +144,15 @@ describe('autosave debounce and unload flush', () => {
     await vi.waitFor(() => {
       expect(memory.get('proj-hide')?.name).toBe('Hidden')
     })
+  })
+})
+
+describe('renameProject', () => {
+  it('renames the live project and writes the new title', async () => {
+    useProjectStore.setState({ projectId: 'proj-live', name: 'Old title' })
+    await renameProject('proj-live', '  Hero shot  ')
+    expect(useProjectStore.getState().name).toBe('Hero shot')
+    expect(memory.get('proj-live')?.name).toBe('Hero shot')
   })
 })
 

@@ -1,28 +1,31 @@
 import { describe, expect, it } from 'vitest'
 import {
   chromeBand,
-  DIRECTOR_COMPOSER_HEIGHT,
+  clampPipRect,
   DIRECTOR_DOCK_WIDTH,
   directorDockSlot,
   FOOTER_ROW_HEIGHT,
   freeAreaRect,
   GUTTER,
   LEFT_PANEL_MAX,
-  SEQUENCE_HEIGHT,
   toolbarSlot,
   viewportInsets,
+  VISUALIZE_DOCK_HEIGHT,
+  ADD_DRAWER_HEIGHT,
+  AXIS_GIZMO_RADIUS,
+  bottomLeftStack,
 } from './viewportInsets'
 import { TIMELINE_HEIGHT } from './Timeline'
 
 const WINDOW = 1202
 
 describe('viewportInsets', () => {
-  it('Build leaves the canvas full-bleed when the outliner is closed', () => {
+  it('Build reserves the Director rail when the outliner is closed', () => {
     const insets = viewportInsets('build', WINDOW, false)
     expect(insets.leftWidth).toBe(0)
-    expect(insets.rightWidth).toBe(0)
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
     expect(insets.left).toBe(GUTTER)
-    expect(insets.right).toBe(WINDOW - GUTTER)
+    expect(insets.right).toBe(WINDOW - GUTTER - DIRECTOR_DOCK_WIDTH - GUTTER)
     expect(insets.bottom).toBe(GUTTER)
   })
 
@@ -32,10 +35,10 @@ describe('viewportInsets', () => {
     expect(insets.left).toBe(GUTTER + LEFT_PANEL_MAX + GUTTER)
   })
 
-  it('Compose Sequence uses the short shot strip, not the AE dock', () => {
+  it('Compose always reserves the requested dock height, even with leftover Sequence state', () => {
     const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'sequence' })
-    expect(insets.timelineHeight).toBe(SEQUENCE_HEIGHT)
-    expect(insets.bottom).toBe(GUTTER + SEQUENCE_HEIGHT + GUTTER)
+    expect(insets.timelineHeight).toBe(240)
+    expect(insets.bottom).toBe(GUTTER + 240 + GUTTER)
     expect(insets.leftWidth).toBe(0)
     expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
   })
@@ -63,12 +66,13 @@ describe('viewportInsets', () => {
     expect(dockLeft).toBeGreaterThan(insets.centre)
   })
 
-  it('Visualize is full-bleed — Director floats on the right instead of a reserved rail', () => {
+  it('Visualize reserves the same Director rail as Compose', () => {
     const insets = viewportInsets('visualize', WINDOW, false)
-    expect(insets.rightWidth).toBe(0)
-    expect(insets.right).toBe(WINDOW - GUTTER)
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
+    expect(insets.right).toBe(WINDOW - GUTTER - DIRECTOR_DOCK_WIDTH - GUTTER)
     expect(insets.leftWidth).toBe(0)
-    expect(insets.dockBottom).toBe(GUTTER + GUTTER)
+    expect(insets.dockBottom).toBe(GUTTER)
+    expect(insets.bottom).toBe(GUTTER + VISUALIZE_DOCK_HEIGHT + GUTTER)
   })
 
   it('centres on the free area, not on the window, when the outliner is open', () => {
@@ -96,7 +100,7 @@ describe('viewportInsets', () => {
     expect(free.h).toBeGreaterThan(0)
   })
 
-  it('sits Compose Director in the timeline row, with PiP above the footer pills', () => {
+  it('sits PiP above the footer pills in Compose', () => {
     const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'sequence' })
     expect(insets.dockBottom).toBe(GUTTER)
     expect(insets.contentBottom).toBe(insets.bottom + FOOTER_ROW_HEIGHT + GUTTER + GUTTER)
@@ -105,7 +109,7 @@ describe('viewportInsets', () => {
 
   it('keeps a free canvas in Visualize on a tight window', () => {
     const insets = viewportInsets('visualize', 820, false, 700)
-    expect(insets.rightWidth).toBe(0)
+    expect(insets.rightWidth).toBeGreaterThan(0)
     const free = freeAreaRect(insets, 700)
     expect(free.w).toBeGreaterThanOrEqual(200)
     expect(free.h).toBeGreaterThan(0)
@@ -125,16 +129,29 @@ describe('viewportInsets', () => {
     expect(taller.bottom).toBeGreaterThan(compact.bottom)
   })
 
-  it('keeps the toolbar on the right of the free area', () => {
+  it('keeps the toolbar on the right of the free area, left of the Director rail', () => {
     const insets = viewportInsets('build', WINDOW, false)
     const slot = toolbarSlot(insets, WINDOW)
-    expect(slot.right).toBe(GUTTER)
+    const dock = directorDockSlot(insets)
+    const dockLeft = WINDOW - dock.right - dock.width
+    expect(WINDOW - slot.right).toBeLessThanOrEqual(dockLeft)
   })
 
-  it('keeps the toolbar on the right edge in Visualize', () => {
+  it('stops the Visualize review bar before the Director column', () => {
+    const insets = viewportInsets('visualize', WINDOW, false)
+    const band = chromeBand(insets, WINDOW)
+    const dock = directorDockSlot(insets)
+    const dockLeft = WINDOW - dock.right - dock.width
+    expect(band.left + band.width).toBeLessThanOrEqual(dockLeft - GUTTER)
+    expect(insets.contentBottom).toBe(insets.bottom + GUTTER)
+  })
+
+  it('keeps the Visualize toolbar left of the Director rail', () => {
     const insets = viewportInsets('visualize', WINDOW, false)
     const slot = toolbarSlot(insets, WINDOW)
-    expect(slot.right).toBe(GUTTER)
+    const dock = directorDockSlot(insets)
+    const dockLeft = WINDOW - dock.right - dock.width
+    expect(WINDOW - slot.right).toBeLessThanOrEqual(dockLeft)
   })
 
   it('stops Compose docks before the Director column', () => {
@@ -156,9 +173,31 @@ describe('viewportInsets', () => {
     expect(insets.right).toBeLessThanOrEqual(dockLeft)
   })
 
-  it('Build still floats the composer above the canvas bottom', () => {
+  it('parks the axis gizmo above the footer row', () => {
+    const insets = viewportInsets('compose', WINDOW, true, 900, 240, { composeDock: 'timeline' })
+    const stack = bottomLeftStack(insets)
+    expect(stack.gizmoMargin[0]).toBe(insets.left + AXIS_GIZMO_RADIUS)
+    expect(stack.gizmoMargin[1]).toBe(insets.contentBottom + AXIS_GIZMO_RADIUS)
+    expect(insets.contentBottom).toBe(insets.bottom + FOOTER_ROW_HEIGHT + GUTTER + GUTTER)
+  })
+
+  it('Build parks floating chrome above the Add-an-Object tray', () => {
     const insets = viewportInsets('build', WINDOW, false)
-    expect(insets.dockBottom).toBe(GUTTER + GUTTER)
-    expect(insets.contentBottom).toBe(insets.dockBottom + DIRECTOR_COMPOSER_HEIGHT + GUTTER)
+    expect(insets.dockBottom).toBe(GUTTER)
+    expect(insets.contentBottom).toBe(insets.bottom + ADD_DRAWER_HEIGHT + GUTTER + GUTTER)
+  })
+
+  it('lifts a hydrated PiP off the Director rail and the Compose timeline', () => {
+    const vw = 1440
+    const vh = 900
+    const insets = viewportInsets('compose', vw, true, vh, 240, {
+      composeDock: 'timeline',
+      showOutliner: true,
+    })
+    const clamped = clampPipRect({ right: 16, bottom: 192, fraction: 0.22 }, insets, vw, vh)
+    expect(clamped.right).toBeGreaterThanOrEqual(GUTTER + DIRECTOR_DOCK_WIDTH + GUTTER)
+    expect(clamped.bottom).toBeGreaterThanOrEqual(insets.contentBottom)
+    const again = clampPipRect(clamped, insets, vw, vh)
+    expect(again).toEqual(clamped)
   })
 })

@@ -1,15 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useCameraReady } from '../state/cameraPathLink'
 import { useEditorStore } from '../state/useEditorStore'
-import { useSceneStore } from '../state/useSceneStore'
-import { downloadRigJSON } from '../state/useRigStore'
 import { applyBeginPlayback } from '../lib/playback'
 import { openComposeTimeline } from '../lib/editorShortcuts'
-import { exportDimensions, exportFrame, exportVideo } from '../lib/recorder'
-import type { ViewMode } from '../state/useEditorStore'
-import { Segmented } from './primitives'
 import { AddSceneMenu } from './AddSceneMenu'
-import { CameraIcon, ClockIcon, CursorIcon, ExportIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
+import { ExportActions, ExportFormatFields, ExportPassToggles } from './ExportControls'
+import { ClockIcon, CursorIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
 import { toolbarSlot, useViewportInsets, useWindowSize } from './viewportInsets'
 
 function ToolButton({
@@ -85,23 +81,8 @@ function SnapControls() {
   )
 }
 
-const PASSES: { value: ViewMode; label: string }[] = [
-  { value: 'clay', label: 'Clay' },
-  { value: 'depth', label: 'Depth' },
-  { value: 'outline', label: 'Outline' },
-  { value: 'normals', label: 'Normals' },
-]
-
 function ExportMenu({ disabled }: { disabled: boolean }) {
   const [open, setOpen] = useState(false)
-  const exportAspect = useEditorStore((s) => s.exportAspect)
-  const exportRes = useEditorStore((s) => s.exportRes)
-  const customSize = useEditorStore((s) => s.customSize)
-  const exportPasses = useEditorStore((s) => s.exportPasses)
-  const setExportAspect = useEditorStore((s) => s.setExportAspect)
-  const setExportRes = useEditorStore((s) => s.setExportRes)
-  const toggleExportPass = useEditorStore((s) => s.toggleExportPass)
-  const [outW, outH] = exportDimensions(exportAspect, exportRes, customSize)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -131,91 +112,9 @@ function ExportMenu({ disabled }: { disabled: boolean }) {
       </button>
       {open && (
         <div className="panel absolute left-1/2 top-9 z-30 w-56 -translate-x-1/2 p-2">
-          <div className="mb-1.5 text-[10px] font-medium text-ink-dim">Format</div>
-          {exportRes !== 'custom' && (
-            <Segmented
-              options={[
-                { value: '16:9', label: '16:9' },
-                { value: '1:1', label: '1:1' },
-                { value: '9:16', label: '9:16' },
-              ]}
-              value={exportAspect}
-              onChange={setExportAspect}
-            />
-          )}
-          <div className="mt-1.5">
-            <Segmented
-              options={[
-                { value: '720', label: '720p' },
-                { value: '1080', label: '1080p' },
-                { value: 'custom', label: 'Custom' },
-              ]}
-              value={String(exportRes)}
-              onChange={(v) => setExportRes(v === 'custom' ? 'custom' : (Number(v) as 720 | 1080))}
-            />
-          </div>
-          <div className="mt-1 text-[10px] text-ink-dim">
-            {outW} × {outH}px{exportRes === 'custom' && ' — set in Camera › Format'}
-          </div>
-
-          <div className="mb-1.5 mt-2 text-[10px] font-medium text-ink-dim">Passes</div>
-          <div className="grid grid-cols-2 gap-1">
-            {PASSES.map((pass) => {
-              const on = exportPasses.includes(pass.value)
-              return (
-                <button
-                  key={pass.value}
-                  onClick={() => toggleExportPass(pass.value)}
-                  className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-left text-[11px] ${
-                    on ? 'bg-panel-2 text-ink' : 'text-ink-dim hover:text-ink'
-                  }`}
-                >
-                  <span
-                    className={`flex h-3 w-3 items-center justify-center rounded-[3px] border text-[8px] ${
-                      on ? 'border-accent bg-accent text-white' : 'border-line'
-                    }`}
-                  >
-                    {on ? '✓' : ''}
-                  </span>
-                  {pass.label}
-                </button>
-              )
-            })}
-          </div>
-
-          <button
-            onClick={() => {
-              setOpen(false)
-              void exportVideo()
-            }}
-            disabled={exportPasses.length === 0}
-            className="mt-2 flex w-full items-center justify-center gap-2 rounded-md bg-accent px-2 py-1.5 text-[11px] font-medium text-white hover:bg-accent/85 disabled:cursor-not-allowed disabled:bg-panel-3 disabled:text-ink-dim/60"
-          >
-            <CameraIcon />
-            Export video (.mp4)
-          </button>
-          <button
-            onClick={() => {
-              setOpen(false)
-              void exportFrame()
-            }}
-            disabled={exportPasses.length === 0}
-            className="mt-1 flex w-full items-center justify-center gap-2 rounded-md bg-panel-2 px-2 py-1.5 text-[11px] text-ink hover:bg-panel-3 disabled:cursor-not-allowed disabled:text-ink-dim/60"
-            title="Exports the current playhead frame as PNG, one file per pass"
-          >
-            Export frame (.png)
-          </button>
-          <button
-            onClick={() => {
-              setOpen(false)
-              downloadRigJSON()
-              useSceneStore.getState().showNotice('camera-rig.json exported')
-            }}
-            className="mt-1 flex w-full items-center justify-center gap-2 rounded-md bg-panel-2 px-2 py-1.5 text-[11px] text-ink hover:bg-panel-3"
-          >
-            <ExportIcon />
-            Camera rig (.json)
-          </button>
+          <ExportFormatFields />
+          <ExportPassToggles />
+          <ExportActions onDone={() => setOpen(false)} />
         </div>
       )}
     </div>
@@ -229,7 +128,6 @@ export function Toolbar() {
   const selection = useEditorStore((s) => s.selection)
   const zoomPct = useEditorStore((s) => s.zoomPct)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
-  const composeDock = useEditorStore((s) => s.composeDock)
   const hasPath = useCameraReady()
   const insets = useViewportInsets()
   const win = useWindowSize()
@@ -306,42 +204,41 @@ export function Toolbar() {
           <Divider />
         </>
       )}
-      <ToolButton
-        title="Center the view on the world origin (H)"
-        onClick={() => useEditorStore.getState().requestHome()}
-      >
-        <TargetIcon />
-      </ToolButton>
-      <button
-        title="Click to frame the scene (F)"
-        onClick={() => useEditorStore.getState().requestFrame()}
-        className="w-11 px-1 text-center text-[11px] tabular-nums text-ink-dim hover:text-ink"
-      >
-        {zoomPct}%
-      </button>
-      <Divider />
-      <ToolButton
-        title="Timeline (T)"
-        active={workspaceMode === 'compose' && composeDock === 'timeline'}
-        onClick={() => {
-          const editor = useEditorStore.getState()
-          if (workspaceMode === 'compose' && composeDock === 'timeline') {
-            editor.setComposeDock('sequence')
-            return
-          }
-          openComposeTimeline()
-        }}
-      >
-        <ClockIcon />
-      </ToolButton>
+      {workspaceMode !== 'visualize' && (
+        <>
+          <ToolButton
+            title="Center the view on the world origin (H)"
+            onClick={() => useEditorStore.getState().requestHome()}
+          >
+            <TargetIcon />
+          </ToolButton>
+          <button
+            title="Click to frame the scene (F)"
+            onClick={() => useEditorStore.getState().requestFrame()}
+            className="w-11 px-1 text-center text-[11px] tabular-nums text-ink-dim hover:text-ink"
+          >
+            {zoomPct}%
+          </button>
+          <Divider />
+          <ToolButton
+            title="Timeline (T)"
+            active={workspaceMode === 'compose'}
+            onClick={() => openComposeTimeline()}
+          >
+            <ClockIcon />
+          </ToolButton>
+        </>
+      )}
       <ExportMenu disabled={!hasPath} />
-      <ToolButton
-        title={hasPath ? 'Fullscreen preview (hides panels)' : 'Create a path first'}
-        disabled={!hasPath}
-        onClick={enterPlay}
-      >
-        <PlayIcon />
-      </ToolButton>
+      {workspaceMode !== 'visualize' && (
+        <ToolButton
+          title={hasPath ? 'Fullscreen preview (hides panels)' : 'Create a path first'}
+          disabled={!hasPath}
+          onClick={enterPlay}
+        >
+          <PlayIcon />
+        </ToolButton>
+      )}
     </div>
   )
 }

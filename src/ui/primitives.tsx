@@ -28,16 +28,19 @@ export function Segmented<T extends string>({
   options,
   value,
   onChange,
+  className = 'w-full',
 }: {
   options: { value: T; label: string }[]
   value: T
   onChange: (value: T) => void
+  className?: string
 }) {
   return (
-    <div className="flex w-full rounded-md bg-panel-2 p-0.5">
+    <div className={`flex rounded-md bg-panel-2 p-0.5 ${className}`}>
       {options.map((option) => (
         <button
           key={option.value}
+          type="button"
           onClick={() => onChange(option.value)}
           className={`flex-1 rounded-[5px] px-2 py-1 text-[11px] transition-colors ${
             value === option.value

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
+import { applyDepthUniforms, fitDepthRange, resolveDepthRange } from '../lib/depthRange'
 import { useEditorStore, type ViewMode } from '../state/useEditorStore'
 import { sceneBounds } from './SceneObjects'
 
@@ -254,15 +255,25 @@ export function ViewModeController() {
   }, [scene, viewMode])
 
   useFrame(({ camera }) => {
-    if (useEditorStore.getState().viewMode === 'clay') return
+    const editor = useEditorStore.getState()
+    if (editor.viewMode === 'clay') return
+    let fitted: { near: number; far: number } | null = null
     const box = sceneBounds()
-    if (!box) return
-    box.getCenter(boundsCenter)
-    box.getSize(boundsSize)
-    const radius = Math.max(boundsSize.length() / 2, 1)
-    const dist = camera.position.distanceTo(boundsCenter)
-    depthUniforms.uNear.value = Math.max(0.05, dist - radius * 1.6)
-    depthUniforms.uFar.value = dist + radius * 1.6
+    if (box) {
+      box.getCenter(boundsCenter)
+      box.getSize(boundsSize)
+      const radius = Math.max(boundsSize.length() / 2, 1)
+      const dist = camera.position.distanceTo(boundsCenter)
+      fitted = fitDepthRange(dist, radius)
+    }
+    applyDepthUniforms(
+      depthUniforms,
+      resolveDepthRange(
+        editor.depthRangeAuto,
+        { near: editor.depthNear, far: editor.depthFar },
+        fitted,
+      ),
+    )
   })
 
   return null

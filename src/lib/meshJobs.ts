@@ -5,7 +5,6 @@ import { remeshGlb } from './fal/remesh'
 import { readFalSettings } from './fal/settings'
 import { idbGet, STORES } from './idb'
 import { importModelBuffer, replaceImportedBuffer } from './sceneIO'
-import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 
 const busy = new Set<string>()
@@ -59,7 +58,6 @@ export async function generateObjectFromText(prompt: string): Promise<void> {
     return
   }
   const name = prompt.trim().slice(0, 40) || 'Generated'
-  useEditorStore.getState().setShowAddDrawer(false)
   const { liftId, signal, scene } = beginJob('generate', `${name} — Generating…`, 'generate')
   try {
     const url = await generateFromText({ prompt, signal })
@@ -85,7 +83,6 @@ export async function generateObjectFromImage(file: File): Promise<void> {
     return
   }
   const name = file.name.replace(/\.[^.]+$/, '') || 'Generated'
-  useEditorStore.getState().setShowAddDrawer(false)
   const { liftId, signal, scene } = beginJob('generate', `${name} — Generating…`, 'generate')
   try {
     const imageUrl = await uploadImage(file, signal)

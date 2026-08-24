@@ -1,5 +1,14 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { autoKeyObjectChannels, evaluatedStaticPose, writeObjectTransform, writeStaticPose } from './autoKey'
+import {
+  autoKeyObjectChannels,
+  cinemaAutoKeyArmed,
+  evaluatedStaticPose,
+  nudgeFov,
+  writeFov,
+  writeObjectTransform,
+  writeRoll,
+  writeStaticPose,
+} from './autoKey'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, identityTransform } from '../state/useSceneStore'
 
@@ -8,6 +17,13 @@ describe('auto-key', () => {
     useSceneStore.setState({ objects: [], pendingLifts: [] })
     useRigStore.setState({
       t: 0.5,
+      fov: 45,
+      roll: 0,
+      fovKeys: [],
+      rollKeys: [],
+      progressKeys: [],
+      targetKeys: [],
+      lookOffsetKeys: [],
       staticPose: { position: [4, 2, 6], rotation: [0, 0, 0] },
       staticPosKeys: [],
       staticRotKeys: [],
@@ -58,5 +74,49 @@ describe('auto-key', () => {
       staticRotKeys: [],
     })
     expect(evaluatedStaticPose().position[0]).toBeCloseTo(10)
+  })
+
+  it('keys FOV only after that channel is animated', () => {
+    writeFov(70)
+    expect(useRigStore.getState().fovKeys).toHaveLength(0)
+    expect(useRigStore.getState().fov).toBeCloseTo(70)
+
+    useRigStore.getState().upsertChannelKey('fov', 0, 45)
+    writeFov(28)
+    expect(useRigStore.getState().fovKeys.length).toBeGreaterThanOrEqual(2)
+    expect(useRigStore.getState().fov).toBeCloseTo(28)
+  })
+
+  it('keys roll only after that channel is animated', () => {
+    writeRoll(15)
+    expect(useRigStore.getState().rollKeys).toHaveLength(0)
+    expect(useRigStore.getState().roll).toBe(15)
+
+    useRigStore.getState().upsertChannelKey('roll', 0, 0)
+    writeRoll(-20)
+    expect(useRigStore.getState().rollKeys.length).toBeGreaterThanOrEqual(2)
+    expect(useRigStore.getState().roll).toBe(-20)
+  })
+
+  it('nudges FOV from the evaluated playhead value', () => {
+    useRigStore.setState({
+      t: 1,
+      ease: 'linear',
+      fov: 40,
+      fovKeys: [
+        { id: 'a', time: 0, value: 40 },
+        { id: 'b', time: 1, value: 80 },
+      ],
+    })
+    nudgeFov(-10)
+    expect(useRigStore.getState().fov).toBeCloseTo(70)
+    const atPlayhead = useRigStore.getState().fovKeys.find((k) => Math.abs(k.time - 1) < 0.02)
+    expect(atPlayhead?.value).toBeCloseTo(70)
+  })
+
+  it('arms look-through recording only after a camera track exists', () => {
+    expect(cinemaAutoKeyArmed()).toBe(false)
+    useRigStore.getState().upsertChannelKey('fov', 0, 45)
+    expect(cinemaAutoKeyArmed()).toBe(true)
   })
 })

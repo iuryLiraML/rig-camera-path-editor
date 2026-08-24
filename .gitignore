@@ -1,4 +1,4 @@
-# Public client tree (what Vercel builds).
+# ── cloud-wip branch: versions the full app (frontend + server/) ──
 # Dependencies & build output
 node_modules/
 dist/

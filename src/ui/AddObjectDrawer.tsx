@@ -5,7 +5,7 @@ import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { CubeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
-import { GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
+import { ADD_DRAWER_HEIGHT, GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
 
 type Chip = 'primitives' | 'assets' | 'generate'
 type GenerateMode = 'pick' | 'text' | 'image'
@@ -42,8 +42,8 @@ export function AddObjectDrawer() {
       style={{
         left: insets.left,
         right: dock.right + dock.width + GUTTER,
-        bottom: insets.contentBottom,
-        height: 280,
+        bottom: insets.bottom + GUTTER,
+        height: ADD_DRAWER_HEIGHT,
       }}
     >
       <div className="flex items-center gap-2 border-b border-line/60 px-3 py-2">
@@ -66,14 +66,6 @@ export function AddObjectDrawer() {
             className="w-full bg-transparent text-xs text-ink outline-none placeholder:text-ink-dim"
           />
         </div>
-        <button
-          type="button"
-          title="Close"
-          onClick={() => useEditorStore.getState().setShowAddDrawer(false)}
-          className="rounded-md px-2 py-1 text-[13px] text-ink-dim hover:text-ink"
-        >
-          ×
-        </button>
       </div>
       <div className="flex gap-1 px-3 pt-2">
         {(
@@ -116,7 +108,6 @@ export function AddObjectDrawer() {
                 type="button"
                 onClick={() => {
                   useEditorStore.getState().select(`obj:${object.id}`)
-                  useEditorStore.getState().setShowAddDrawer(false)
                 }}
                 className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
               >
@@ -306,7 +297,6 @@ function PrimitiveTile({ kind }: { kind: PrimitiveKind }) {
       type="button"
       onClick={() => {
         useSceneStore.getState().addPrimitive(kind)
-        useEditorStore.getState().setShowAddDrawer(false)
       }}
       className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
     >

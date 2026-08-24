@@ -1,8 +1,8 @@
 import { useMemo, useRef } from 'react'
 import { useCameraReady } from '../../state/cameraPathLink'
 import * as THREE from 'three'
-import { TransformControls } from '@react-three/drei'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { GizmoControls } from '../GizmoControls'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useRigStore } from '../../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
@@ -15,6 +15,13 @@ import { useScreenScale } from '../../lib/screenScale'
 import { isTechMode } from '../RenderPasses'
 import { writeLookAt } from '../../lib/lookAtWrite'
 import { cinemaCameraRef } from './CinemaCamera'
+
+const HANDLE_VISUAL_SCALE = 0.07
+const HANDLE_PICK_SCALE = 0.18
+
+function ignoreRaycast() {
+  // Visual only — the larger pick sphere owns the click.
+}
 
 export function LookAtTarget() {
   const target = useRigStore((s) => s.target)
@@ -31,6 +38,7 @@ export function LookAtTarget() {
   const hasPath = useCameraReady()
   const playMode = useEditorStore((s) => s.playMode)
   const cameraView = useEditorStore((s) => s.cameraView)
+  const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const selected = useEditorStore((s) => s.selection === 'target')
   const tool = useEditorStore((s) => s.tool)
@@ -54,11 +62,11 @@ export function LookAtTarget() {
   }, [])
   const lineRef = useRef<THREE.Line>(line)
   lineRef.current = line
-  const gizmoRef = useRef<THREE.Object3D>(null)
+  const pickRef = useRef<THREE.Mesh>(null)
   useEditorOnly(handleRef)
-  useEditorOnly(gizmoRef)
   useEditorOnly(lineRef)
-  useScreenScale(sphereRef, 0.07)
+  useScreenScale(sphereRef, HANDLE_VISUAL_SCALE)
+  useScreenScale(pickRef, HANDLE_PICK_SCALE)
 
   useFrame(() => {
     if (!dragging.current && handleRef.current) {
@@ -73,7 +81,16 @@ export function LookAtTarget() {
     attr.needsUpdate = true
   })
 
-  if (!hasPath || lookAtMode !== 'target' || playMode || tech || cameraKind === 'static') return null
+  if (
+    !hasPath ||
+    lookAtMode !== 'target' ||
+    playMode ||
+    workspaceMode === 'visualize' ||
+    tech ||
+    cameraKind === 'static'
+  ) {
+    return null
+  }
 
   const showGizmo = selected && tool === 'select' && !cameraView
 
@@ -81,7 +98,7 @@ export function LookAtTarget() {
     <group>
       <group ref={handleRef} position={position}>
         <mesh
-          ref={sphereRef}
+          ref={pickRef}
           userData={{ pickKind: 'target', pickId: 'look-at' }}
           onPointerDown={(e: ThreeEvent<PointerEvent>) => {
             if (e.button !== 0) return
@@ -90,12 +107,15 @@ export function LookAtTarget() {
           }}
         >
           <sphereGeometry args={[1, 16, 16]} />
+          <meshBasicMaterial transparent opacity={0} depthTest={false} depthWrite={false} />
+        </mesh>
+        <mesh ref={sphereRef} raycast={ignoreRaycast}>
+          <sphereGeometry args={[1, 16, 16]} />
           <meshBasicMaterial color={selected ? '#ffffff' : '#7c5cff'} depthTest={false} />
         </mesh>
       </group>
       {showGizmo && (
-        <TransformControls
-          ref={gizmoRef as never}
+        <GizmoControls
           object={handleRef as React.RefObject<THREE.Group>}
           mode="translate"
           size={0.65}

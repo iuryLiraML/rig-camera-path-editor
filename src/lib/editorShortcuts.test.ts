@@ -171,6 +171,7 @@ describe('shortcut handlers', () => {
     expect(SHORTCUT_ROWS.map((row) => row.keys)).toEqual([
       'I',
       'Delete',
+      'WASD / arrows',
       'Space',
       'W E R',
       'T',

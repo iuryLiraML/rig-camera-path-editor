@@ -4,7 +4,7 @@ import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
-import { PlusIcon, ImportIcon, ExpandIcon, ImageIcon } from './icons'
+import { ImportIcon, ImageIcon } from './icons'
 import { directorDockSlot, GUTTER, useViewportInsets } from './viewportInsets'
 
 function ToolChip({ name }: { name: string }) {
@@ -23,7 +23,7 @@ const PLACEHOLDER: Record<'build' | 'compose' | 'visualize', string> = {
   visualize: 'Describe the shot to generate…',
 }
 
-/** Director composer — docked beside Sequence/Timeline in Compose, floating elsewhere. */
+/** Director chat — full-height right rail in every workspace. */
 export function DirectorDock() {
   const chat = useAgentStore((s) => s.chat)
   const status = useAgentStore((s) => s.status)
@@ -38,8 +38,6 @@ export function DirectorDock() {
   const liftPhotoName = useAgentStore((s) => s.liftPhotoName)
   const visualizeMedia = useEditorStore((s) => s.visualizeMedia)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
-  const expanded = useEditorStore((s) => s.directorExpanded)
-  const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
   const insets = useViewportInsets()
   const dock = directorDockSlot(insets)
   const [input, setInput] = useState('')
@@ -47,13 +45,12 @@ export function DirectorDock() {
   const [pendingImage, setPendingImage] = useState<File | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
   const generate = workspaceMode === 'visualize'
-  const composeDocked = workspaceMode === 'compose'
 
   useEffect(() => {
     const node = scrollRef.current
     if (!node) return
     node.scrollTop = node.scrollHeight
-  }, [chat, status, expanded])
+  }, [chat, status])
 
   const send = () => {
     const text = input.trim()
@@ -65,7 +62,6 @@ export function DirectorDock() {
     const image = pendingImage
     setPendingImage(null)
     setInput('')
-    useEditorStore.getState().setDirectorExpanded(true)
     const media = useEditorStore.getState().visualizeMedia
     const body =
       generate && media === 'motion' && text
@@ -76,21 +72,15 @@ export function DirectorDock() {
 
   return (
     <div
-      className="absolute z-30 flex min-h-0 flex-col"
+      className="panel absolute z-30 flex min-h-0 flex-col overflow-hidden"
       style={{
         right: dock.right,
-        bottom: composeDocked ? GUTTER : insets.dockBottom,
         width: dock.width,
-        ...(composeDocked && !expanded ? { height: insets.timelineHeight } : {}),
-        ...(expanded ? { top: insets.top } : {}),
+        top: GUTTER,
+        bottom: GUTTER,
       }}
     >
-      {expanded && (
-        <div
-          className={`panel flex min-h-0 flex-1 flex-col overflow-hidden ${
-            composeDocked ? 'mb-0 rounded-b-none' : 'mb-2'
-          }`}
-        >
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-3 py-2">
             <span className="text-[11px] font-medium text-ink">
               {generate ? 'Visualize' : 'Director'}
@@ -117,14 +107,6 @@ export function DirectorDock() {
                 New
               </button>
             )}
-            <button
-              type="button"
-              title="Collapse chat"
-              onClick={() => useEditorStore.getState().setDirectorExpanded(false)}
-              className={`rounded-md px-1.5 py-0.5 text-[13px] text-ink-dim hover:text-ink ${generate || chat.length > 0 ? '' : 'ml-auto'}`}
-            >
-              ×
-            </button>
           </div>
 
           {!hasKey ? (
@@ -242,17 +224,8 @@ export function DirectorDock() {
             </div>
           )}
         </div>
-      )}
 
-      <div
-        className={`panel overflow-hidden p-2.5 focus-within:border-accent ${
-          composeDocked
-            ? expanded
-              ? 'shrink-0 rounded-t-none'
-              : 'flex min-h-0 flex-1 flex-col'
-            : 'shrink-0 rounded-3xl'
-        }`}
-      >
+      <div className="shrink-0 overflow-hidden border-t border-line/60 p-2.5">
         <input
           id="director-attach-photo"
           type="file"
@@ -281,21 +254,13 @@ export function DirectorDock() {
             placeholder={PLACEHOLDER[workspaceMode]}
             className="min-h-[40px] w-full resize-none bg-transparent text-[12px] leading-relaxed text-ink outline-none placeholder:text-ink-dim"
           />
-          <button
-            type="button"
-            title={expanded ? 'Collapse chat' : 'Expand chat'}
-            onClick={() => useEditorStore.getState().setDirectorExpanded(!expanded)}
-            className="mt-0.5 shrink-0 rounded-md p-1 text-ink-dim hover:bg-panel-2 hover:text-ink"
-          >
-            <ExpandIcon size={13} />
-          </button>
         </div>
         {(pendingImage || liftPhotoName) && (
           <div className="mt-1 truncate px-0.5 text-[10px] text-ink-dim">
             {pendingImage ? `Photo: ${pendingImage.name}` : `Photo in use: ${liftPhotoName} — ask to lift again`}
           </div>
         )}
-        {generate && expanded && (
+        {generate && (
           <div className="mt-2 grid grid-cols-2 gap-1.5">
             <label className="text-[10px] text-ink-dim">
               Media
@@ -330,20 +295,6 @@ export function DirectorDock() {
         )}
         <div className="mt-1.5 flex items-center justify-between gap-2">
           <div className="flex items-center gap-0.5">
-            {workspaceMode === 'build' && (
-              <button
-                type="button"
-                title="Add an object"
-                onClick={() => useEditorStore.getState().toggleAddDrawer()}
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
-                  showAddDrawer
-                    ? 'bg-accent text-white'
-                    : 'text-ink-dim hover:bg-panel-2 hover:text-ink'
-                }`}
-              >
-                <PlusIcon size={15} />
-              </button>
-            )}
             <button
               type="button"
               title="Import a .glb or .gltf"

@@ -38,7 +38,7 @@ afterEach(() => {
 })
 
 describe('DirectorDock', () => {
-  it('shows the floating composer without a remaining-prompts line', () => {
+  it('shows the Build prompt without a remaining-prompts line', () => {
     const { container } = render(<DirectorDock />)
     const textarea = container.querySelector('textarea')
     expect(textarea?.getAttribute('placeholder')).toBe('Describe a scene, watch AI build it in 3D')
@@ -54,14 +54,15 @@ describe('DirectorDock', () => {
     )
   })
 
-  it('expands the transcript without adding a remaining-prompts line', () => {
-    const { container, getByTitle } = render(<DirectorDock />)
-    fireEvent.click(getByTitle('Expand chat'))
-    expect(useEditorStore.getState().directorExpanded).toBe(true)
+  it('always shows the transcript on the full-height rail', () => {
+    const { container, queryByTitle } = render(<DirectorDock />)
     expect(container.textContent).toContain('Director')
     expect(container.textContent?.toLowerCase()).not.toContain('remaining')
+    expect(queryByTitle('Expand chat')).toBeNull()
+    expect(queryByTitle('Collapse chat')).toBeNull()
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.top).toBeTruthy()
+    expect(root.style.top).toBe('12px')
+    expect(root.style.bottom).toBe('12px')
   })
 
   it('pins the composer to the right of the viewport, not the centre', () => {
@@ -73,15 +74,12 @@ describe('DirectorDock', () => {
     expect(Number.parseFloat(root.style.width)).toBeGreaterThan(0)
   })
 
-  it('groups Add, Import and attach on the Build composer', () => {
+  it('keeps Import and attach on the composer without an Add toggle', () => {
     const { getByTitle, queryByTitle } = render(<DirectorDock />)
-    expect(getByTitle('Add an object')).toBeTruthy()
+    expect(queryByTitle('Add an object')).toBeNull()
     expect(getByTitle('Import a .glb or .gltf')).toBeTruthy()
     expect(getByTitle('Attach a reference photo')).toBeTruthy()
     expect(getByTitle('Send (Enter)')).toBeTruthy()
-    expect(queryByTitle('Add an object')?.closest('.panel')).toBe(
-      getByTitle('Import a .glb or .gltf').closest('.panel'),
-    )
   })
 
   it('keeps Import on Compose without the Add control', () => {
@@ -92,29 +90,39 @@ describe('DirectorDock', () => {
     expect(getByTitle('Attach a reference photo')).toBeTruthy()
   })
 
-  it('docks the Compose composer into the timeline row', () => {
+  it('fills the Compose right rail from the top gutter to the bottom', () => {
     useEditorStore.setState({ workspaceMode: 'compose' })
-    const { container } = render(<DirectorDock />)
+    const { container, queryByTitle } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
+    expect(root.className).toContain('panel')
+    expect(root.style.top).toBe('12px')
     expect(root.style.bottom).toBe('12px')
-    expect(root.style.height).toBe('148px')
-    expect(root.style.top).toBe('')
+    expect(root.style.height).toBe('')
+    expect(container.querySelectorAll('.panel')).toHaveLength(1)
+    expect(container.textContent).toContain('Director')
+    expect(queryByTitle('Expand chat')).toBeNull()
+    expect(queryByTitle('Collapse chat')).toBeNull()
   })
 
-  it('matches the Timeline dock height when that tab is selected', () => {
+  it('uses the same full-height rail in Visualize', () => {
+    useEditorStore.setState({ workspaceMode: 'visualize' })
+    const { container, queryByTitle } = render(<DirectorDock />)
+    const root = container.firstElementChild as HTMLElement
+    expect(root.style.top).toBe('12px')
+    expect(root.style.bottom).toBe('12px')
+    expect(container.textContent).toContain('Visualize')
+    expect(queryByTitle('Expand chat')).toBeNull()
+    expect(container.querySelector('textarea')?.getAttribute('placeholder')).toBe(
+      'Describe the shot to generate…',
+    )
+  })
+
+  it('keeps the full-height rail when the Timeline tab is selected', () => {
     useEditorStore.setState({ workspaceMode: 'compose', composeDock: 'timeline', timelineHeight: 240 })
     const { container } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
+    expect(root.style.top).toBe('12px')
     expect(root.style.bottom).toBe('12px')
-    expect(root.style.height).toBe('240px')
-  })
-
-  it('grows the Compose transcript up the reserved column', () => {
-    useEditorStore.setState({ workspaceMode: 'compose', directorExpanded: true })
-    const { container } = render(<DirectorDock />)
-    const root = container.firstElementChild as HTMLElement
-    expect(root.style.bottom).toBe('12px')
-    expect(root.style.top).toBeTruthy()
     expect(root.style.height).toBe('')
   })
 

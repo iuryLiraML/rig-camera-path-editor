@@ -51,7 +51,7 @@ import {
   XYZInput,
 } from './primitives'
 import { insertChannelKeyAt } from '../lib/timelineKey'
-import { writeStaticPose } from '../lib/autoKey'
+import { writeFov, writeRoll, writeStaticPose } from '../lib/autoKey'
 import { SettingsIcon } from './icons'
 import { PoseKeyButton } from './PoseKeyButton'
 
@@ -931,11 +931,7 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
               value={fovNow}
               keyed={hasKeyAtTime(fovKeys, t)}
               onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'fov' : null)}
-              onChange={(v) => {
-                const state = useRigStore.getState()
-                if (state.fovKeys.length > 0) state.upsertChannelKey('fov', state.t, v)
-                else state.setFov(v)
-              }}
+              onChange={(v) => writeFov(v)}
               min={15}
               max={120}
               step={1}
@@ -964,11 +960,7 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
               value={rollNow}
               keyed={hasKeyAtTime(rollKeys, t)}
               onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'roll' : null)}
-              onChange={(v) => {
-                const state = useRigStore.getState()
-                if (state.rollKeys.length > 0) state.upsertChannelKey('roll', state.t, v)
-                else state.setRoll(v)
-              }}
+              onChange={(v) => writeRoll(v)}
               min={-180}
               max={180}
               step={1}

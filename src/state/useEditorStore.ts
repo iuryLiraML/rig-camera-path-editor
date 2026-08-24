@@ -47,6 +47,12 @@ interface EditorState {
   recordingKind: RecordingKind | null
   /** 0..1 progress of the offline MP4 render (NaN for realtime capture) */
   recordProgress: number
+  /** Depth-pass near plane when `depthRangeAuto` is off */
+  depthNear: number
+  /** Depth-pass far plane when `depthRangeAuto` is off */
+  depthFar: number
+  /** When true, depth near/far follow scene bounds every frame */
+  depthRangeAuto: boolean
   /** shot currently framed in Compose (HUD / Sequence highlight) */
   activeShotId: string | null
   exportAspect: ExportAspect
@@ -137,6 +143,9 @@ interface EditorState {
   setExportRes: (res: ExportRes) => void
   setCustomSize: (size: [number, number]) => void
   setViewMode: (mode: ViewMode) => void
+  setDepthNear: (near: number) => void
+  setDepthFar: (far: number) => void
+  setDepthRangeAuto: (on: boolean) => void
   setAppView: (view: AppView) => void
   setWorkspaceMode: (mode: WorkspaceMode) => void
   setComposeDock: (dock: ComposeDock) => void
@@ -204,6 +213,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   visualizeMedia: 'still',
   directorExpanded: false,
   viewMode: 'clay',
+  depthNear: 0.1,
+  depthFar: 20,
+  depthRangeAuto: true,
   exportPasses: ['clay'],
   exportSize: null,
   showPreview: true,
@@ -259,6 +271,9 @@ export const useEditorStore = create<EditorState>((set) => ({
   setExportRes: (exportRes) => set({ exportRes }),
   setCustomSize: (customSize) => set({ customSize }),
   setViewMode: (viewMode) => set({ viewMode }),
+  setDepthNear: (depthNear) => set({ depthNear: Math.max(0.05, depthNear), depthRangeAuto: false }),
+  setDepthFar: (depthFar) => set({ depthFar: Math.max(0.06, depthFar), depthRangeAuto: false }),
+  setDepthRangeAuto: (depthRangeAuto) => set({ depthRangeAuto }),
   setAppView: (appView) => {
     if (appView === 'board') {
       set({

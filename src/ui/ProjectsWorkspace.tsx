@@ -4,28 +4,19 @@ import { createFolder, projectsInFolder, renameFolder, unfiledProjects } from '.
 import {
   bootProjects,
   createProject,
+  deleteProject,
   loadShot,
   moveProjectToFolder,
   removeFolder,
+  renameProject,
   switchProject,
 } from '../lib/projects'
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { GoogleSignInButton } from './GoogleSignInButton'
+import { PlusIcon, SearchIcon } from './icons'
 import { ProjectCard } from './ProjectCard'
-
-function FolderGlyph() {
-  return (
-    <svg width="28" height="22" viewBox="0 0 28 22" fill="none" aria-hidden className="text-ink-dim">
-      <path
-        d="M1.5 5.5A2 2 0 0 1 3.5 3.5h6.2l1.6 2H24.5A2 2 0 0 1 26.5 7.5v11A2 2 0 0 1 24.5 20.5h-21A2 2 0 0 1 1.5 18.5v-13Z"
-        stroke="currentColor"
-        strokeWidth="1.5"
-      />
-    </svg>
-  )
-}
 
 export function ProjectsWorkspace() {
   const projects = useProjectStore((state) => state.projectList)
@@ -45,11 +36,12 @@ export function ProjectsWorkspace() {
   const [renameValue, setRenameValue] = useState('')
 
   const openFolder = folders.find((folder) => folder.id === openFolderId) ?? null
-  const scoped = openFolder ? projectsInFolder(projects, openFolder.id) : unfiledProjects(projects)
   const needle = query.trim().toLowerCase()
+  const homeList = openFolder ? projectsInFolder(projects, openFolder.id) : unfiledProjects(projects)
+  const searchPool = !openFolder && needle ? projects : homeList
   const visible = needle
-    ? scoped.filter((project) => project.name.toLowerCase().includes(needle))
-    : scoped
+    ? searchPool.filter((project) => project.name.toLowerCase().includes(needle))
+    : homeList
 
   const openProject = async (projectId: string) => {
     setError(null)
@@ -165,70 +157,158 @@ export function ProjectsWorkspace() {
   }
 
   return (
-    <main className="h-full select-text overflow-auto bg-[#0f0f11] px-6 py-10 text-ink selection:bg-accent/30 sm:px-10 lg:px-16 lg:py-14">
+    <main className="h-full select-text overflow-auto bg-[#0f0f11] px-6 py-8 text-ink selection:bg-accent/30 sm:px-10 lg:px-14 lg:py-10">
       <div className="mx-auto max-w-6xl">
-        <header className="flex flex-wrap items-end justify-between gap-6">
-          <div>
-            {openFolder ? (
-              <button
-                type="button"
-                onClick={() => setOpenFolderId(null)}
-                className="text-xs text-ink-dim hover:text-ink"
-              >
-                ← All projects
-              </button>
-            ) : null}
-            <h1 className="text-2xl font-semibold tracking-tight">
-              {openFolder ? openFolder.name : 'Projects'}
-            </h1>
-            <p className="mt-1.5 text-sm text-ink-dim">
-              {openFolder
-                ? 'Projects and saved scenes in this folder.'
-                : 'Folders hold projects. Each project keeps saved scenes and versions.'}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {signedIn && cloudSession ? (
-              <div className="mr-2 flex items-center gap-2">
-                {cloudSession.picture ? (
-                  <img
-                    src={cloudSession.picture}
-                    alt=""
-                    className="h-8 w-8 rounded-full"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : null}
-                <span className="max-w-[14rem] truncate text-xs text-ink-dim">
-                  {cloudSession.email ?? cloudSession.name ?? cloudSession.userId}
-                </span>
+        <header className="flex flex-col gap-5">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              {openFolder ? (
                 <button
                   type="button"
-                  onClick={() => void useCloudAuthStore.getState().signOut()}
-                  className="rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-ink hover:bg-panel-3"
+                  onClick={() => setOpenFolderId(null)}
+                  className="text-xs text-ink-dim hover:text-ink"
                 >
-                  Sign out
+                  ← All projects
                 </button>
-              </div>
-            ) : null}
-            {!openFolder && (
+              ) : null}
+              <h1 className="text-[28px] font-semibold tracking-tight">
+                {openFolder ? openFolder.name : 'Projects'}
+              </h1>
+              <p className="mt-1 text-sm text-ink-dim">
+                {openFolder
+                  ? `${visible.length} ${visible.length === 1 ? 'project' : 'projects'} in this folder`
+                  : `${projects.length} ${projects.length === 1 ? 'project' : 'projects'}`}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {signedIn && cloudSession ? (
+                <div className="mr-1 flex items-center gap-2">
+                  {cloudSession.picture ? (
+                    <img
+                      src={cloudSession.picture}
+                      alt=""
+                      className="h-8 w-8 rounded-full"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : null}
+                  <span className="max-w-[12rem] truncate text-xs text-ink-dim">
+                    {cloudSession.email ?? cloudSession.name ?? cloudSession.userId}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => void useCloudAuthStore.getState().signOut()}
+                    className="rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-ink hover:bg-panel-3"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : null}
+              <label className="relative">
+                <SearchIcon
+                  size={14}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-ink-dim"
+                />
+                <input
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="Search projects"
+                  aria-label="Search projects"
+                  className="w-56 rounded-lg border border-line bg-panel-2 py-2 pl-8 pr-3 text-sm text-ink outline-none placeholder:text-ink-dim focus:border-accent"
+                />
+              </label>
+              {!openFolder && (
+                <button
+                  type="button"
+                  onClick={() => void newFolder()}
+                  className="rounded-lg border border-line bg-panel-2 px-3.5 py-2 text-sm text-ink hover:bg-panel-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  New folder
+                </button>
+              )}
               <button
                 type="button"
-                onClick={() => void newFolder()}
-                className="rounded-lg border border-line bg-panel-2 px-4 py-2 text-sm text-ink hover:bg-panel-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                disabled={projectBusy}
+                onClick={() => void newProject()}
+                title="Opens the editor with the Director pane"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-accent px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f11]"
               >
-                New folder
+                <PlusIcon size={14} />
+                {projectBusy ? 'Working…' : 'New project'}
               </button>
-            )}
-            <button
-              type="button"
-              disabled={projectBusy}
-              onClick={() => void newProject()}
-              title="Opens the editor with the Director pane"
-              className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-blue-500 disabled:cursor-wait disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-[#0f0f11]"
-            >
-              {projectBusy ? 'Working…' : 'New project'}
-            </button>
+            </div>
           </div>
+          {!openFolder && folders.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2" role="tablist" aria-label="Folders">
+              <button
+                type="button"
+                role="tab"
+                aria-selected
+                className="rounded-full bg-panel-3 px-3 py-1 text-xs text-ink"
+              >
+                Unfiled · {unfiledProjects(projects).length}
+              </button>
+              {folders.map((folder) => {
+                const count = projectsInFolder(projects, folder.id).length
+                return (
+                  <div key={folder.id} className="flex items-center rounded-full border border-line bg-panel-2">
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={false}
+                      onClick={() => setOpenFolderId(folder.id)}
+                      className="px-3 py-1 text-xs text-ink-dim hover:text-ink"
+                    >
+                      {folder.name} · {count}
+                    </button>
+                    {renamingId === folder.id ? (
+                      <input
+                        autoFocus
+                        value={renameValue}
+                        onChange={(event) => setRenameValue(event.target.value)}
+                        onBlur={() => void commitRename()}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') void commitRename()
+                          if (event.key === 'Escape') setRenamingId(null)
+                        }}
+                        className="mr-1 w-28 rounded-md border border-line bg-panel px-1.5 py-0.5 text-[11px] text-ink outline-none"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        title={`Rename ${folder.name}`}
+                        onClick={() => {
+                          setRenamingId(folder.id)
+                          setRenameValue(folder.name)
+                        }}
+                        className="px-1.5 text-[10px] text-ink-dim hover:text-ink"
+                      >
+                        Rename
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      title={`Delete ${folder.name}`}
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Delete “${folder.name}”? Projects inside move back to All projects.`,
+                          )
+                        ) {
+                          void removeFolder(folder.id).then(() => {
+                            if (openFolderId === folder.id) setOpenFolderId(null)
+                          })
+                        }
+                      }}
+                      className="pr-2.5 text-[10px] text-ink-dim hover:text-red-300"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </header>
         {error && (
           <p role="alert" className="mt-6 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
@@ -236,99 +316,11 @@ export function ProjectsWorkspace() {
           </p>
         )}
 
-        {!openFolder && folders.length > 0 && (
-          <section aria-labelledby="folder-list-title" className="mt-8">
-            <h2 id="folder-list-title" className="text-sm font-semibold">
-              Folders
-            </h2>
-            <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-              {folders.map((folder) => {
-                const count = projectsInFolder(projects, folder.id).length
-                return (
-                  <div
-                    key={folder.id}
-                    className="flex flex-col overflow-hidden rounded-xl border border-line bg-panel"
-                  >
-                    <button
-                      type="button"
-                      onClick={() => setOpenFolderId(folder.id)}
-                      className="flex aspect-[5/3] flex-col items-start justify-between p-4 text-left hover:bg-panel-2"
-                    >
-                      <FolderGlyph />
-                      <span className="mt-auto">
-                        <span className="block truncate text-sm font-medium text-ink">{folder.name}</span>
-                        <span className="mt-0.5 block text-xs text-ink-dim">
-                          {count} {count === 1 ? 'project' : 'projects'}
-                        </span>
-                      </span>
-                    </button>
-                    <div className="flex items-center gap-2 border-t border-line px-3 py-2">
-                      {renamingId === folder.id ? (
-                        <input
-                          autoFocus
-                          value={renameValue}
-                          onChange={(event) => setRenameValue(event.target.value)}
-                          onBlur={() => void commitRename()}
-                          onKeyDown={(event) => {
-                            if (event.key === 'Enter') void commitRename()
-                            if (event.key === 'Escape') setRenamingId(null)
-                          }}
-                          className="min-w-0 flex-1 rounded-md border border-line bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
-                        />
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setRenamingId(folder.id)
-                            setRenameValue(folder.name)
-                          }}
-                          className="text-[11px] text-ink-dim hover:text-ink"
-                        >
-                          Rename
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (
-                            window.confirm(
-                              `Delete “${folder.name}”? Projects inside move back to All projects.`,
-                            )
-                          ) {
-                            void removeFolder(folder.id).then(() => {
-                              if (openFolderId === folder.id) setOpenFolderId(null)
-                            })
-                          }
-                        }}
-                        className="ml-auto text-[11px] text-ink-dim hover:text-red-300"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </section>
-        )}
-
         <section aria-labelledby="project-list-title" className="mt-8">
-          <div className="flex items-center justify-between gap-4">
-            <h2 id="project-list-title" className="text-sm font-semibold">
-              {openFolder ? 'Projects' : 'Unfiled'} · {visible.length}
-            </h2>
-            {projects.length > 4 && (
-              <input
-                type="search"
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search projects"
-                aria-label="Search projects"
-                className="w-56 rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-ink outline-none placeholder:text-ink-dim focus:border-accent"
-              />
-            )}
-          </div>
-          <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
+          <h2 id="project-list-title" className="sr-only">
+            {openFolder ? openFolder.name : needle ? 'Search results' : 'Unfiled projects'}
+          </h2>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
             {visible.map((project) => (
               <ProjectCard
                 key={project.id}
@@ -339,6 +331,16 @@ export function ProjectsWorkspace() {
                 onOpen={() => void openProject(project.id)}
                 onOpenScene={(sceneId) => void openScene(project.id, sceneId)}
                 onMove={(folderId) => void moveProjectToFolder(project.id, folderId)}
+                onRename={(name) =>
+                  void renameProject(project.id, name).catch(() =>
+                    setError('The project could not be renamed.'),
+                  )
+                }
+                onDelete={() =>
+                  void deleteProject(project.id).catch(() =>
+                    setError('The project could not be deleted.'),
+                  )
+                }
               />
             ))}
             <button
@@ -346,20 +348,20 @@ export function ProjectsWorkspace() {
               disabled={projectBusy}
               onClick={() => void newProject()}
               title="Opens the editor with the Director pane"
-              className="flex aspect-[4/3] flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-ink-dim transition-colors hover:border-accent/60 hover:text-ink disabled:cursor-wait"
+              className="flex aspect-video flex-col items-center justify-center gap-2 rounded-xl border border-dashed border-line text-ink-dim transition-colors hover:border-accent/60 hover:text-ink disabled:cursor-wait"
             >
-              <span className="text-xl leading-none">+</span>
+              <PlusIcon size={18} />
               <span className="text-xs">New project</span>
             </button>
           </div>
-          {scoped.length === 0 && (
+          {homeList.length === 0 && !needle && (
             <p className="mt-6 text-sm text-ink-dim">
               {openFolder
                 ? 'This folder is empty. Create a project to start a camera move.'
                 : 'No unfiled projects. Create one, or open a folder.'}
             </p>
           )}
-          {scoped.length > 0 && visible.length === 0 && (
+          {visible.length === 0 && needle && (
             <p className="mt-6 text-sm text-ink-dim">No project matches “{query}”.</p>
           )}
         </section>

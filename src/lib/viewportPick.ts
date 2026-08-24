@@ -107,21 +107,21 @@ function takeClosest<T>(hits: TaggedHit<T>[]): TaggedHit<T>[] {
 }
 
 /**
- * The W/E/R transform gizmo of the current selection always wins — dragging
- * an arrow must not pick the mesh or camera sitting behind it. Everything
- * else uses true depth: a cube in front of the camera icon stays a cube.
- * Scene objects still beat the fat spline stroke. Repeated clicks in the
- * same spot cycle stacked objects.
+ * Helpers that sit on / inside the subject (W/E/R arrows, look-at handle)
+ * win the whole ray — R3F walks every leftover intersection until
+ * stopPropagation, and those helpers often have no mesh handler of their
+ * own. Camera icons still lose to a mesh in front. Scene objects still
+ * beat the fat spline. Repeated clicks in the same spot cycle stacked
+ * objects.
  */
 export function preferTaggedHits<T>(tagged: TaggedHit<T>[]): TaggedHit<T>[] {
   if (tagged.length === 0) return tagged
 
   const gizmos = tagged.filter((item) => item.kind === 'gizmo')
-  if (gizmos.length > 0) {
-    const chosen = takeClosest(gizmos)
-    const rest = tagged.filter((item) => !chosen.includes(item))
-    return [...chosen, ...rest]
-  }
+  if (gizmos.length > 0) return takeClosest(gizmos)
+
+  const targets = tagged.filter((item) => item.kind === 'target')
+  if (targets.length > 0) return takeClosest(targets)
 
   const closest = Math.min(...tagged.map((item) => item.distance))
   const slack = Math.max(0.14, closest * 0.1)
