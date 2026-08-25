@@ -173,6 +173,8 @@ describe('shortcut handlers', () => {
       'Delete',
       'WASD / arrows',
       'Space',
+      'P',
+      'D',
       'W E R',
       'T',
       'Shift+T',

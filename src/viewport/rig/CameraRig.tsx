@@ -14,6 +14,7 @@ import { useEditorOnly } from '../../lib/editorOnly'
 import { useScreenScale } from '../../lib/screenScale'
 import { useRigStore } from '../../state/useRigStore'
 import { isCinemaViewport } from '../../lib/workspaceChrome'
+import { useCameraOptionsStore } from '../../state/useCameraOptionsStore'
 import { useEditorStore } from '../../state/useEditorStore'
 import { usePathStore } from '../../state/usePathStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
@@ -76,6 +77,9 @@ export function CameraRig() {
   const selected = useEditorStore((s) => s.selection === 'cinema-camera')
   const tool = useEditorStore((s) => s.tool)
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
+  const activeCameraId = useCameraOptionsStore((s) => s.activeOptionId)
+  const cameraHidden = useEditorStore((s) => s.hiddenIds.includes(`cam:${activeCameraId}`))
+  const targetHidden = useEditorStore((s) => s.hiddenIds.includes('target'))
 
   const controls = useThree((s) => s.controls) as { enabled: boolean } | null
 
@@ -247,7 +251,7 @@ export function CameraRig() {
   return (
     <group ref={rootRef}>
       {/* camera body: proxy the gizmo moves + generous invisible pick target */}
-      <group ref={proxyRef}>
+      <group ref={proxyRef} visible={!cameraHidden}>
         <mesh
           ref={pickRef}
           userData={{ pickKind: 'camera', pickId: 'cinema-camera' }}
@@ -262,7 +266,7 @@ export function CameraRig() {
           <meshBasicMaterial transparent opacity={0} depthWrite={false} />
         </mesh>
       </group>
-      {showGizmo && (
+      {showGizmo && !cameraHidden && (
         <GizmoControls
           object={proxyRef as React.RefObject<THREE.Group>}
           mode={mode}
@@ -285,7 +289,7 @@ export function CameraRig() {
           }}
         />
       )}
-      <group ref={groundHandle}>
+      <group ref={groundHandle} visible={!cameraHidden}>
         <RingHandle
           kind="ground"
           billboard={false}
@@ -297,7 +301,7 @@ export function CameraRig() {
           onPointerUp={endDrag}
         />
       </group>
-      {lookAtMode === 'target' && (
+      {lookAtMode === 'target' && !targetHidden && (
         <group ref={targetHandle}>
           <RingHandle
             kind="target"
@@ -308,8 +312,8 @@ export function CameraRig() {
           />
         </group>
       )}
-      <primitive ref={dropRef} object={drop} />
-      {lookAtMode === 'target' && <primitive ref={aimRef} object={aim} />}
+      {!cameraHidden && <primitive ref={dropRef} object={drop} />}
+      {lookAtMode === 'target' && !targetHidden && <primitive ref={aimRef} object={aim} />}
     </group>
   )
 }

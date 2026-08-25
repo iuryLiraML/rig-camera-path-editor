@@ -72,14 +72,16 @@ describe('CameraRigHud', () => {
     expect(container.querySelector('[data-testid="camera-rig-hud"]')).toBeNull()
   })
 
-  it('shows fly hints, pose buttons, and an Exit camera button', () => {
+  it('shows a compact Esc chip, one fly hint, pose buttons, and Exit camera', () => {
     useRigStore.setState({ cameraKind: 'static', lookAtMode: 'free' })
     useEditorStore.setState({ selection: 'cinema-camera', cameraView: true })
     const { container } = render(<CameraRigHud />)
-    expect(container.textContent).toContain('Looking through')
-    expect(container.textContent).toContain('Drag to look')
-    expect(container.textContent).toContain('fly')
+    expect(container.textContent).toContain('Looking through · Esc')
     expect(container.textContent).toContain('WASD')
+    expect(container.textContent).toContain('fly')
+    expect(container.textContent).not.toContain('Drag to look')
+    expect(container.textContent).not.toContain('Aim locked')
+    expect(container.textContent).not.toContain('↑↓←→')
     expect(container.textContent).toContain('Add pose')
     expect(container.textContent).toContain('Remove pose')
     expect(container.textContent).toContain('Record fly')
@@ -91,27 +93,27 @@ describe('CameraRigHud', () => {
     expect(container.textContent).toContain('Safe')
     expect(container.querySelector('[data-testid="composition-guides"]')).toBeTruthy()
     expect(container.querySelector('[data-testid="film-gate"]')).toBeTruthy()
-    expect(container.textContent).not.toContain('Esc exits')
   })
 
-  it('says aim is locked until the user drags to look', () => {
+  it('hints Scroll FOV while the aim handle is still locked', () => {
     useRigStore.setState({ cameraKind: 'static', lookAtMode: 'target' })
     useEditorStore.setState({ selection: 'cinema-camera', cameraView: true })
     const { container } = render(<CameraRigHud />)
-    expect(container.textContent).not.toContain('Drag to look')
-    expect(container.textContent).toContain('Aim locked')
-    expect(container.textContent).toContain('fly')
+    expect(container.textContent).toContain('Looking through · Esc')
+    expect(container.textContent).toContain('Scroll')
+    expect(container.textContent).toContain('FOV')
+    expect(container.textContent).not.toContain('WASD')
+    expect(container.textContent).not.toContain('Aim locked')
   })
 
   it('offers the same fly + pose controls on a path camera', () => {
     seedPathCamera()
     useEditorStore.setState({ selection: 'cinema-camera', cameraView: true })
     const { container } = render(<CameraRigHud />)
-    expect(container.textContent).toContain('Looking through')
-    expect(container.textContent).toContain('fly')
+    expect(container.textContent).toContain('Looking through · Esc')
     expect(container.textContent).toContain('Add pose')
     expect(container.textContent).toContain('Exit camera')
-    expect(container.textContent).not.toContain('FOV')
+    expect(container.textContent).not.toContain('24 mm')
     expect(container.querySelector('[data-testid="look-through-frame"]')).toBeTruthy()
     expect(
       container.querySelector('[data-testid="look-through-frame"]')?.getAttribute('data-recording'),
@@ -170,7 +172,15 @@ describe('CameraRigHud', () => {
     expect(useEditorStore.getState().compositionGuides.thirds).toBe(false)
   })
 
-  it('exits look-through from the center Exit camera button', () => {
+  it('exits look-through from the compact Esc chip', () => {
+    seedPathCamera()
+    useEditorStore.setState({ cameraView: true })
+    const { getByTitle } = render(<CameraRigHud />)
+    fireEvent.click(getByTitle('Leave look-through (Esc)'))
+    expect(useEditorStore.getState().cameraView).toBe(false)
+  })
+
+  it('exits look-through from the Exit camera button', () => {
     seedPathCamera()
     useEditorStore.setState({ cameraView: true })
     const { getByTitle } = render(<CameraRigHud />)
@@ -240,5 +250,19 @@ describe('ViewportFooter', () => {
     useEditorStore.setState({ cameraView: false })
     const { container } = render(<ViewportFooter />)
     expect(container.textContent).toContain('Show look-at')
+  })
+
+  it('shows an eye toggle in Outline to hide scene objects', () => {
+    useEditorStore.setState({ cameraView: false, viewMode: 'outline', showSceneObjects: true })
+    const { getByTitle, queryByTitle, rerender } = render(<ViewportFooter />)
+    expect(getByTitle('Hide scene objects')).toBeTruthy()
+    fireEvent.click(getByTitle('Hide scene objects'))
+    expect(useEditorStore.getState().showSceneObjects).toBe(false)
+    expect(getByTitle('Show scene objects')).toBeTruthy()
+    fireEvent.click(getByTitle('Show scene objects'))
+    expect(useEditorStore.getState().showSceneObjects).toBe(true)
+    useEditorStore.setState({ viewMode: 'clay' })
+    rerender(<ViewportFooter />)
+    expect(queryByTitle('Hide scene objects')).toBeNull()
   })
 })

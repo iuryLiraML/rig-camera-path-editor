@@ -88,30 +88,47 @@ export async function subscribe<T>(
   return result.data as T
 }
 
-export async function fileToDataUri(file: File): Promise<string> {
-  const buffer = await file.arrayBuffer()
-  const bytes = new Uint8Array(buffer)
-  let binary = ''
-  for (const byte of bytes) binary += String.fromCharCode(byte)
-  const base64 = btoa(binary)
-  const type = file.type || 'image/jpeg'
-  return `data:${type};base64,${base64}`
+export const DATA_URI_LIMIT = 4_000_000
+
+/** GLBs must not take the data-URI path — base64 of a mesh freezes the editor. */
+export function uploadUsesDataUri(file: File): boolean {
+  if (file.size > DATA_URI_LIMIT) return false
+  if (file.type === 'model/gltf-binary' || /\.glb$/i.test(file.name)) return false
+  return true
 }
 
-const DATA_URI_LIMIT = 4_000_000
+export async function fileToDataUri(file: File): Promise<string> {
+  if (typeof FileReader === 'function') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result ?? ''))
+      reader.onerror = () => reject(reader.error ?? new Error('Could not read file'))
+      reader.readAsDataURL(file)
+    })
+  }
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  const chunks: string[] = []
+  const step = 0x8000
+  for (let i = 0; i < bytes.length; i += step) {
+    chunks.push(String.fromCharCode(...bytes.subarray(i, i + step)))
+    if (i > 0 && i % (step * 32) === 0) await Promise.resolve()
+  }
+  const type = file.type || 'image/jpeg'
+  return `data:${type};base64,${btoa(chunks.join(''))}`
+}
 
 export async function uploadImage(file: File, signal?: AbortSignal): Promise<string> {
   return uploadFile(file, signal)
 }
 
-/** GLB uploads skip the data-URI path when they would blow past the size cap. */
+/** GLB remesh uploads always go through Fal storage, never base64. */
 export async function uploadFile(file: File, signal?: AbortSignal): Promise<string> {
   if (!falUsable()) {
     throw new Error('Add your Fal API key in Settings first.')
   }
   throwIfAborted(signal)
   if (uploadImpl) return uploadImpl(file, signal)
-  if (file.size <= DATA_URI_LIMIT) return fileToDataUri(file)
+  if (uploadUsesDataUri(file)) return fileToDataUri(file)
   throwIfAborted(signal)
   return liveClient().storage.upload(file)
 }

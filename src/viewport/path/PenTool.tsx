@@ -46,7 +46,7 @@ function ignoreRaycast() {
   // Visual construction plane only — placement listens on the canvas.
 }
 
-function rayFromPointer(
+export function rayFromPointer(
   e: PointerEvent,
   el: HTMLCanvasElement,
   editorCam: THREE.Camera,

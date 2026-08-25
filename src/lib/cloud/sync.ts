@@ -1,4 +1,5 @@
 import { idbGet, idbPut, STORES } from '../idb'
+import { persistModelBuffer } from '../readModelFile'
 import {
   createCloudProject,
   defaultWorkflowPayload,
@@ -48,7 +49,7 @@ export async function hydrateCloudProject(projectId: string): Promise<ProjectRec
     if (!meta.bufferKey || !meta.bufferAssetId) continue
     try {
       const bytes = await downloadCloudAsset(accessToken, meta.bufferAssetId)
-      await idbPut(STORES.buffers, bytes, meta.bufferKey)
+      await persistModelBuffer(meta.bufferKey, bytes)
     } catch {
       throw new Error(`The GLB for “${meta.name}” is missing from storage.`)
     }

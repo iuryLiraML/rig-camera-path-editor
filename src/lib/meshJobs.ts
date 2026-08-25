@@ -221,7 +221,7 @@ export async function remeshSceneObject(objectId: string, opts: RemeshSceneObjec
     remeshQueue.push({
       objectId,
       buffer: opts.sourceBuffer,
-      bufferKey: opts.sourceBuffer ? undefined : object.bufferKey,
+      bufferKey: opts.sourceBuffer ? undefined : object.bufferKey ?? undefined,
       placeholder: Boolean(opts.placeholder),
       recordUndo,
       objectName: object.name,

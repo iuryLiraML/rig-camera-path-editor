@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { editorChrome, isCinemaViewport, isPathEditing, isSceneEditing } from './workspaceChrome'
+import { editorChrome, isCinemaViewport, isPathEditing, isPathStrokeTool, isSceneEditing, pathGuidesVisible } from './workspaceChrome'
 
 describe('editorChrome', () => {
   it('hides every overlay in play mode', () => {
@@ -73,6 +73,9 @@ describe('editorChrome', () => {
     expect(isSceneEditing(false, 'build')).toBe(true)
     expect(isPathEditing(false, 'build')).toBe(false)
     expect(isPathEditing(false, 'compose')).toBe(true)
+    expect(isPathStrokeTool('pen')).toBe(true)
+    expect(isPathStrokeTool('draw')).toBe(true)
+    expect(isPathStrokeTool('select')).toBe(false)
   })
 
   it('treats Visualize as a cinema viewport without playMode or look-through', () => {
@@ -81,5 +84,12 @@ describe('editorChrome', () => {
     expect(isCinemaViewport(false, false, 'build')).toBe(false)
     expect(isCinemaViewport(true, false, 'compose')).toBe(true)
     expect(isCinemaViewport(false, true, 'compose')).toBe(true)
+  })
+
+  it('hides path guides in Compose when the camera is Free (static)', () => {
+    expect(pathGuidesVisible(false, 'compose', 'static')).toBe(false)
+    expect(pathGuidesVisible(false, 'compose', 'path')).toBe(true)
+    expect(pathGuidesVisible(false, 'build', 'static')).toBe(true)
+    expect(pathGuidesVisible(false, 'visualize', 'path')).toBe(false)
   })
 })

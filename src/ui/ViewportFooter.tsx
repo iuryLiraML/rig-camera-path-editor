@@ -2,6 +2,7 @@ import type { ReactNode } from 'react'
 import { useEditorStore, type Projection, type QuickView, type ViewMode } from '../state/useEditorStore'
 import { detectPreset, leafList, useLayoutStore, type LayoutPreset } from '../state/useLayoutStore'
 import { LookCluster } from './LookCluster'
+import { EyeIcon, EyeOffIcon } from './icons'
 import { chromeBand, GUTTER, useViewportInsets, useWindowSize } from './viewportInsets'
 
 const VIEWS: { value: QuickView; label: string }[] = [
@@ -35,6 +36,8 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
   const requestView = useEditorStore((s) => s.requestView)
   const viewMode = useEditorStore((s) => s.viewMode)
   const setViewMode = useEditorStore((s) => s.setViewMode)
+  const showSceneObjects = useEditorStore((s) => s.showSceneObjects)
+  const toggleShowSceneObjects = useEditorStore((s) => s.toggleShowSceneObjects)
   const insets = useViewportInsets()
   const paneCount = useLayoutStore((s) => leafList(s.root).length)
   const preset = useLayoutStore((s) => detectPreset(s.root))
@@ -79,6 +82,21 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
             </button>
           ))}
         </div>
+        {viewMode === 'outline' && (
+          <button
+            type="button"
+            title={showSceneObjects ? 'Hide scene objects' : 'Show scene objects'}
+            aria-pressed={showSceneObjects}
+            onClick={() => toggleShowSceneObjects()}
+            className={`flex h-7 w-7 items-center justify-center rounded-full transition-colors ${
+              showSceneObjects
+                ? 'text-ink-dim hover:bg-panel-3 hover:text-ink'
+                : 'bg-panel-3 text-ink'
+            }`}
+          >
+            {showSceneObjects ? <EyeIcon size={13} /> : <EyeOffIcon size={13} />}
+          </button>
+        )}
       </div>
 
       {center && <div className="pointer-events-auto shrink-0">{center}</div>}

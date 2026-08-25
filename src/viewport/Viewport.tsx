@@ -16,6 +16,7 @@ import { AXIS_GIZMO_RADIUS, bottomLeftStack, useViewportInsets } from '../ui/vie
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
 import { SceneObjects } from './SceneObjects'
+import { DrawTool } from './path/DrawTool'
 import { PenTool } from './path/PenTool'
 import { InactivePaths, PathEditor } from './path/PathEditor'
 import { CinemaCamera, cinemaCameraRef } from './rig/CinemaCamera'
@@ -146,6 +147,7 @@ export function Viewport() {
   const staticCamera = useRigStore((s) => s.cameraKind === 'static')
   const exportSize = useEditorStore((s) => s.exportSize)
   const viewMode = useEditorStore((s) => s.viewMode)
+  const lightHidden = useEditorStore((s) => s.hiddenIds.includes('light'))
   const tech = isTechMode(viewMode)
   const cinema = isCinemaViewport(playMode, cameraView, workspaceMode)
   const lookThroughHud = cameraView && !playMode && workspaceMode !== 'visualize'
@@ -191,6 +193,7 @@ export function Viewport() {
 
       <ambientLight intensity={0.55} />
       <directionalLight
+        visible={!lightHidden}
         position={[4, 7, 4]}
         intensity={lightIntensity}
         castShadow={!tech}
@@ -204,11 +207,12 @@ export function Viewport() {
         shadow-bias={-0.0002}
       />
       {/* soft fill from the opposite side so clay never reads flat-black */}
-      <directionalLight position={[-5, 3, -4]} intensity={0.35} />
+      <directionalLight visible={!lightHidden} position={[-5, 3, -4]} intensity={0.35} />
 
       <SceneObjects />
 
-      {tool === 'pen' && isPathEditing(playMode, workspaceMode) && !tech && <PenTool />}
+      {tool === 'pen' && isPathEditing(playMode, workspaceMode) && !staticCamera && !tech && <PenTool />}
+      {tool === 'draw' && isPathEditing(playMode, workspaceMode) && !cameraView && !tech && <DrawTool />}
       <InactivePaths />
       <PathEditor />
       <CinemaCamera />

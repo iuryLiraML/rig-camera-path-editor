@@ -5,7 +5,7 @@ import { applyBeginPlayback } from '../lib/playback'
 import { openComposeTimeline } from '../lib/editorShortcuts'
 import { AddSceneMenu } from './AddSceneMenu'
 import { ExportActions, ExportFormatFields, ExportPassToggles } from './ExportControls'
-import { ClockIcon, CursorIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
+import { ClockIcon, CursorIcon, DrawPathIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
 import { toolbarSlot, useViewportInsets, useWindowSize } from './viewportInsets'
 
 function ToolButton({
@@ -162,13 +162,22 @@ export function Toolbar() {
             <CursorIcon />
           </ToolButton>
           {composeTools && (
+            <>
             <ToolButton
-              title="Pen — draw the camera path (P)"
+              title="Pen — click to place path points (P)"
               active={tool === 'pen'}
               onClick={() => setTool('pen')}
             >
               <PenIcon />
             </ToolButton>
+            <ToolButton
+              title="Draw — stroke a new camera path from the top view (D)"
+              active={tool === 'draw'}
+              onClick={() => setTool('draw')}
+            >
+              <DrawPathIcon />
+            </ToolButton>
+            </>
           )}
           <Divider />
           <div className="flex items-center gap-px px-0.5">

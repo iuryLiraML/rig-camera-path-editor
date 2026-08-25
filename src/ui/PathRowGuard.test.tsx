@@ -38,7 +38,7 @@ const deleteButtonFor = (container: HTMLElement, label: string) => {
 }
 
 beforeEach(() => {
-  useEditorStore.setState({ playMode: false, selection: null })
+  useEditorStore.setState({ playMode: false, selection: null, hiddenIds: [] })
   usePathStore.setState({
     paths: [
       { id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 },
@@ -48,7 +48,10 @@ beforeEach(() => {
   })
 })
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  useEditorStore.setState({ hiddenIds: [] })
+})
 
 describe('path row remove control', () => {
   it('offers deletion for a path no camera follows', () => {
@@ -138,5 +141,47 @@ describe('scene object remove control', () => {
     )
     expect(button).toBeTruthy()
     expect(button!.disabled).toBe(false)
+  })
+})
+
+describe('outliner visibility toggle', () => {
+  const hideButtonFor = (container: HTMLElement, label: string) => {
+    const row = Array.from(container.querySelectorAll('div.group')).find((el) =>
+      el.textContent?.includes(label),
+    )
+    if (!row) return null
+    return (
+      Array.from(row.querySelectorAll('button')).find((b) =>
+        b.title.startsWith('Hide ') || b.title.startsWith('Show '),
+      ) ?? null
+    )
+  }
+
+  it('shows an eye on scene, light, camera and path rows', () => {
+    const knot = makeDefaultKnotObject({ id: 'obj-knot' })
+    knot.name = 'Torus Knot'
+    useSceneStore.setState({ objects: [knot] })
+    useCameraOptionsStore.setState({
+      options: [cameraOn('Wide', CAMERA_PATH_ID)],
+      activeOptionId: 'cam-Wide',
+    })
+    const { container, getByTitle } = render(<LeftPanel />)
+    expect(hideButtonFor(container, 'Torus Knot')?.title).toBe('Hide Torus Knot')
+    expect(getByTitle('Hide Directional Light')).toBeTruthy()
+    expect(hideButtonFor(container, 'Wide')?.title).toBe('Hide Wide')
+    expect(hideButtonFor(container, 'Camera Path')?.title).toBe('Hide Camera Path')
+  })
+
+  it('hides a scene object without deleting it', () => {
+    const knot = makeDefaultKnotObject({ id: 'obj-knot' })
+    knot.name = 'Torus Knot'
+    useSceneStore.setState({ objects: [knot] })
+    const { getByTitle, rerender } = render(<LeftPanel />)
+    getByTitle('Hide Torus Knot').click()
+    expect(useEditorStore.getState().hiddenIds).toContain('obj:obj-knot')
+    expect(useSceneStore.getState().objects).toHaveLength(1)
+    rerender(<LeftPanel />)
+    getByTitle('Show Torus Knot').click()
+    expect(useEditorStore.getState().hiddenIds).not.toContain('obj:obj-knot')
   })
 })

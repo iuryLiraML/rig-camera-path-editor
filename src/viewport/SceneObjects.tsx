@@ -106,6 +106,8 @@ function ObjectNode({ object }: { object: SceneObject }) {
   const playMode = useEditorStore((s) => s.playMode)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const locked = useEditorStore((s) => s.lockedIds.includes(object.id))
+  const showSceneObjects = useEditorStore((s) => s.showSceneObjects)
+  const objectHidden = useEditorStore((s) => s.hiddenIds.includes(`obj:${object.id}`))
   const editing = isSceneEditing(playMode, workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const [hovered, setHovered] = useState(false)
@@ -292,6 +294,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
     <>
       <group
         ref={groupRef}
+        visible={showSceneObjects && !objectHidden}
         userData={{ pickKind: 'object', pickId: `obj:${object.id}` }}
         onPointerDown={(e) => {
           const editor = useEditorStore.getState()

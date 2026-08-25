@@ -25,6 +25,37 @@ describe('replaceImportedRoot', () => {
     expect(live?.primitive).toBeUndefined()
     expect(mesh.material).toBe(live?.material)
   })
+
+  it('keeps the cached triangle count when swapping in a remesh placeholder', () => {
+    const first = new THREE.Group()
+    first.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))
+    const object = makeObject('Car', first, {
+      bufferKey: 'car',
+      id: 'car',
+      triangleCount: 90_000,
+    })
+    useSceneStore.setState({ objects: [object] })
+    const cube = new THREE.Group()
+    cube.userData.rigRemeshPlaceholder = true
+    cube.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))
+    useSceneStore.getState().replaceImportedRoot('car', cube, [])
+    expect(useSceneStore.getState().objects[0]?.triangleCount).toBe(90_000)
+  })
+
+  it('copies the cached triangle count when duplicating an import', () => {
+    const root = new THREE.Group()
+    root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))
+    const object = makeObject('Car', root, {
+      bufferKey: 'car',
+      id: 'car',
+      triangleCount: 90_000,
+    })
+    useSceneStore.setState({ objects: [object] })
+    useSceneStore.getState().duplicateObject('car')
+    const copy = useSceneStore.getState().objects.find((item) => item.id !== 'car')
+    expect(copy?.triangleCount).toBe(90_000)
+    expect(copy?.bufferKey).toBe('car')
+  })
 })
 
 describe('pending generate jobs', () => {

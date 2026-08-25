@@ -16,6 +16,8 @@ import { AddSceneMenu, addDrawnPath } from './AddSceneMenu'
 import {
   CameraIcon,
   CubeIcon,
+  EyeIcon,
+  EyeOffIcon,
   ImportIcon,
   DotsIcon,
   PenIcon,
@@ -26,6 +28,40 @@ import {
   TrashIcon,
 } from './icons'
 import { GUTTER, TOP_ROW_HEIGHT, useViewportInsets } from './viewportInsets'
+
+function VisibilityToggle({
+  hideId,
+  name,
+  selected,
+}: {
+  hideId: string
+  name: string
+  selected?: boolean
+}) {
+  const hidden = useEditorStore((s) => s.hiddenIds.includes(hideId))
+  return (
+    <button
+      type="button"
+      title={hidden ? `Show ${name}` : `Hide ${name}`}
+      aria-pressed={!hidden}
+      onClick={(e) => {
+        e.stopPropagation()
+        useEditorStore.getState().toggleHidden(hideId)
+      }}
+      className={`shrink-0 rounded p-1 ${
+        selected
+          ? hidden
+            ? 'text-white/45 hover:bg-white/15 hover:text-white'
+            : 'text-white/70 hover:bg-white/15 hover:text-white'
+          : hidden
+            ? 'text-ink-dim/45 hover:bg-panel hover:text-ink'
+            : 'text-ink-dim hover:bg-panel hover:text-ink'
+      }`}
+    >
+      {hidden ? <EyeOffIcon size={12} /> : <EyeIcon size={12} />}
+    </button>
+  )
+}
 
 function TreeItem({
   id,
@@ -38,17 +74,23 @@ function TreeItem({
 }) {
   const selection = useEditorStore((s) => s.selection)
   const select = useEditorStore((s) => s.select)
+  const hidden = useEditorStore((s) => s.hiddenIds.includes(id))
   const selected = selection === id
   return (
-    <button
-      onClick={() => select(selected ? null : id)}
-      className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors ${
+    <div
+      className={`group flex w-full items-center gap-1 rounded-md pr-1 transition-colors ${
         selected ? 'bg-accent text-white' : 'text-ink hover:bg-panel-2'
       }`}
     >
-      <span className={selected ? 'text-white' : 'text-ink-dim'}>{icon}</span>
-      <span className="truncate">{name}</span>
-    </button>
+      <button
+        onClick={() => select(selected ? null : id)}
+        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
+      >
+        <span className={selected ? 'text-white' : 'text-ink-dim'}>{icon}</span>
+        <span className={`truncate ${hidden ? 'opacity-45' : ''}`}>{name}</span>
+      </button>
+      <VisibilityToggle hideId={id} name={name} selected={selected} />
+    </div>
   )
 }
 
@@ -67,6 +109,7 @@ function ObjectTreeItem({
   const remeshJob = useSceneStore((s) => s.pendingLifts.find((lift) => lift.objectId === id))
   const selectableId: SelectableId = `obj:${id}`
   const selected = selection === selectableId
+  const hidden = useEditorStore((s) => s.hiddenIds.includes(selectableId))
   const [confirming, setConfirming] = useState(false)
 
   useEffect(() => {
@@ -91,8 +134,11 @@ function ObjectTreeItem({
         ) : (
           <span className={selected ? 'text-white' : 'text-ink-dim'}>{icon}</span>
         )}
-        <span className="truncate">{remeshJob ? `${name} — Remeshing…` : name}</span>
+        <span className={`truncate ${hidden ? 'opacity-45' : ''}`}>
+          {remeshJob ? `${name} — Remeshing…` : name}
+        </span>
       </button>
+      <VisibilityToggle hideId={selectableId} name={name} selected={selected} />
       {remeshJob ? (
         <button
           type="button"
@@ -155,6 +201,7 @@ function PathTreeItem({ id, name }: { id: string; name: string }) {
   const pathCount = usePathStore((s) => s.paths.length)
   const followedBy = useCameraFollowers(id)
   const selected = selection === 'camera-path' && activePathId === id
+  const hidden = useEditorStore((s) => s.hiddenIds.includes(`path:${id}`))
   const [confirming, setConfirming] = useState(false)
 
   /*
@@ -194,8 +241,9 @@ function PathTreeItem({ id, name }: { id: string; name: string }) {
         <span className={selected ? 'text-white' : 'text-ink-dim'}>
           <PenIcon />
         </span>
-        <span className="truncate">{name}</span>
+        <span className={`truncate ${hidden ? 'opacity-45' : ''}`}>{name}</span>
       </button>
+      <VisibilityToggle hideId={`path:${id}`} name={name} selected={selected} />
       {confirming && !blocked ? (
         <button
           onClick={(e) => {
@@ -237,6 +285,7 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
   const selection = useEditorStore((s) => s.selection)
   const active = id === activeOptionId
   const selected = active && selection === 'cinema-camera'
+  const hidden = useEditorStore((s) => s.hiddenIds.includes(`cam:${id}`))
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
   const [confirming, setConfirming] = useState(false)
@@ -296,9 +345,10 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
             className={`w-full bg-transparent outline-none ${selected ? 'text-white' : 'text-ink'}`}
           />
         ) : (
-          <span className="truncate">{name}</span>
+          <span className={`truncate ${hidden ? 'opacity-45' : ''}`}>{name}</span>
         )}
       </button>
+      <VisibilityToggle hideId={`cam:${id}`} name={name} selected={selected} />
 {/* This was a 10px "x" at opacity-0 until you hovered the exact row, which
           read as "cameras cannot be deleted". Always visible, real icon, and it
           asks once before throwing away a camera move. */}

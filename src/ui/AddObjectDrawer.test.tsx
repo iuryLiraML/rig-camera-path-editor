@@ -50,3 +50,23 @@ describe('AddObjectDrawer generate chip', () => {
     expect(container.querySelector('textarea')).not.toBeNull()
   })
 })
+
+describe('AddObjectDrawer primitive previews', () => {
+  it('shows a distinct shape preview for every primitive, not a shared cube icon', () => {
+    const { container } = render(<AddObjectDrawer />)
+    const tiles = Array.from(container.querySelectorAll('[data-primitive]'))
+    expect(tiles.map((tile) => tile.getAttribute('data-primitive'))).toEqual([
+      'box',
+      'sphere',
+      'cylinder',
+      'cone',
+      'plane',
+      'torus',
+    ])
+    const previews = tiles.map((tile) =>
+      tile.querySelector('[data-primitive-preview]')?.getAttribute('data-primitive-preview'),
+    )
+    expect(previews).toEqual(['box', 'sphere', 'cylinder', 'cone', 'plane', 'torus'])
+    expect(container.querySelector('button[data-primitive] svg[viewBox="0 0 16 16"]')).toBeNull()
+  })
+})

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import * as THREE from 'three'
-import { lockOrbit, resetOrbitLock } from '../lib/orbitLock'
+import { lockOrbit, resetOrbitLock, restoreViewportNav } from '../lib/orbitLock'
 
 vi.mock('./SceneObjects', () => ({ sceneBounds: () => null }))
 
@@ -50,6 +50,17 @@ describe('spatialViews', () => {
     spatialCameras.front.position.set(4, 5, 6)
     bindOrbitToPane(controls, 'front', editor, true)
     expect(spatialCameras.front.position.toArray()).toEqual([4, 5, 6])
+  })
+
+  it('re-enables editor orbit after a cinema-pane bind and a leaked lock', () => {
+    const editor = new THREE.PerspectiveCamera()
+    const controls = fakeOrbit(editor)
+    bindOrbitToPane(controls, 'camera', editor, true)
+    expect(controls.enabled).toBe(false)
+    lockOrbit()
+    restoreViewportNav(controls)
+    bindOrbitToPane(controls, 'editor', editor, true)
+    expect(controls.enabled).toBe(true)
   })
 
   it('does not orbit the cinema pane', () => {

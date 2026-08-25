@@ -40,7 +40,7 @@ export function OnboardingCard() {
     )
   }
 
-  if (anchors >= 2 || tool === 'pen') return null
+  if (anchors >= 2 || tool === 'pen' || tool === 'draw') return null
 
   const onePoint = anchors === 1
   return (

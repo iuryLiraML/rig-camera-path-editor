@@ -143,7 +143,8 @@ function MoreMenu({ objectId }: { objectId: string }) {
   const falKey = useAgentStore((s) => s.falKey)
   const serverFal = useAgentStore((s) => s.serverKeys.fal)
   const canFal = Boolean(falKey.trim()) || serverFal
-  const needsRetopo = objectNeedsRetopo(objectId)
+  const remeshJob = useSceneStore((s) => s.pendingLifts.find((lift) => lift.objectId === objectId))
+  const needsRetopo = !remeshJob && objectNeedsRetopo(objectId)
   const ref = useRef<HTMLDivElement>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 

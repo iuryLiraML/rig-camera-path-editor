@@ -91,6 +91,8 @@ export const SHORTCUT_ROWS: { keys: string; action: string }[] = [
   { keys: 'Delete', action: 'Remove that key (then the object if none)' },
   { keys: 'WASD / arrows', action: 'Fly the cinema camera (look-through)' },
   { keys: 'Space', action: 'Play / pause' },
+  { keys: 'P', action: 'Pen — place path points (Compose)' },
+  { keys: 'D', action: 'Draw a new camera path (Compose)' },
   { keys: 'W E R', action: 'Move / rotate / scale (opens Transform)' },
   { keys: 'T', action: 'Focus Timeline (Compose)' },
   { keys: 'Shift+T', action: 'Toggle Graph Editor' },

@@ -7,6 +7,7 @@ import {
   type CompositionGuides,
 } from '../lib/compositionGuides'
 import { clampTimeView, FULL_TIME_VIEW, type TimeView } from '../lib/timeView'
+import { resetOrbitLock } from '../lib/orbitLock'
 import { usePathStore } from './usePathStore'
 import type { RigChannel } from './useRigStore'
 
@@ -14,7 +15,7 @@ export type SelectedTimelineKey =
   | { kind: 'rig'; channel: RigChannel; id: string }
   | { kind: 'object'; objectId: string; id: string }
 
-export type Tool = 'select' | 'pen'
+export type Tool = 'select' | 'pen' | 'draw'
 export type Projection = 'perspective' | 'orthographic'
 export type GizmoMode = 'translate' | 'rotate' | 'scale'
 export type ExportAspect = '16:9' | '1:1' | '9:16'
@@ -96,6 +97,8 @@ interface EditorState {
   showImportModal: boolean
   /** Object ids that refuse transform (Lock on the object bar). */
   lockedIds: string[]
+  /** Outliner hide — scene objects, lights, targets, cameras and paths. */
+  hiddenIds: string[]
   /** Visualize Generate media toggle — still vs motion reference. */
   visualizeMedia: VisualizeMedia
   /** Director composer transcript is open above the floating bar. */
@@ -138,6 +141,8 @@ interface EditorState {
   flyRecording: boolean
   /** On-lens composition guides while looking through. */
   compositionGuides: CompositionGuides
+  /** Scene meshes in the viewport (outline mode can hide them for a clean line pass). */
+  showSceneObjects: boolean
   setTool: (tool: Tool) => void
   setProjection: (projection: Projection) => void
   select: (id: SelectableId | null) => void
@@ -153,6 +158,8 @@ interface EditorState {
   setExportRes: (res: ExportRes) => void
   setCustomSize: (size: [number, number]) => void
   setViewMode: (mode: ViewMode) => void
+  setShowSceneObjects: (show: boolean) => void
+  toggleShowSceneObjects: () => void
   setDepthNear: (near: number) => void
   setDepthFar: (far: number) => void
   setDepthRangeAuto: (on: boolean) => void
@@ -167,6 +174,7 @@ interface EditorState {
   setCameraPanel: (panel: CameraPanel) => void
   setShowImportModal: (on: boolean) => void
   toggleLock: (id: string) => void
+  toggleHidden: (id: string) => void
   setVisualizeMedia: (media: VisualizeMedia) => void
   setDirectorExpanded: (on: boolean) => void
   toggleExportPass: (pass: ViewMode) => void
@@ -221,6 +229,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   cameraPanel: 'closed',
   showImportModal: false,
   lockedIds: [],
+  hiddenIds: [],
   visualizeMedia: 'still',
   directorExpanded: false,
   viewMode: 'clay',
@@ -251,7 +260,18 @@ export const useEditorStore = create<EditorState>((set) => ({
   lookThroughLivePose: false,
   flyRecording: false,
   compositionGuides: { ...DEFAULT_COMPOSITION_GUIDES },
-  setTool: (tool) => set({ tool }),
+  showSceneObjects: true,
+  setTool: (tool) =>
+    set((s) => {
+      if (tool !== 'pen' && tool !== 'draw') resetOrbitLock()
+      return tool === 'draw'
+        ? {
+            tool,
+            projection: 'orthographic' as const,
+            viewRequest: { view: 'top' as const, n: (s.viewRequest?.n ?? 0) + 1 },
+          }
+        : { tool }
+    }),
   setProjection: (projection) => set({ projection }),
   select: (selection) => {
     set((s) => ({
@@ -290,6 +310,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   setExportRes: (exportRes) => set({ exportRes }),
   setCustomSize: (customSize) => set({ customSize }),
   setViewMode: (viewMode) => set({ viewMode }),
+  setShowSceneObjects: (showSceneObjects) => set({ showSceneObjects }),
+  toggleShowSceneObjects: () => set((s) => ({ showSceneObjects: !s.showSceneObjects })),
   setDepthNear: (depthNear) => set({ depthNear: Math.max(0.05, depthNear), depthRangeAuto: false }),
   setDepthFar: (depthFar) => set({ depthFar: Math.max(0.06, depthFar), depthRangeAuto: false }),
   setDepthRangeAuto: (depthRangeAuto) => set({ depthRangeAuto }),
@@ -305,22 +327,25 @@ export const useEditorStore = create<EditorState>((set) => ({
     set({ appView })
   },
   setWorkspaceMode: (workspaceMode) =>
-    set((s) => ({
-      workspaceMode,
-      ...(workspaceMode !== 'compose' && s.cameraView
-        ? { cameraView: false, flyRecording: false, lookThroughLivePose: false }
-        : {}),
-      tool:
-        workspaceMode === 'visualize'
-          ? 'select'
-          : workspaceMode !== 'compose' && s.tool === 'pen'
+    set((s) => {
+      resetOrbitLock()
+      return {
+        workspaceMode,
+        ...(workspaceMode !== 'compose' && s.cameraView
+          ? { cameraView: false, flyRecording: false, lookThroughLivePose: false }
+          : {}),
+        tool:
+          workspaceMode === 'visualize'
             ? 'select'
-            : s.tool,
-      showAddDrawer: workspaceMode === 'build' ? s.showAddDrawer : false,
-      objectBarPanel: workspaceMode === 'visualize' ? 'none' : s.objectBarPanel,
-      showOutliner: workspaceMode === 'build' ? s.showOutliner : false,
-      cameraPanel: workspaceMode === 'compose' ? s.cameraPanel : 'closed',
-    })),
+            : workspaceMode !== 'compose' && (s.tool === 'pen' || s.tool === 'draw')
+              ? 'select'
+              : s.tool,
+        showAddDrawer: workspaceMode === 'build' ? s.showAddDrawer : false,
+        objectBarPanel: workspaceMode === 'visualize' ? 'none' : s.objectBarPanel,
+        showOutliner: workspaceMode === 'build' ? s.showOutliner : false,
+        cameraPanel: workspaceMode === 'compose' ? s.cameraPanel : 'closed',
+      }
+    }),
   setComposeDock: (composeDock) => set({ composeDock }),
   setShowOutliner: (showOutliner) => set({ showOutliner }),
   toggleOutliner: () => set((s) => ({ showOutliner: !s.showOutliner })),
@@ -334,6 +359,12 @@ export const useEditorStore = create<EditorState>((set) => ({
       lockedIds: s.lockedIds.includes(id)
         ? s.lockedIds.filter((locked) => locked !== id)
         : [...s.lockedIds, id],
+    })),
+  toggleHidden: (id) =>
+    set((s) => ({
+      hiddenIds: s.hiddenIds.includes(id)
+        ? s.hiddenIds.filter((hidden) => hidden !== id)
+        : [...s.hiddenIds, id],
     })),
   setVisualizeMedia: (visualizeMedia) => set({ visualizeMedia }),
   setDirectorExpanded: (directorExpanded) => set({ directorExpanded }),

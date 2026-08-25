@@ -15,9 +15,10 @@ import {
 } from '../../lib/pathSpaceBind'
 import { useScreenScale } from '../../lib/screenScale'
 import { useShiftHeld } from '../../lib/useShiftHeld'
-import { isPathEditing, isSceneEditing } from '../../lib/workspaceChrome'
+import { isPathEditing, isPathStrokeTool, pathGuidesVisible } from '../../lib/workspaceChrome'
 import { useEditorStore, type GizmoMode } from '../../state/useEditorStore'
 import { usePathStore, type PathAnchor } from '../../state/usePathStore'
+import { useRigStore } from '../../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
 import { isTechMode } from '../RenderPasses'
 import { capturePointer, finishPen, releasePointer } from './PenTool'
@@ -111,8 +112,8 @@ function AnchorGizmo({ anchor, isFirst }: { anchor: PathAnchor; isFirst: boolean
         if (e.button !== 0) return
         if (useEditorStore.getState().cameraView) return
         // while drawing, clicking the first anchor closes the loop
-        if (tool === 'pen') {
-          if (isFirst) {
+        if (isPathStrokeTool(tool)) {
+          if (tool === 'pen' && isFirst) {
             e.stopPropagation()
             finishPen(true)
           }
@@ -358,6 +359,8 @@ export function InactivePaths() {
   const activePathId = usePathStore((s) => s.activePathId)
   const playMode = useEditorStore((s) => s.playMode)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const cameraKind = useRigStore((s) => s.cameraKind)
+  const hiddenIds = useEditorStore((s) => s.hiddenIds)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const rootRef = useRef<THREE.Group>(null)
   useEditorOnly(rootRef)
@@ -365,16 +368,16 @@ export function InactivePaths() {
   const lines = useMemo(
     () =>
       paths
-        .filter((p) => p.id !== activePathId && p.anchors.length >= 2)
+        .filter((p) => p.id !== activePathId && p.anchors.length >= 2 && !hiddenIds.includes(`path:${p.id}`))
         .map((p) => {
           const curve = buildCurve(p.anchors, p.closed, p.rounding)
           return curve ? { id: p.id, points: curve.getPoints(Math.max(64, p.anchors.length * 24)) } : null
         })
         .filter((x): x is { id: string; points: THREE.Vector3[] } => x !== null),
-    [paths, activePathId],
+    [paths, activePathId, hiddenIds],
   )
 
-  if (!isSceneEditing(playMode, workspaceMode) || tech || lines.length === 0) return null
+  if (!pathGuidesVisible(playMode, workspaceMode, cameraKind) || tech || lines.length === 0) return null
 
   return (
     <group ref={rootRef} renderOrder={9}>
@@ -404,6 +407,10 @@ export function PathEditor() {
   const tool = useEditorStore((s) => s.tool)
   const playMode = useEditorStore((s) => s.playMode)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const cameraKind = useRigStore((s) => s.cameraKind)
+  const pathHidden = useEditorStore((s) =>
+    active ? s.hiddenIds.includes(`path:${active.id}`) : false,
+  )
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
 
   const curve = useMemo(() => buildCurve(anchors, closed, rounding), [anchors, closed, rounding])
@@ -417,7 +424,14 @@ export function PathEditor() {
     [anchors, closed, rounding],
   )
 
-  if (!isPathEditing(playMode, workspaceMode) || tech || anchors.length === 0) return null
+  if (
+    !isPathEditing(playMode, workspaceMode) ||
+    cameraKind === 'static' ||
+    pathHidden ||
+    tech ||
+    anchors.length === 0
+  )
+    return null
 
   const selected = resolved.find((a) => a.id === selectedAnchorId)
 
@@ -451,9 +465,9 @@ export function PathEditor() {
             color={ACCENT}
             lineWidth={2}
             depthTest={false}
-            {...(tool === 'pen' ? { raycast: ignoreRaycast } : {})}
+            {...(isPathStrokeTool(tool) ? { raycast: ignoreRaycast } : {})}
             onDoubleClick={(e) => {
-              if (tool === 'pen') return
+              if (isPathStrokeTool(tool)) return
               e.stopPropagation()
               insertAt(e.point)
             }}
@@ -469,7 +483,7 @@ export function PathEditor() {
           <HandleGizmo anchor={selected} which="out" />
         </>
       )}
-      {tool !== 'pen' && selectedAnchorId && <PathTransformGizmo />}
+      {!isPathStrokeTool(tool) && selectedAnchorId && <PathTransformGizmo />}
     </ParentSpaceGroup>
   )
 }

@@ -156,26 +156,27 @@ export function CameraRigHud() {
         data-testid="camera-rig-hud"
         className="pointer-events-none absolute z-20 flex items-center justify-between gap-3"
         style={{
-          left: free.x + GUTTER,
+          left: insets.left + GUTTER,
           width: Math.max(0, free.w - GUTTER * 2),
           bottom: insets.bottom + GUTTER,
         }}
       >
-        <div className="pointer-events-auto flex min-w-0 items-center gap-x-2.5 overflow-hidden rounded-full bg-panel/90 px-3 py-1.5 text-[11px] text-ink-dim shadow-lg backdrop-blur">
-          {recording && <span className="shrink-0 font-medium text-red-400">REC</span>}
-          <span className="shrink-0 text-ink">Looking through</span>
-          <span className="flex shrink-0 items-center gap-1">
-            <Key>WASD</Key>
-            <span>/</span>
-            <Key>↑↓←→</Key>
-            <span>fly</span>
-          </span>
-          <span className="truncate">
-            {aimLocked ? 'Aim locked — drag to unlock' : 'Drag to look'}
-          </span>
-          <span className="flex shrink-0 items-center gap-1">
-            <Key>Wheel</Key>
-            <span>speed</span>
+        <div className="pointer-events-auto flex min-w-0 items-center gap-2 rounded-full bg-panel/90 px-2 py-1 shadow-lg backdrop-blur">
+          {recording && <span className="shrink-0 px-1.5 text-[11px] font-medium text-red-400">REC</span>}
+          <button
+            type="button"
+            title="Leave look-through (Esc)"
+            onClick={() => {
+              stopFlyRecord()
+              useEditorStore.getState().setCameraView(false)
+            }}
+            className="rounded-full px-2.5 py-1 text-[11px] font-medium text-ink hover:bg-panel-2"
+          >
+            Looking through · Esc
+          </button>
+          <span className="flex shrink-0 items-center gap-1 pr-1.5 text-[11px] text-ink-dim">
+            <Key>{aimLocked ? 'Scroll' : 'WASD'}</Key>
+            <span>{aimLocked ? 'FOV' : 'fly'}</span>
           </span>
         </div>
         <div

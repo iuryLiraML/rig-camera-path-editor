@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { isOrbitLocked, lockOrbit, resetOrbitLock } from '../lib/orbitLock'
 import { useEditorStore } from '../state/useEditorStore'
 
 describe('workspaceMode', () => {
@@ -27,6 +28,39 @@ describe('workspaceMode', () => {
     useEditorStore.setState({ workspaceMode: 'compose', tool: 'pen' })
     useEditorStore.getState().setWorkspaceMode('build')
     expect(useEditorStore.getState().tool).toBe('select')
+  })
+
+  it('drops the draw tool when leaving Compose', () => {
+    useEditorStore.setState({ workspaceMode: 'compose', tool: 'draw' })
+    useEditorStore.getState().setWorkspaceMode('build')
+    expect(useEditorStore.getState().tool).toBe('select')
+  })
+
+  it('clears a leaked orbit lock when leaving Draw or changing workspace', () => {
+    resetOrbitLock()
+    useEditorStore.setState({ workspaceMode: 'compose', tool: 'draw' })
+    lockOrbit()
+    expect(isOrbitLocked()).toBe(true)
+    useEditorStore.getState().setTool('select')
+    expect(isOrbitLocked()).toBe(false)
+
+    lockOrbit()
+    useEditorStore.getState().setWorkspaceMode('build')
+    expect(isOrbitLocked()).toBe(false)
+  })
+
+  it('snaps Top + ortho when Draw is activated', () => {
+    useEditorStore.setState({
+      workspaceMode: 'compose',
+      tool: 'select',
+      projection: 'perspective',
+      viewRequest: null,
+    })
+    useEditorStore.getState().setTool('draw')
+    const editor = useEditorStore.getState()
+    expect(editor.tool).toBe('draw')
+    expect(editor.projection).toBe('orthographic')
+    expect(editor.viewRequest?.view).toBe('top')
   })
 
   it('closes the camera inspector when leaving Compose', () => {

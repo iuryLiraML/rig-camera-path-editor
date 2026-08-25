@@ -81,4 +81,15 @@ describe('VisualizeBar', () => {
     expect(useEditorStore.getState().depthNear).toBe(2.5)
     expect(useEditorStore.getState().depthRangeAuto).toBe(false)
   })
+
+  it('shows an eye toggle in Outline to hide scene objects', () => {
+    useEditorStore.setState({ viewMode: 'outline', showSceneObjects: true })
+    const { getByTitle, queryByTitle, rerender } = render(<VisualizeBar />)
+    expect(getByTitle('Hide scene objects')).toBeTruthy()
+    fireEvent.click(getByTitle('Hide scene objects'))
+    expect(useEditorStore.getState().showSceneObjects).toBe(false)
+    useEditorStore.setState({ viewMode: 'clay' })
+    rerender(<VisualizeBar />)
+    expect(queryByTitle('Hide scene objects')).toBeNull()
+  })
 })

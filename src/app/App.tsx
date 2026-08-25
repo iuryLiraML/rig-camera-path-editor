@@ -35,6 +35,7 @@ import {
   isKeyableShortcut,
   isTextEditing,
 } from '../lib/editorShortcuts'
+import { resetOrbitLock } from '../lib/orbitLock'
 import { applyTogglePlayback } from '../lib/playback'
 import { importDroppedModels, undoLastMeshRevision } from '../lib/sceneIO'
 import { useProjectStore } from '../state/useProjectStore'
@@ -113,6 +114,10 @@ function useShortcuts() {
         case 'P':
           if (!editor.playMode && editor.workspaceMode === 'compose') editor.setTool('pen')
           break
+        case 'd':
+        case 'D':
+          if (!editor.playMode && editor.workspaceMode === 'compose') editor.setTool('draw')
+          break
         case 'w':
         case 'W':
           editor.setGizmoMode('translate')
@@ -166,11 +171,16 @@ function useShortcuts() {
           }
           break
         case 'Escape':
+          resetOrbitLock()
           if (isRecording()) {
             cancelRecording()
           } else if (editor.playMode) {
             editor.setPlayMode(false)
             rig.setPlaying(false)
+          } else if (editor.tool === 'pen' || editor.tool === 'draw') {
+            // Leave the stroke tool before closing panels — Esc must give
+            // the camera back, not only dismiss a sidebar.
+            editor.setTool('select')
           } else if (editor.showImportModal) {
             editor.setShowImportModal(false)
           } else if (editor.objectBarPanel !== 'none') {
@@ -183,8 +193,6 @@ function useShortcuts() {
             stopFlyRecord()
           } else if (editor.cameraView && editor.workspaceMode !== 'visualize') {
             editor.setCameraView(false)
-          } else if (editor.tool === 'pen') {
-            editor.setTool('select')
           } else if (editor.selectedKeyframe) {
             editor.selectKeyframe(null)
           } else if (path.selectedHandle !== 'none') {

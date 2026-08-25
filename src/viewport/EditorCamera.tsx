@@ -3,11 +3,11 @@ import * as THREE from 'three'
 import { OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
-import { lockOrbit, unlockOrbit } from '../lib/orbitLock'
+import { lockOrbit, restoreViewportNav, unlockOrbit } from '../lib/orbitLock'
 import { useShiftHeld } from '../lib/useShiftHeld'
 import { beginPickClick, hasInteractivePick } from '../lib/viewportPick'
 import { aimOrbitAtWorldOrigin } from '../lib/orbitHome'
-import { isCinemaViewport } from '../lib/workspaceChrome'
+import { isCinemaViewport, isPathStrokeTool } from '../lib/workspaceChrome'
 import { useEditorStore } from '../state/useEditorStore'
 import { computeRects, paneAt, useLayoutStore } from '../state/useLayoutStore'
 import { cinemaCameraRef } from './rig/CinemaCamera'
@@ -116,6 +116,33 @@ export function EditorCamera() {
   controlsRef.current = controls
   const scene = useThree((s) => s.scene)
 
+  // Draw / pick can leave OrbitControls bound to the cinema pane, or a lock
+  // held after a missed pointerup. Esc and workspace used to ignore both, so
+  // LMB orbit stayed dead. Reset onto the editor camera whenever nav should
+  // work again.
+  useEffect(() => {
+    pointerView.current = 'editor'
+    restoreViewportNav(controlsRef.current)
+    const current = controlsRef.current
+    if (current && editorCamActive && !isPathStrokeTool(tool)) {
+      bindOrbitToPane(current, 'editor', editorCam(), true)
+    }
+  }, [tool, workspaceMode, playMode, cameraView, editorCamActive, projection])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      pointerView.current = 'editor'
+      restoreViewportNav(controlsRef.current)
+      const current = controlsRef.current
+      if (current && editorCamActive) {
+        bindOrbitToPane(current, 'editor', editorCam(), true)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [editorCamActive, projection])
+
   // Bind orbit to whichever pane the pointer is in, before OrbitControls sees
   // the event — otherwise a drag in Front would spin the Editor camera.
   // A hit on a mesh/gizmo/anchor locks orbit for the whole gesture so a
@@ -166,6 +193,9 @@ export function EditorCamera() {
       raycaster.setFromCamera(ndc, cam)
       const hits = raycaster.intersectObjects(scene.children, true)
       beginPickClick(e.clientX, e.clientY)
+      // Pen / Draw own LMB — locking orbit here left the viewport stuck
+      // if pointerup did not reach the release handler after a stroke.
+      if (isPathStrokeTool(useEditorStore.getState().tool)) return
       if (!hasInteractivePick(hits)) return
       lockOrbit()
       held = true
@@ -239,8 +269,8 @@ export function EditorCamera() {
         makeDefault
         enabled={editorCamActive}
         enableDamping={editorCamActive}
-        enableRotate={tool !== 'pen'}
-        enableZoom={tool !== 'pen'}
+        enableRotate={!isPathStrokeTool(tool)}
+        enableZoom={editorCamActive}
         enablePan={editorCamActive && !shiftHeld}
         dampingFactor={0.08}
         minPolarAngle={0.02}

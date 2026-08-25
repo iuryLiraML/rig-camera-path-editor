@@ -5,6 +5,7 @@ import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { CubeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
+import { PrimitivePreview } from './PrimitivePreview'
 import { ADD_DRAWER_HEIGHT, GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
 
 type Chip = 'primitives' | 'assets' | 'generate'
@@ -295,15 +296,16 @@ function PrimitiveTile({ kind }: { kind: PrimitiveKind }) {
   return (
     <button
       type="button"
+      data-primitive={kind}
       onClick={() => {
         useSceneStore.getState().addPrimitive(kind)
       }}
-      className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
+      className="group flex h-full w-28 shrink-0 flex-col items-center rounded-xl bg-panel-2 px-2 pb-2 pt-3 text-left hover:bg-panel-3"
     >
-      <div className="flex flex-1 items-center justify-center text-ink-dim">
-        <CubeIcon size={28} />
+      <div className="flex h-[4.75rem] w-[4.75rem] items-center justify-center overflow-hidden rounded-lg bg-black/25 transition-transform duration-150 group-hover:scale-[1.03]">
+        <PrimitivePreview kind={kind} />
       </div>
-      <span className="truncate text-[11px] text-ink">{PRIMITIVE_DEFS[kind].label}</span>
+      <span className="mt-auto truncate text-[11px] text-ink">{PRIMITIVE_DEFS[kind].label}</span>
     </button>
   )
 }

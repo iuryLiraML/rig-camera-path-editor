@@ -1,4 +1,4 @@
-import type { ComposeDock, WorkspaceMode } from '../state/useEditorStore'
+import type { ComposeDock, Tool, WorkspaceMode } from '../state/useEditorStore'
 
 export interface EditorChromeFlags {
   toolbar: boolean
@@ -152,4 +152,20 @@ export function isSceneEditing(playMode: boolean, workspaceMode: WorkspaceMode):
 /** Path / pen editing belongs to Compose. */
 export function isPathEditing(playMode: boolean, workspaceMode: WorkspaceMode): boolean {
   return !playMode && workspaceMode === 'compose'
+}
+
+/** Pen click-to-place and Draw stroke — both steal LMB from orbit. */
+export function isPathStrokeTool(tool: Tool): boolean {
+  return tool === 'pen' || tool === 'draw'
+}
+
+/** Bezier guides — hidden for Free (pathless) cameras in Compose so the viewport stays uncluttered. */
+export function pathGuidesVisible(
+  playMode: boolean,
+  workspaceMode: WorkspaceMode,
+  cameraKind: 'path' | 'static',
+): boolean {
+  if (!isSceneEditing(playMode, workspaceMode)) return false
+  if (workspaceMode === 'compose' && cameraKind === 'static') return false
+  return true
 }

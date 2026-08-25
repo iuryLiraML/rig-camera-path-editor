@@ -135,10 +135,22 @@ export interface SceneObject {
   playClips: boolean
   /** when set, the object rides a motion path instead of its pose keyframes */
   follow?: FollowConfig
+  /** Cached so ObjectBar remesh does not walk a dense live mesh every render. */
+  triangleCount?: number
 }
 
 let nextId = 1
 export const makeSceneId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${nextId++}`
+
+function meshTriangleCount(root: THREE.Object3D): number {
+  let total = 0
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Mesh)) return
+    const geometry = child.geometry as THREE.BufferGeometry
+    total += (geometry.index?.count ?? geometry.attributes.position?.count ?? 0) / 3
+  })
+  return Math.round(total)
+}
 
 /**
  * Removed objects are parked here (roots stay alive in memory) so undo/redo
@@ -146,6 +158,16 @@ export const makeSceneId = (prefix: string) => `${prefix}-${Date.now().toString(
  */
 export const objectGraveyard = new Map<string, SceneObject>()
 const GRAVEYARD_CAP = 40
+
+const objectRemovedListeners = new Set<(id: string) => void>()
+
+/** meshJobs aborts an in-flight remesh so delete can undo back to the original mesh. */
+export function onSceneObjectRemoved(listener: (id: string) => void) {
+  objectRemovedListeners.add(listener)
+  return () => {
+    objectRemovedListeners.delete(listener)
+  }
+}
 
 function bury(object: SceneObject) {
   objectGraveyard.set(object.id, object)
@@ -159,7 +181,10 @@ export function makeObject(
   name: string,
   root: THREE.Object3D,
   options: Partial<
-    Pick<SceneObject, 'id' | 'shade' | 'bufferKey' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'follow'>
+    Pick<
+      SceneObject,
+      'id' | 'shade' | 'bufferKey' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'follow' | 'triangleCount'
+    >
   > = {},
 ): SceneObject {
   const shade = options.shade ?? nextShade()
@@ -178,6 +203,7 @@ export function makeObject(
     clips: options.clips ?? [],
     playClips: options.playClips ?? true,
     follow: options.follow,
+    triangleCount: options.triangleCount,
   }
 }
 
@@ -328,7 +354,12 @@ export const useSceneStore = create<SceneState>()(
         replaceImportedRoot: (id, root, clips) =>
           updateObject(id, (o) => {
             applyClay(root, o.material)
-            return { root, clips, primitive: undefined }
+            return {
+              root,
+              clips,
+              primitive: undefined,
+              triangleCount: root.userData.rigRemeshPlaceholder ? o.triangleCount : meshTriangleCount(root),
+            }
           }),
 
         addPrimitive: (kind) => {
@@ -350,7 +381,7 @@ export const useSceneStore = create<SceneState>()(
             return { primitive: spec }
           }),
 
-        removeObject: (id) =>
+        removeObject: (id) => {
           set((s) => {
             const removed = s.objects.find((o) => o.id === id)
             if (removed) bury(removed)
@@ -359,7 +390,9 @@ export const useSceneStore = create<SceneState>()(
               useRigStore.getState().setTargetObjectId(null)
             }
             return { objects: s.objects.filter((o) => o.id !== id) }
-          }),
+          })
+          for (const listener of objectRemovedListeners) listener(id)
+        },
 
         renameObject: (id, name) => updateObject(id, () => ({ name })),
 
@@ -386,6 +419,7 @@ export const useSceneStore = create<SceneState>()(
                   ...common,
                   bufferKey: src.bufferKey,
                   clips: src.clips,
+                  triangleCount: src.triangleCount,
                 })
             if (src.primitive) copy.name = `${src.name} copy`
             return { objects: [...s.objects, copy] }

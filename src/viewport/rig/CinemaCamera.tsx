@@ -2,6 +2,7 @@ import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { PerspectiveCamera } from '@react-three/drei'
 import { useFrame } from '@react-three/fiber'
+import { useCameraOptionsStore } from '../../state/useCameraOptionsStore'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useRigStore } from '../../state/useRigStore'
 import { useCameraPath } from '../../state/cameraPathLink'
@@ -81,6 +82,8 @@ export function CinemaCamera() {
   const cinema = isCinemaViewport(playMode, cameraView, workspaceMode)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const selected = useEditorStore((s) => s.selection === 'cinema-camera')
+  const activeCameraId = useCameraOptionsStore((s) => s.activeOptionId)
+  const cameraHidden = useEditorStore((s) => s.hiddenIds.includes(`cam:${activeCameraId}`))
 
   const camRef = useRef<THREE.PerspectiveCamera>(null)
   const bodyRef = useRef<THREE.Group>(null)
@@ -193,7 +196,7 @@ export function CinemaCamera() {
       <group
         ref={bodyRef}
         userData={{ pickKind: 'camera', pickId: 'cinema-camera' }}
-        visible={!cinema && !tech}
+        visible={!cinema && !tech && !cameraHidden}
         frustumCulled={false}
         onPointerDown={(e) => {
           if (e.button !== 0) return

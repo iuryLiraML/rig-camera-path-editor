@@ -9,7 +9,7 @@ import { useEditorStore, type ViewMode } from '../../state/useEditorStore'
 import { useProjectStore, type Shot } from '../../state/useProjectStore'
 import { useRigStore } from '../../state/useRigStore'
 import { ExportActions, ExportFormatPills, ExportPassesMenu } from '../ExportControls'
-import { CameraIcon, PlayIcon } from '../icons'
+import { CameraIcon, EyeIcon, EyeOffIcon, PlayIcon } from '../icons'
 import { Segmented } from '../primitives'
 import {
   chromeBand,
@@ -208,6 +208,8 @@ export function VisualizeBar() {
   const t = useRigStore((s) => s.t)
   const duration = useRigStore((s) => s.duration)
   const viewMode = useEditorStore((s) => s.viewMode)
+  const showSceneObjects = useEditorStore((s) => s.showSceneObjects)
+  const toggleShowSceneObjects = useEditorStore((s) => s.toggleShowSceneObjects)
   const hasPath = useCameraReady()
   const insets = useViewportInsets()
   const win = useWindowSize()
@@ -313,6 +315,21 @@ export function VisualizeBar() {
                 </button>
               ))}
             </div>
+            {viewMode === 'outline' && (
+              <button
+                type="button"
+                title={showSceneObjects ? 'Hide scene objects' : 'Show scene objects'}
+                aria-pressed={showSceneObjects}
+                onClick={() => toggleShowSceneObjects()}
+                className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+                  showSceneObjects
+                    ? 'text-ink-dim hover:bg-panel-3 hover:text-ink'
+                    : 'bg-accent text-white'
+                }`}
+              >
+                {showSceneObjects ? <EyeIcon size={13} /> : <EyeOffIcon size={13} />}
+              </button>
+            )}
           </BarGroup>
           <BarRule />
           <BarGroup label="Range">

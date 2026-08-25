@@ -36,6 +36,13 @@ export const PenIcon = (p: IconProps) => (
   </svg>
 )
 
+export const DrawPathIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M2.5 11.5c1.4-3 2.6-5.2 4.2-5.2 1.4 0 1.6 2.8 3.2 2.8 1.8 0 2.4-4.6 3.8-6.6" />
+    <path d="M2.5 13.2h3.2" />
+  </svg>
+)
+
 export const ImportIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M8 2.5v7M5.2 7l2.8 2.8L10.8 7" />
@@ -227,5 +234,20 @@ export const ExpandIcon = (p: IconProps) => (
     <path d="M6.5 12.5H3.5V9.5" />
     <path d="M12.5 3.5L9 7" />
     <path d="M3.5 12.5L7 9" />
+  </svg>
+)
+
+export const EyeIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M2.2 8s2.2-3.6 5.8-3.6S13.8 8 13.8 8s-2.2 3.6-5.8 3.6S2.2 8 2.2 8z" />
+    <circle cx="8" cy="8" r="1.8" />
+  </svg>
+)
+
+export const EyeOffIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M2.2 8s2.2-3.6 5.8-3.6c1.2 0 2.2.4 3 .9" />
+    <path d="M13.8 8s-1.1 1.8-2.8 2.8" />
+    <path d="M3.2 3.2l9.6 9.6" />
   </svg>
 )

@@ -46,6 +46,7 @@ export function LookAtTarget() {
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const selected = useEditorStore((s) => s.selection === 'target')
   const tool = useEditorStore((s) => s.tool)
+  const targetHidden = useEditorStore((s) => s.hiddenIds.includes('target'))
   const track = resolveTrackTarget(targetObjectId, objects, paths)
 
   const position = track
@@ -91,7 +92,8 @@ export function LookAtTarget() {
     playMode ||
     workspaceMode === 'visualize' ||
     tech ||
-    cameraKind === 'static'
+    cameraKind === 'static' ||
+    targetHidden
   ) {
     return null
   }

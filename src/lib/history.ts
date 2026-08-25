@@ -51,6 +51,8 @@ function capture() {
       cameraNoise: r.cameraNoise,
       targetObjectId: r.targetObjectId,
       pathSpace: r.pathSpace,
+      cameraPathId: r.cameraPathId,
+      cameraKind: r.cameraKind,
     },
     paths: {
       paths: p.paths,
