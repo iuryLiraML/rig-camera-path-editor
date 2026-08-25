@@ -3,29 +3,37 @@ import { generateFromImage, generateFromText } from './fal/generate3d'
 import { downloadGlb } from './fal/lift'
 import { remeshGlb } from './fal/remesh'
 import { readFalSettings } from './fal/settings'
+import { persistModelBuffer, fileFromBuffer, fileFromStoredBuffer } from './readModelFile'
 import { idbGet, STORES } from './idb'
 import {
   FAL_REMESH_MAX_BYTES,
+  discardParkedMesh,
   importModelBuffer,
+  parkMeshForRemesh,
   remeshTooLargeCopy,
   replaceImportedBuffer,
+  restoreParkedMesh,
   setDenseRemeshEnqueue,
+  yieldToBrowser,
 } from './sceneIO'
 import { useEditorStore } from '../state/useEditorStore'
-import { useSceneStore } from '../state/useSceneStore'
+import { makeSceneId, objectGraveyard, onSceneObjectRemoved, useSceneStore } from '../state/useSceneStore'
 
 const busy = new Set<string>()
 const controllers = new Map<string, AbortController>()
 
 type RemeshJob = {
   objectId: string
-  buffer: ArrayBuffer
+  buffer?: ArrayBuffer
+  bufferKey?: string
   placeholder: boolean
   recordUndo: boolean
   objectName: string
   liftId: string
   signal: AbortSignal
   busyKey: string
+  /** Set when this object shared an IndexedDB buffer with a duplicate. */
+  previousBufferKey?: string
   resolve: () => void
 }
 
@@ -193,13 +201,7 @@ export async function remeshSceneObject(objectId: string, opts: RemeshSceneObjec
     if (opts.placeholder) dropPlaceholder(objectId)
     return
   }
-  const buffer = opts.sourceBuffer ?? (await idbGet<ArrayBuffer>(STORES.buffers, object.bufferKey))
-  if (!buffer) {
-    scene.showNotice('The original file is missing — re-import the model first.')
-    if (opts.placeholder) dropPlaceholder(objectId)
-    return
-  }
-  if (buffer.byteLength > FAL_REMESH_MAX_BYTES) {
+  if (opts.sourceBuffer && opts.sourceBuffer.byteLength > FAL_REMESH_MAX_BYTES) {
     scene.showNotice(remeshTooLargeCopy(object.name))
     if (opts.placeholder) dropPlaceholder(objectId)
     return
@@ -212,17 +214,21 @@ export async function remeshSceneObject(objectId: string, opts: RemeshSceneObjec
     return
   }
   const recordUndo = opts.placeholder ? false : (opts.recordUndo ?? true)
+  const previousBufferKey = await isolateSharedRemeshBuffer(objectId, object.bufferKey, opts.sourceBuffer)
+  if (!opts.placeholder) parkMeshForRemesh(objectId)
   const { liftId, signal } = beginJob(busyKey, `${object.name} — Remeshing…`, 'remesh', objectId)
   return new Promise<void>((resolve) => {
     remeshQueue.push({
       objectId,
-      buffer,
+      buffer: opts.sourceBuffer,
+      bufferKey: opts.sourceBuffer ? undefined : object.bufferKey,
       placeholder: Boolean(opts.placeholder),
       recordUndo,
       objectName: object.name,
       liftId,
       signal,
       busyKey,
+      previousBufferKey,
       resolve,
     })
     void pumpRemeshQueue()
@@ -247,10 +253,54 @@ async function pumpRemeshQueue() {
   }
 }
 
+async function isolateSharedRemeshBuffer(
+  objectId: string,
+  bufferKey: string | null,
+  sourceBuffer?: ArrayBuffer,
+): Promise<string | undefined> {
+  if (!bufferKey) return undefined
+  const shared = useSceneStore
+    .getState()
+    .objects.some((item) => item.id !== objectId && item.bufferKey === bufferKey)
+  if (!shared) return undefined
+  const nextKey = objectId === bufferKey ? makeSceneId('buf') : objectId
+  const source =
+    sourceBuffer && sourceBuffer.byteLength > 0
+      ? sourceBuffer
+      : await idbGet<ArrayBuffer>(STORES.buffers, bufferKey)
+  if (source && source.byteLength > 0) {
+    try {
+      await persistModelBuffer(nextKey, source.slice(0))
+    } catch (error) {
+      console.error('Failed to isolate remesh buffer', error)
+    }
+  }
+  useSceneStore.setState((s) => ({
+    objects: s.objects.map((item) => (item.id === objectId ? { ...item, bufferKey: nextKey } : item)),
+  }))
+  return bufferKey
+}
+
+function revertIsolatedBufferKey(objectId: string, previousBufferKey: string | undefined) {
+  if (!previousBufferKey) return
+  useSceneStore.setState((s) => ({
+    objects: s.objects.map((item) =>
+      item.id === objectId ? { ...item, bufferKey: previousBufferKey } : item,
+    ),
+  }))
+  const buried = objectGraveyard.get(objectId)
+  if (buried) buried.bufferKey = previousBufferKey
+}
+
 async function runRemeshJob(job: RemeshJob) {
   try {
     if (job.signal.aborted) throw new DOMException('The user aborted a request.', 'AbortError')
-    const file = new File([job.buffer], `${job.objectName}.glb`, { type: 'model/gltf-binary' })
+    await yieldToBrowser()
+    const file = job.buffer
+      ? await fileFromBuffer(job.buffer, `${job.objectName}.glb`, 'model/gltf-binary')
+      : await fileFromStoredBuffer(job.bufferKey ?? job.objectId, `${job.objectName}.glb`, 'model/gltf-binary')
+    if (!file) throw new Error('The original file is missing — re-import the model first.')
+    if (file.size > FAL_REMESH_MAX_BYTES) throw new Error(remeshTooLargeCopy(job.objectName))
     const meshUrl = await uploadFile(file, job.signal)
     const url = await remeshGlb({
       meshUrl,
@@ -261,11 +311,23 @@ async function runRemeshJob(job: RemeshJob) {
       },
     })
     const next = await downloadGlb(url, job.signal)
-    if (!useSceneStore.getState().objects.some((item) => item.id === job.objectId)) return
-    await replaceImportedBuffer(job.objectId, next, { recordUndo: job.recordUndo })
+    if (!useSceneStore.getState().objects.some((item) => item.id === job.objectId)) {
+      if (job.placeholder) discardParkedMesh(job.objectId)
+      else restoreParkedMesh(job.objectId)
+      revertIsolatedBufferKey(job.objectId, job.previousBufferKey)
+      return
+    }
+    await replaceImportedBuffer(job.objectId, next, {
+      recordUndo: job.recordUndo,
+      previousBufferKey: job.previousBufferKey,
+      previousBuffer: job.buffer,
+    })
+    discardParkedMesh(job.objectId)
     useSceneStore.getState().showNotice(`Remeshed "${job.objectName}".`)
   } catch (error) {
     if (job.placeholder) dropPlaceholder(job.objectId)
+    else restoreParkedMesh(job.objectId)
+    revertIsolatedBufferKey(job.objectId, job.previousBufferKey)
     useSceneStore
       .getState()
       .showNotice(isAbortError(error) ? 'Remesh cancelled.' : error instanceof Error ? error.message : String(error))
@@ -276,4 +338,11 @@ async function runRemeshJob(job: RemeshJob) {
 
 setDenseRemeshEnqueue((objectId, buffer) => {
   void remeshSceneObject(objectId, { sourceBuffer: buffer, placeholder: true })
+})
+
+onSceneObjectRemoved((objectId) => {
+  const lift = useSceneStore
+    .getState()
+    .pendingLifts.find((item) => item.kind === 'remesh' && item.objectId === objectId)
+  if (lift) cancelMeshJob(lift.id)
 })

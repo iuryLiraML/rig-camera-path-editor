@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import {
+  applyClay,
   makeDefaultKnotObject,
   makeObject,
   makePrimitive,
@@ -23,6 +24,8 @@ import { prepareImportedRoot } from './prepareImport'
 import { VIEWPORT_BG_DEFAULT_TOP } from '../viewport/viewportBackground'
 import { configureFal, falUsable } from './fal/client'
 import { readFalSettings } from './fal/settings'
+import { countGltfTriangles } from './glbTriangleCount'
+import { persistModelBuffer, readModelBytes } from './readModelFile'
 
 /** legacy (pre-projects) localStorage key — still read for migration */
 export const LEGACY_META_KEY = 'rig-scene-objects'
@@ -59,6 +62,14 @@ export function remeshTooLargeCopy(name: string): string {
   return `"${name}" is too large to remesh (max 150 MB).`
 }
 
+export function denseLoadParkCopy(name: string, triangles: number): string {
+  return `"${name}" is dense (${formatTriangleCount(triangles)}). Remesh from the object bar.`
+}
+
+export function denseLoadParkManyCopy(count: number): string {
+  return `${count} dense models loaded as placeholders. Remesh from the object bar.`
+}
+
 export type DenseImportAction =
   | { action: 'import' }
   | { action: 'remesh'; notice: string }
@@ -81,18 +92,127 @@ function falReady(): boolean {
   return falUsable()
 }
 
+async function queueDenseRemesh(
+  name: string,
+  buffer: ArrayBuffer,
+  triangles: number,
+  scene: ReturnType<typeof useSceneStore.getState>,
+): Promise<{
+  objectId: string
+  objectName: string
+  byteSize: number
+  triangles: number
+} | null> {
+  const decision = denseImportDecision(name, triangles, buffer.byteLength, falReady())
+  if (decision.action !== 'remesh') {
+    if (decision.action === 'skip') scene.showNotice(decision.notice)
+    return null
+  }
+  const placeholder = addImportedObject(name, makeRemeshPlaceholderRoot(), [], triangles)
+  try {
+    await yieldToBrowser()
+    buffer = await persistModelBuffer(placeholder.id, buffer)
+    if (buffer.byteLength === 0) throw new Error('Persisted buffer was detached')
+  } catch (error) {
+    console.error('Failed to persist model buffer', error)
+    scene.showNotice(`"${name}" imported, but remesh needs a re-import`)
+    return {
+      objectId: placeholder.id,
+      objectName: placeholder.name,
+      byteSize: buffer.byteLength,
+      triangles,
+    }
+  }
+  scene.showNotice(decision.notice)
+  denseRemeshEnqueue?.(placeholder.id, buffer)
+  return {
+    objectId: placeholder.id,
+    objectName: placeholder.name,
+    byteSize: buffer.byteLength,
+    triangles,
+  }
+}
+
 export function disposeObject3D(root: THREE.Object3D) {
   root.traverse((child) => {
     if (child instanceof THREE.Mesh) child.geometry.dispose()
   })
 }
 
+export const REMESH_PLACEHOLDER_FLAG = 'rigRemeshPlaceholder'
+
 export function makeRemeshPlaceholderRoot(): THREE.Object3D {
   const group = new THREE.Group()
+  group.userData[REMESH_PLACEHOLDER_FLAG] = true
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.2))
   mesh.position.y = 0.6
   group.add(mesh)
   return group
+}
+
+export function isRemeshPlaceholder(root: THREE.Object3D): boolean {
+  return root.userData[REMESH_PLACEHOLDER_FLAG] === true
+}
+
+export function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+    setTimeout(done, 0)
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(done)
+  })
+}
+
+type ParkedMesh = { root: THREE.Object3D; clips: THREE.AnimationClip[] }
+const parkedMeshes = new Map<string, ParkedMesh>()
+
+/** Swap a live dense mesh for the remesh cube so the viewport stops drawing it. */
+export function parkMeshForRemesh(objectId: string): boolean {
+  const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
+  if (!object || isRemeshPlaceholder(object.root)) return false
+  if (parkedMeshes.has(objectId)) return true
+  parkedMeshes.set(objectId, { root: object.root, clips: object.clips })
+  useSceneStore.getState().replaceImportedRoot(objectId, makeRemeshPlaceholderRoot(), [])
+  return true
+}
+
+function installParkedRoot(objectId: string, held: ParkedMesh): boolean {
+  if (useSceneStore.getState().objects.some((item) => item.id === objectId)) {
+    useSceneStore.getState().replaceImportedRoot(objectId, held.root, held.clips)
+    return true
+  }
+  const buried = objectGraveyard.get(objectId)
+  if (!buried) return false
+  applyClay(held.root, buried.material)
+  buried.root = held.root
+  buried.clips = held.clips
+  buried.primitive = undefined
+  return true
+}
+
+export function restoreParkedMesh(objectId: string): boolean {
+  const held = parkedMeshes.get(objectId)
+  if (!held) return false
+  parkedMeshes.delete(objectId)
+  if (installParkedRoot(objectId, held)) return true
+  disposeObject3D(held.root)
+  return false
+}
+
+export function discardParkedMesh(objectId: string) {
+  const held = parkedMeshes.get(objectId)
+  if (!held) return
+  parkedMeshes.delete(objectId)
+  disposeObject3D(held.root)
+}
+
+export function clearParkedMeshesForTests() {
+  for (const held of parkedMeshes.values()) disposeObject3D(held.root)
+  parkedMeshes.clear()
 }
 
 // ---------------------------------------------------------------------------
@@ -131,8 +251,9 @@ function addImportedObject(
   name: string,
   root: THREE.Object3D,
   clips: THREE.AnimationClip[],
+  triangleCount?: number,
 ): SceneObject {
-  const object = makeObject(name, root, { bufferKey: null, clips })
+  const object = makeObject(name, root, { bufferKey: null, clips, triangleCount })
   object.bufferKey = object.id
   useSceneStore.getState().addObject(object)
   useEditorStore.getState().select(`obj:${object.id}`)
@@ -143,7 +264,7 @@ function addImportedObject(
 export async function importModelBuffer(
   buffer: ArrayBuffer,
   name: string,
-  opts: { announce?: boolean; autoRemesh?: boolean } = {},
+  opts: { announce?: boolean; autoRemesh?: boolean; triangles?: number | null } = {},
 ): Promise<{
   objectId: string
   objectName: string
@@ -155,39 +276,28 @@ export async function importModelBuffer(
   const scene = useSceneStore.getState()
   scene.setImporting(1)
   try {
+    const quickCount = opts.triangles !== undefined ? opts.triangles : countGltfTriangles(buffer)
+
+    if (autoRemesh && quickCount != null && quickCount > RETOPO_TRIANGLES) {
+      const queued = await queueDenseRemesh(name, buffer, quickCount, scene)
+      if (queued) return queued
+      return null
+    }
+
+    await yieldToBrowser()
     const { scene: root, clips } = await parseGLB(buffer)
     prepareImportedRoot(root)
-    const triangles = countTriangles(root)
+    const triangles = quickCount ?? countTriangles(root)
 
     if (autoRemesh && triangles > RETOPO_TRIANGLES) {
       disposeObject3D(root)
-      const decision = denseImportDecision(name, triangles, buffer.byteLength, falReady())
-      switch (decision.action) {
-        case 'skip':
-          scene.showNotice(decision.notice)
-          return null
-        case 'import':
-          return null
-        case 'remesh': {
-          const placeholder = addImportedObject(name, makeRemeshPlaceholderRoot(), [])
-          scene.showNotice(decision.notice)
-          denseRemeshEnqueue?.(placeholder.id, buffer)
-          return {
-            objectId: placeholder.id,
-            objectName: placeholder.name,
-            byteSize: buffer.byteLength,
-            triangles,
-          }
-        }
-        default: {
-          const _exhaustive: never = decision
-          return _exhaustive
-        }
-      }
+      const queued = await queueDenseRemesh(name, buffer, triangles, scene)
+      if (queued) return queued
+      return null
     }
 
     normalizeModel(root)
-    const object = addImportedObject(name, root, clips)
+    const object = addImportedObject(name, root, clips, triangles)
 
     if (announce) {
       if (triangles > HEAVY_TRIANGLES) {
@@ -205,7 +315,8 @@ export async function importModelBuffer(
       }
     }
     try {
-      await idbPut(STORES.buffers, buffer, object.id)
+      await yieldToBrowser()
+      await persistModelBuffer(object.id, buffer)
     } catch (error) {
       console.error('Failed to persist model buffer', error)
       scene.showNotice(`"${name}" imported, but remesh needs a re-import`)
@@ -231,35 +342,58 @@ export async function importModelFile(
   triangles: number
 } | null> {
   const name = file.name.replace(/\.(glb|gltf)$/i, '')
-  return importModelBuffer(await file.arrayBuffer(), name, { autoRemesh: true, ...opts })
+  useSceneStore.getState().setImporting(1)
+  try {
+    const { buffer, triangles } = await readModelBytes(file)
+    return await importModelBuffer(buffer, name, { autoRemesh: true, triangles, ...opts })
+  } catch (error) {
+    console.error('Failed to read model file', error)
+    useSceneStore.getState().showNotice('Could not read this file — use a self-contained .glb')
+    return null
+  } finally {
+    useSceneStore.getState().setImporting(-1)
+  }
 }
 
 const meshRevisions: { objectId: string; buffer: ArrayBuffer; clock: number }[] = []
 
 export function objectTriangleCount(objectId: string): number {
   const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
-  return object ? countTriangles(object.root) : 0
+  if (!object) return 0
+  return object.triangleCount ?? countTriangles(object.root)
 }
 
 export function objectNeedsRetopo(objectId: string): boolean {
   const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
-  return Boolean(object?.bufferKey) && objectTriangleCount(objectId) > RETOPO_TRIANGLES
+  if (!object?.bufferKey) return false
+  const triangles = object.triangleCount ?? countTriangles(object.root)
+  return triangles > RETOPO_TRIANGLES
 }
 
 export async function replaceImportedBuffer(
   objectId: string,
   buffer: ArrayBuffer,
-  opts: { recordUndo?: boolean } = {},
+  opts: { recordUndo?: boolean; previousBufferKey?: string; previousBuffer?: ArrayBuffer } = {},
 ): Promise<void> {
   const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
   if (!object?.bufferKey) throw new Error('Only imported models can be remeshed.')
-  const previous =
-    opts.recordUndo === false ? undefined : await idbGet<ArrayBuffer>(STORES.buffers, object.bufferKey)
+  let previous: ArrayBuffer | undefined
+  if (opts.recordUndo !== false) {
+    previous = await idbGet<ArrayBuffer>(STORES.buffers, object.bufferKey)
+    if (!previous && opts.previousBufferKey && opts.previousBufferKey !== object.bufferKey) {
+      previous = await idbGet<ArrayBuffer>(STORES.buffers, opts.previousBufferKey)
+    }
+    if (!previous && opts.previousBuffer && opts.previousBuffer.byteLength > 0) {
+      previous = opts.previousBuffer.slice(0)
+    }
+  }
+  await yieldToBrowser()
   const { scene: root, clips } = await parseGLB(buffer)
   prepareImportedRoot(root)
   normalizeModel(root)
   useSceneStore.getState().replaceImportedRoot(objectId, root, clips)
-  await idbPut(STORES.buffers, buffer, object.bufferKey)
+  await yieldToBrowser()
+  await persistModelBuffer(object.bufferKey, buffer)
   if (previous) meshRevisions.push({ objectId, buffer: previous, clock: historyClock() })
 }
 
@@ -330,6 +464,7 @@ export interface ObjectMeta {
   keys: ModelKey[]
   playClips: boolean
   follow?: FollowConfig
+  triangleCount?: number
 }
 
 export function toMeta(o: SceneObject): ObjectMeta {
@@ -343,6 +478,7 @@ export function toMeta(o: SceneObject): ObjectMeta {
     keys: o.keys,
     playClips: o.playClips,
     follow: o.follow,
+    triangleCount: o.triangleCount,
   }
 }
 
@@ -350,10 +486,44 @@ export function liveSceneMetas(): ObjectMeta[] {
   return useSceneStore.getState().objects.map(toMeta)
 }
 
+export function denseLoadCanSkipBuffer(meta: ObjectMeta): boolean {
+  return meta.triangleCount != null && meta.triangleCount > RETOPO_TRIANGLES
+}
+
+export function objectFromDenseMeta(meta: ObjectMeta): SceneObject {
+  return makeObject(meta.name, makeRemeshPlaceholderRoot(), {
+    ...meta,
+    clips: [],
+    triangleCount: meta.triangleCount,
+  })
+}
+
+/** Rebuilds an imported object from its stored GLB. Dense meshes stay a cube. */
+export async function objectFromStoredBuffer(meta: ObjectMeta, buffer: ArrayBuffer): Promise<SceneObject> {
+  const triangles = countGltfTriangles(buffer) ?? meta.triangleCount
+  if (triangles != null && triangles > RETOPO_TRIANGLES) {
+    return makeObject(meta.name, makeRemeshPlaceholderRoot(), {
+      ...meta,
+      clips: [],
+      triangleCount: triangles,
+    })
+  }
+  await yieldToBrowser()
+  const { scene: root, clips } = await parseGLB(buffer)
+  prepareImportedRoot(root)
+  normalizeModel(root)
+  return makeObject(meta.name, root, {
+    ...meta,
+    clips,
+    triangleCount: triangles ?? countTriangles(root),
+  })
+}
+
 /** Clears the current scene and rebuilds it from metadata + stored buffers. */
 export async function loadSceneFromMetas(metas: ObjectMeta[], seedIfEmpty = true) {
   objectGraveyard.clear()
   useSceneStore.setState({ objects: [] })
+  const parked: { name: string; triangles: number }[] = []
 
   for (const meta of metas) {
     try {
@@ -364,18 +534,30 @@ export async function loadSceneFromMetas(metas: ObjectMeta[], seedIfEmpty = true
       } else if (meta.bufferKey === null) {
         object = makeDefaultKnotObject(meta)
         object.name = meta.name
+      } else if (denseLoadCanSkipBuffer(meta)) {
+        object = objectFromDenseMeta(meta)
+        if (object.triangleCount != null) {
+          parked.push({ name: object.name, triangles: object.triangleCount })
+        }
       } else {
         const buffer = await idbGet<ArrayBuffer>(STORES.buffers, meta.bufferKey)
         if (!buffer) continue // buffer lost (cleared storage) — skip quietly
-        const { scene: root, clips } = await parseGLB(buffer)
-        prepareImportedRoot(root)
-        normalizeModel(root)
-        object = makeObject(meta.name, root, { ...meta, clips })
+        object = await objectFromStoredBuffer(meta, buffer)
+        if (isRemeshPlaceholder(object.root) && object.triangleCount != null) {
+          parked.push({ name: object.name, triangles: object.triangleCount })
+        }
+        await yieldToBrowser()
       }
       useSceneStore.getState().addObject(object)
     } catch (e) {
       console.error('Failed to restore object', meta.name, e)
     }
+  }
+
+  if (parked.length === 1) {
+    useSceneStore.getState().showNotice(denseLoadParkCopy(parked[0].name, parked[0].triangles))
+  } else if (parked.length > 1) {
+    useSceneStore.getState().showNotice(denseLoadParkManyCopy(parked.length))
   }
 
   if (seedIfEmpty && useSceneStore.getState().objects.length === 0) {
