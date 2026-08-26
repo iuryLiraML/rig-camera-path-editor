@@ -28,30 +28,32 @@ export async function hydrateCloudProject(projectId: string): Promise<ProjectRec
   const project = await fetchCloudProject(accessToken, projectId)
   const editorState = parseCloudEditorState(project.editorState ?? {})
   const shots: Shot[] = []
-  for (const shot of editorState.shots) {
-    let thumbnail: Blob | null = null
-    if (shot.stillAssetId) {
-      const bytes = await downloadCloudAsset(accessToken, shot.stillAssetId)
-      thumbnail = new Blob([bytes], { type: 'image/jpeg' })
+  for (const scene of editorState.scenes) {
+    for (const shot of scene.shots) {
+      let thumbnail: Blob | null = null
+      if (shot.stillAssetId) {
+        const bytes = await downloadCloudAsset(accessToken, shot.stillAssetId)
+        thumbnail = new Blob([bytes], { type: 'image/jpeg' })
+      }
+      shots.push({
+        id: shot.id,
+        name: shot.name,
+        order: shot.order,
+        rig: shot.rig,
+        format: shot.format,
+        duration: shot.duration,
+        thumbnail,
+      })
     }
-    shots.push({
-      id: shot.id,
-      name: shot.name,
-      order: shot.order,
-      rig: shot.rig,
-      format: shot.format,
-      duration: shot.duration,
-      thumbnail,
-    })
-  }
 
-  for (const meta of editorState.sceneMeta) {
-    if (!meta.bufferKey || !meta.bufferAssetId) continue
-    try {
-      const bytes = await downloadCloudAsset(accessToken, meta.bufferAssetId)
-      await persistModelBuffer(meta.bufferKey, bytes)
-    } catch {
-      throw new Error(`The GLB for “${meta.name}” is missing from storage.`)
+    for (const meta of scene.sceneMeta) {
+      if (!meta.bufferKey || !meta.bufferAssetId) continue
+      try {
+        const bytes = await downloadCloudAsset(accessToken, meta.bufferAssetId)
+        await persistModelBuffer(meta.bufferKey, bytes)
+      } catch {
+        throw new Error(`The GLB for “${meta.name}” is missing from storage.`)
+      }
     }
   }
 
@@ -76,44 +78,46 @@ async function uploadDirtyAssets(
     stillAssets: { ...(record.stillAssets ?? {}) },
   }
 
-  for (const meta of record.sceneMeta) {
-    if (!meta.bufferKey) continue
-    const buffer = await idbGet<ArrayBuffer>(STORES.buffers, meta.bufferKey)
-    if (!buffer) {
-      throw new Error(`The GLB for “${meta.name}” is missing from this browser cache.`)
+  for (const scene of record.scenes) {
+    for (const meta of scene.sceneMeta) {
+      if (!meta.bufferKey) continue
+      const buffer = await idbGet<ArrayBuffer>(STORES.buffers, meta.bufferKey)
+      if (!buffer) {
+        throw new Error(`The GLB for “${meta.name}” is missing from this browser cache.`)
+      }
+      const sha256 = await sha256Hex(buffer)
+      const existing = assets.bufferAssets[meta.bufferKey]
+      if (existing?.sha256 === sha256) continue
+      const uploaded = await uploadCloudBytes(
+        accessToken,
+        projectId,
+        buffer,
+        `${meta.name || 'model'}.glb`,
+        'model/gltf-binary',
+        'glb',
+      )
+      assets.bufferAssets[meta.bufferKey] = uploaded
     }
-    const sha256 = await sha256Hex(buffer)
-    const existing = assets.bufferAssets[meta.bufferKey]
-    if (existing?.sha256 === sha256) continue
-    const uploaded = await uploadCloudBytes(
-      accessToken,
-      projectId,
-      buffer,
-      `${meta.name || 'model'}.glb`,
-      'model/gltf-binary',
-      'glb',
-    )
-    assets.bufferAssets[meta.bufferKey] = uploaded
-  }
 
-  for (const shot of record.shots) {
-    if (!shot.thumbnail) {
-      delete assets.stillAssets[shot.id]
-      continue
+    for (const shot of scene.shots) {
+      if (!shot.thumbnail) {
+        delete assets.stillAssets[shot.id]
+        continue
+      }
+      const bytes = await shot.thumbnail.arrayBuffer()
+      const sha256 = await sha256Hex(bytes)
+      const existing = assets.stillAssets[shot.id]
+      if (existing?.sha256 === sha256) continue
+      const type = shot.thumbnail.type === 'image/png' ? 'image/png' : 'image/jpeg'
+      const uploaded = await uploadCloudBytes(
+        accessToken,
+        projectId,
+        shot.thumbnail,
+        `${shot.id}.${type === 'image/png' ? 'png' : 'jpg'}`,
+        type,
+      )
+      assets.stillAssets[shot.id] = uploaded
     }
-    const bytes = await shot.thumbnail.arrayBuffer()
-    const sha256 = await sha256Hex(bytes)
-    const existing = assets.stillAssets[shot.id]
-    if (existing?.sha256 === sha256) continue
-    const type = shot.thumbnail.type === 'image/png' ? 'image/png' : 'image/jpeg'
-    const uploaded = await uploadCloudBytes(
-      accessToken,
-      projectId,
-      shot.thumbnail,
-      `${shot.id}.${type === 'image/png' ? 'png' : 'jpg'}`,
-      type,
-    )
-    assets.stillAssets[shot.id] = uploaded
   }
 
   return assets

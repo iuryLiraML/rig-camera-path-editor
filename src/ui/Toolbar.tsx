@@ -3,7 +3,7 @@ import { useCameraReady } from '../state/cameraPathLink'
 import { useEditorStore } from '../state/useEditorStore'
 import { applyBeginPlayback } from '../lib/playback'
 import { openComposeTimeline } from '../lib/editorShortcuts'
-import { AddSceneMenu } from './AddSceneMenu'
+import { AddObjectMenu } from './AddObjectMenu'
 import { ExportActions, ExportFormatFields, ExportPassToggles } from './ExportControls'
 import { ClockIcon, CursorIcon, DrawPathIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
 import { toolbarSlot, useViewportInsets, useWindowSize } from './viewportInsets'
@@ -155,7 +155,7 @@ export function Toolbar() {
       {sceneTools && (
         <>
           {composeTools && (
-            <AddSceneMenu includePath title="Add a shape, path, or import a model" />
+            <AddObjectMenu includePath title="Add a shape, path, or import a model" />
           )}
           {composeTools && <Divider />}
           <ToolButton title="Select (V)" active={tool === 'select'} onClick={() => setTool('select')}>

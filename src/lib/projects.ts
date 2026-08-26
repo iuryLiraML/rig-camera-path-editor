@@ -37,6 +37,26 @@ export interface ProjectAssetRef {
   sha256: string
 }
 
+/** A place within a project: its own stage, camera, and shots. */
+export interface SceneRecord {
+  id: string
+  name: string
+  order: number
+  createdAt: number
+  /** small JPEG preview, used for the scene switcher */
+  thumbnail?: Blob | null
+  sceneMeta: ObjectMeta[]
+  rig: RigSnapshot
+  /** full motion-path collection (incl. the camera path); optional for back-compat */
+  paths?: MotionPath[]
+  /** named camera alternatives; optional for scenes created before multi-camera support */
+  cameraOptions?: CameraOption[]
+  activeCameraOptionId?: string
+  shots: Shot[]
+  directorChat?: DirectorChatEntry[]
+  directorLessons?: string[]
+}
+
 export interface ProjectRecord {
   id: string
   name: string
@@ -53,24 +73,134 @@ export interface ProjectRecord {
   guidelines: string
   savedPrompts: SavedPrompt[]
   skills: CustomSkill[]
+  activeSceneId: string
+  scenes: SceneRecord[]
+}
+
+/**
+ * Records written before the Scene tier existed are a flat bundle of one
+ * scene's fields at the record root. Detected and grandfathered in on load —
+ * see `migrateLegacyRecord` — rather than migrated in a batch pass.
+ */
+interface LegacyProjectRecord {
+  id: string
+  name: string
+  createdAt: number
+  updatedAt?: number
+  cloudProjectId?: string
+  cloudUpdatedAt?: string
+  bufferAssets?: Record<string, ProjectAssetRef>
+  stillAssets?: Record<string, ProjectAssetRef>
+  folderId?: string | null
+  workflow?: ProjectWorkflow
+  guidelines: string
+  savedPrompts: SavedPrompt[]
+  skills: CustomSkill[]
   shots: Shot[]
   directorChat?: DirectorChatEntry[]
   directorLessons?: string[]
   sceneMeta: ObjectMeta[]
   rig: RigSnapshot
-  /** full motion-path collection (incl. the camera path); optional for back-compat */
   paths?: MotionPath[]
-  /** named camera alternatives; optional for projects created before multi-camera support */
   cameraOptions?: CameraOption[]
   activeCameraOptionId?: string
+  scenes?: undefined
+}
+
+/** Deterministic so re-normalizing the same not-yet-resaved legacy record twice agrees with itself. */
+const LEGACY_SCENE_ID = 'scene-legacy'
+
+function migrateLegacyRecord(raw: LegacyProjectRecord): ProjectRecord {
+  const scene: SceneRecord = {
+    id: LEGACY_SCENE_ID,
+    name: 'Scene 1',
+    order: 0,
+    createdAt: raw.createdAt,
+    thumbnail: [...(raw.shots ?? [])].sort((a, b) => a.order - b.order)[0]?.thumbnail ?? null,
+    sceneMeta: raw.sceneMeta ?? [],
+    rig: raw.rig,
+    paths: raw.paths,
+    cameraOptions: raw.cameraOptions,
+    activeCameraOptionId: raw.activeCameraOptionId,
+    shots: raw.shots ?? [],
+    directorChat: raw.directorChat,
+    directorLessons: raw.directorLessons,
+  }
+  return {
+    id: raw.id,
+    name: raw.name,
+    createdAt: raw.createdAt,
+    updatedAt: raw.updatedAt,
+    cloudProjectId: raw.cloudProjectId,
+    cloudUpdatedAt: raw.cloudUpdatedAt,
+    bufferAssets: raw.bufferAssets,
+    stillAssets: raw.stillAssets,
+    folderId: raw.folderId,
+    workflow: raw.workflow,
+    guidelines: raw.guidelines,
+    savedPrompts: raw.savedPrompts ?? [],
+    skills: raw.skills ?? [],
+    activeSceneId: LEGACY_SCENE_ID,
+    scenes: [scene],
+  }
+}
+
+/** Every read of a stored project record passes through here — old flat shapes get one scene synthesized. */
+function normalizeProjectRecord(raw: LegacyProjectRecord | ProjectRecord): ProjectRecord {
+  if (Array.isArray(raw.scenes)) return raw as ProjectRecord
+  return migrateLegacyRecord(raw as LegacyProjectRecord)
+}
+
+async function getProjectRecord(id: string): Promise<ProjectRecord | undefined> {
+  const raw = await idbGet<LegacyProjectRecord | ProjectRecord>(STORES.projects, id)
+  return raw ? normalizeProjectRecord(raw) : undefined
+}
+
+async function getAllProjectRecords(): Promise<ProjectRecord[]> {
+  const raw = await idbGetAll<LegacyProjectRecord | ProjectRecord>(STORES.projects)
+  return raw.map(normalizeProjectRecord)
+}
+
+function activeSceneOf(record: ProjectRecord): SceneRecord {
+  return record.scenes.find((s) => s.id === record.activeSceneId) ?? record.scenes[0]
 }
 
 function isCloudFirst(): boolean {
   return useCloudAuthStore.getState().status === 'signed-in'
 }
 
-function buildActiveRecord(id: string, createdAt: number): ProjectRecord {
+function buildActiveScene(id: string, name: string, createdAt: number, previous?: SceneRecord): SceneRecord {
   const project = useProjectStore.getState()
+  return {
+    id,
+    name,
+    order: previous?.order ?? 0,
+    createdAt,
+    thumbnail: previous?.thumbnail ?? null,
+    sceneMeta: liveSceneMetas(),
+    rig: getRigSnapshot(),
+    paths: JSON.parse(JSON.stringify(usePathStore.getState().paths)),
+    cameraOptions: getCameraOptionsSnapshot(),
+    activeCameraOptionId: useCameraOptionsStore.getState().activeOptionId,
+    shots: project.shots,
+    directorChat: project.directorChat,
+    directorLessons: project.directorLessons,
+  }
+}
+
+/** Captures the live stores into the record, splicing the active scene into whatever else `previous` had saved. */
+function buildActiveRecord(id: string, createdAt: number, previous?: ProjectRecord): ProjectRecord {
+  const project = useProjectStore.getState()
+  const activeSceneId = project.activeSceneId
+  const previousScenes = previous?.scenes ?? []
+  const index = previousScenes.findIndex((s) => s.id === activeSceneId)
+  const activeScene = buildActiveScene(
+    activeSceneId,
+    project.sceneName,
+    createdAt,
+    index >= 0 ? previousScenes[index] : undefined,
+  )
+  const scenes = index >= 0 ? previousScenes.map((s, i) => (i === index ? activeScene : s)) : [...previousScenes, activeScene]
   return {
     id,
     name: project.name,
@@ -80,15 +210,9 @@ function buildActiveRecord(id: string, createdAt: number): ProjectRecord {
     guidelines: project.guidelines,
     savedPrompts: project.savedPrompts,
     skills: project.skills,
-    shots: project.shots,
-    directorChat: project.directorChat,
-    directorLessons: project.directorLessons,
     folderId: project.folderId,
-    sceneMeta: liveSceneMetas(),
-    rig: getRigSnapshot(),
-    paths: JSON.parse(JSON.stringify(usePathStore.getState().paths)),
-    cameraOptions: getCameraOptionsSnapshot(),
-    activeCameraOptionId: useCameraOptionsStore.getState().activeOptionId,
+    activeSceneId,
+    scenes,
   }
 }
 
@@ -131,6 +255,9 @@ async function createUntitledFromCurrent(): Promise<string | null> {
     guidelines: current.guidelines,
     savedPrompts: current.savedPrompts,
     skills: current.skills,
+    activeSceneId: current.activeSceneId,
+    sceneName: current.sceneName,
+    scenes: current.scenes,
     shots: current.shots,
     directorChat: current.directorChat,
     directorLessons: current.directorLessons,
@@ -177,9 +304,9 @@ export async function saveActiveProject(options?: { createIfMissing?: boolean })
     }
     const createdAt = createdAtById.get(projectId) ?? Date.now()
     createdAtById.set(projectId, createdAt)
-    const previous = await idbGet<ProjectRecord>(STORES.projects, projectId)
+    const previous = await getProjectRecord(projectId)
     const record: ProjectRecord = {
-      ...buildActiveRecord(projectId, createdAt),
+      ...buildActiveRecord(projectId, createdAt, previous),
       cloudProjectId: previous?.cloudProjectId ?? (isCloudFirst() ? projectId : undefined),
       cloudUpdatedAt: previous?.cloudUpdatedAt,
       bufferAssets: previous?.bufferAssets,
@@ -214,19 +341,29 @@ export function flushActiveProject(options?: { createIfMissing?: boolean }) {
   return saveActiveProject(options)
 }
 
-function sceneSummaries(shots: Shot[] | undefined) {
-  return [...(shots ?? [])]
+function sceneSummaries(scenes: SceneRecord[] | undefined) {
+  return [...(scenes ?? [])]
     .sort((a, b) => a.order - b.order)
-    .map((shot) => ({ id: shot.id, name: shot.name }))
+    .map((scene) => ({ id: scene.id, name: scene.name }))
 }
 
-function shotsFromUnknown(value: unknown): Shot[] {
-  if (!Array.isArray(value)) return []
-  return value.filter((shot): shot is Shot => {
-    if (!shot || typeof shot !== 'object') return false
-    const record = shot as { id?: unknown; name?: unknown }
-    return typeof record.id === 'string' && typeof record.name === 'string'
+/** Lenient read of a cloud project-list entry's opaque editorState — never throws on a shape mismatch. */
+function scenesFromUnknownEditorState(value: unknown): { id: string; name: string; order?: number }[] {
+  if (!value || typeof value !== 'object') return []
+  const scenes = (value as { scenes?: unknown }).scenes
+  if (!Array.isArray(scenes)) return []
+  return scenes.filter((s): s is { id: string; name: string; order?: number } => {
+    if (!s || typeof s !== 'object') return false
+    const r = s as { id?: unknown; name?: unknown }
+    return typeof r.id === 'string' && typeof r.name === 'string'
   })
+}
+
+function shotCountFromUnknownEditorState(value: unknown): number {
+  return scenesFromUnknownEditorState(value).reduce((total, s) => {
+    const shots = (s as { shots?: unknown }).shots
+    return total + (Array.isArray(shots) ? shots.length : 0)
+  }, 0)
 }
 
 async function refreshFolderList() {
@@ -244,7 +381,7 @@ async function refreshProjectList() {
       return []
     }
     const cloud = await listCloudProjects(accessToken)
-    const local = await idbGetAll<ProjectRecord>(STORES.projects)
+    const local = await getAllProjectRecords()
     const localById = new Map(local.map((record) => [record.id, record]))
     cloud.forEach((project) => {
       const createdAt = Date.parse(project.updatedAt) || Date.now()
@@ -253,27 +390,24 @@ async function refreshProjectList() {
     useProjectStore.getState().setProjectList(
       cloud.map((project) => {
         const workflow = migrateProjectWorkflow(project.workflow, project.name)
-        const editorState = project.editorState
-        const shots = shotsFromUnknown(
-          editorState && typeof editorState === 'object'
-            ? (editorState as { shots?: unknown }).shots
-            : [],
-        )
+        const scenes = scenesFromUnknownEditorState(project.editorState)
         return {
           id: project.id,
           name: project.name,
           setupStatus: isProjectEditorReady(workflow) ? 'ready' : 'draft',
           folderId: localById.get(project.id)?.folderId ?? null,
-          shotCount: shots.length,
+          shotCount: shotCountFromUnknownEditorState(project.editorState),
           updatedAt: Date.parse(project.updatedAt) || Date.now(),
-          scenes: sceneSummaries(shots),
+          scenes: scenes
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+            .map((s) => ({ id: s.id, name: s.name })),
         }
       }),
     )
     return [] as ProjectRecord[]
   }
 
-  const records = await idbGetAll<ProjectRecord>(STORES.projects)
+  const records = await getAllProjectRecords()
   records.forEach((r) => createdAtById.set(r.id, r.createdAt))
   // most recently touched first: that is the order you actually look for
   const byRecency = [...records].sort(
@@ -282,16 +416,18 @@ async function refreshProjectList() {
   useProjectStore.getState().setProjectList(
     byRecency.map((record) => {
       const workflow = migrateProjectWorkflow(record.workflow, record.name)
-      const shots = record.shots ?? []
+      const scenes = [...record.scenes].sort((a, b) => a.order - b.order)
+      const allShots = scenes.flatMap((s) => s.shots ?? [])
       return {
         id: record.id,
         name: record.name,
         setupStatus: isProjectEditorReady(workflow) ? 'ready' : 'draft',
         folderId: record.folderId ?? null,
-        shotCount: shots.length,
+        shotCount: allShots.length,
         updatedAt: record.updatedAt ?? record.createdAt,
-        thumbnail: [...shots].sort((a, b) => a.order - b.order)[0]?.thumbnail ?? undefined,
-        scenes: sceneSummaries(shots),
+        thumbnail:
+          scenes[0]?.thumbnail ?? [...allShots].sort((a, b) => a.order - b.order)[0]?.thumbnail ?? undefined,
+        scenes: sceneSummaries(scenes),
       }
     }),
   )
@@ -300,6 +436,7 @@ async function refreshProjectList() {
 }
 
 function applyRecord(record: ProjectRecord) {
+  const scene = activeSceneOf(record)
   useProjectStore.getState().loadProject({
     projectId: record.id,
     name: record.name,
@@ -307,16 +444,19 @@ function applyRecord(record: ProjectRecord) {
     guidelines: record.guidelines,
     savedPrompts: record.savedPrompts ?? [],
     skills: record.skills ?? [],
-    shots: record.shots ?? [],
-    directorChat: record.directorChat ?? [],
-    directorLessons: record.directorLessons ?? [],
+    activeSceneId: scene.id,
+    sceneName: scene.name,
+    scenes: sceneSummaries(record.scenes),
+    shots: scene.shots ?? [],
+    directorChat: scene.directorChat ?? [],
+    directorLessons: scene.directorLessons ?? [],
     folderId: record.folderId ?? null,
   })
   // restore the whole path collection first, then let the rig snapshot
   // upsert the camera path (keeps old records without `paths` working)
   usePathStore.setState({
-    paths: record.paths?.length
-      ? JSON.parse(JSON.stringify(record.paths))
+    paths: scene.paths?.length
+      ? JSON.parse(JSON.stringify(scene.paths))
       : [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
     activePathId: CAMERA_PATH_ID,
     selectedAnchorId: null,
@@ -325,7 +465,7 @@ function applyRecord(record: ProjectRecord) {
   })
   useCameraOptionsStore
     .getState()
-    .loadOptions(record.cameraOptions, record.activeCameraOptionId, record.rig)
+    .loadOptions(scene.cameraOptions, scene.activeCameraOptionId, scene.rig)
   localStorage.setItem(ACTIVE_KEY, record.id)
   useSaveStatusStore.getState().setStatus('saved')
 }
@@ -381,7 +521,7 @@ function watchForAutosave() {
 
 async function openHydratedRecord(record: ProjectRecord) {
   applyRecord(record)
-  await loadSceneFromMetas(record.sceneMeta, true)
+  await loadSceneFromMetas(activeSceneOf(record).sceneMeta, true)
   restoreDirectorChat()
 }
 
@@ -443,6 +583,7 @@ export async function bootProjects() {
     const legacyMetas = readLegacyMetas() ?? []
     await loadSceneFromMetas(legacyMetas, true)
     const id = makeSceneId('proj')
+    const sceneId = makeSceneId('scene')
     createdAtById.set(id, Date.now())
     useProjectStore.getState().loadProject({
       projectId: id,
@@ -451,6 +592,9 @@ export async function bootProjects() {
       guidelines: useAgentStore.getState().guidelines, // legacy location
       savedPrompts: [],
       skills: [],
+      activeSceneId: sceneId,
+      sceneName: 'Scene 1',
+      scenes: [{ id: sceneId, name: 'Scene 1' }],
       shots: [],
     })
     localStorage.setItem(ACTIVE_KEY, id)
@@ -465,13 +609,18 @@ export async function bootProjects() {
   watchForAutosave()
   useProjectStore.getState().setBooted(true)
 
-  // sweep buffers no project references anymore
-  const live = new Set<string>()
-  for (const r of await idbGetAll<ProjectRecord>(STORES.projects)) {
-    r.sceneMeta.forEach((m) => m.bufferKey && live.add(m.bufferKey))
+  // sweep buffers no scene, in any project, references anymore
+  void sweepOrphanBuffers(liveBufferKeys(await getAllProjectRecords(), liveSceneMetas()))
+}
+
+/** Every buffer key referenced by any scene in any project, plus whatever the live stage holds right now. */
+export function liveBufferKeys(records: ProjectRecord[], liveMetas: ObjectMeta[]): Set<string> {
+  const keys = new Set<string>()
+  for (const record of records) {
+    record.scenes.forEach((scene) => scene.sceneMeta.forEach((m) => m.bufferKey && keys.add(m.bufferKey)))
   }
-  liveSceneMetas().forEach((m) => m.bufferKey && live.add(m.bufferKey))
-  void sweepOrphanBuffers(live)
+  liveMetas.forEach((m) => m.bufferKey && keys.add(m.bufferKey))
+  return keys
 }
 
 let projectTransition = Promise.resolve()
@@ -508,7 +657,7 @@ async function switchProjectNow(id: string) {
     return
   }
 
-  const records = await idbGetAll<ProjectRecord>(STORES.projects)
+  const records = await getAllProjectRecords()
   const record = records.find((r) => r.id === id)
   if (!record) return
 
@@ -519,6 +668,121 @@ async function switchProjectNow(id: string) {
 
 export function switchProject(id: string) {
   return serializeProjectTransition(() => switchProjectNow(id))
+}
+
+// ---------------------------------------------------------------------------
+// Scenes — places within the active project
+// ---------------------------------------------------------------------------
+
+async function switchSceneNow(sceneId: string) {
+  const { projectId, activeSceneId } = useProjectStore.getState()
+  if (!projectId || sceneId === activeSceneId) return
+  clearTimeout(saveTimer)
+  await saveActiveProject({ createIfMissing: false })
+  resetEditorChrome()
+
+  const record = await getProjectRecord(projectId)
+  const scene = record?.scenes.find((s) => s.id === sceneId)
+  if (!record || !scene) return
+
+  applyRecord({ ...record, activeSceneId: sceneId })
+  await loadSceneFromMetas(scene.sceneMeta, true)
+  restoreDirectorChat()
+  resetHistory()
+  useSceneStore.getState().showNotice(`Switched to "${scene.name}"`)
+}
+
+/** Switch which scene (place) is active within the current project. */
+export function switchScene(sceneId: string) {
+  return serializeProjectTransition(() => switchSceneNow(sceneId))
+}
+
+async function createSceneNow(name: string): Promise<string | null> {
+  const { projectId } = useProjectStore.getState()
+  if (!projectId) return null
+  clearTimeout(saveTimer)
+  await saveActiveProject({ createIfMissing: false })
+  resetEditorChrome()
+
+  const record = await getProjectRecord(projectId)
+  if (!record) return null
+
+  const sceneId = makeSceneId('scene')
+  const emptyRig = makeEmptyRigSnapshot()
+  const newScene: SceneRecord = {
+    id: sceneId,
+    name,
+    order: record.scenes.length,
+    createdAt: Date.now(),
+    thumbnail: null,
+    sceneMeta: [],
+    rig: emptyRig,
+    paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
+    shots: [],
+    directorChat: [],
+    directorLessons: [],
+  }
+  const updated: ProjectRecord = { ...record, activeSceneId: sceneId, scenes: [...record.scenes, newScene] }
+  await idbPut(STORES.projects, updated)
+
+  applyRecord(updated) // hydrates the rig too, via useCameraOptionsStore.loadOptions
+  await loadSceneFromMetas([], true) // fresh scene with the sample shape, matches New project
+  useEditorStore.getState().select(null)
+  restoreDirectorChat()
+  resetHistory()
+  await saveActiveProject()
+  await refreshProjectList()
+  useSceneStore.getState().showNotice(`Scene "${name}" created`)
+  return sceneId
+}
+
+/** Create a new, empty scene in the current project and switch to it. */
+export function createScene(name = 'New scene') {
+  return serializeProjectTransition(() => createSceneNow(name))
+}
+
+export async function renameScene(sceneId: string, name: string) {
+  const next = name.trim() || 'Untitled scene'
+  const store = useProjectStore.getState()
+  if (store.activeSceneId === sceneId) {
+    store.setSceneName(next)
+    await saveActiveProject()
+    return
+  }
+  const record = await getProjectRecord(store.projectId)
+  if (!record) return
+  const scenes = record.scenes.map((s) => (s.id === sceneId ? { ...s, name: next } : s))
+  await idbPut(STORES.projects, { ...record, scenes, updatedAt: Date.now() })
+  useProjectStore.getState().setScenes(sceneSummaries(scenes))
+}
+
+async function deleteSceneNow(sceneId: string) {
+  const { projectId, activeSceneId } = useProjectStore.getState()
+  if (!projectId) return
+  const record = await getProjectRecord(projectId)
+  // a project always keeps at least one scene
+  if (!record || record.scenes.length <= 1) return
+  const remaining = record.scenes.filter((s) => s.id !== sceneId)
+  if (remaining.length === record.scenes.length) return
+
+  if (activeSceneId === sceneId) {
+    const updated: ProjectRecord = { ...record, scenes: remaining, activeSceneId: remaining[0].id }
+    await idbPut(STORES.projects, updated)
+    resetEditorChrome()
+    applyRecord(updated)
+    await loadSceneFromMetas(remaining[0].sceneMeta, true)
+    restoreDirectorChat()
+    resetHistory()
+  } else {
+    await idbPut(STORES.projects, { ...record, scenes: remaining, updatedAt: Date.now() })
+    useProjectStore.getState().setScenes(sceneSummaries(remaining))
+  }
+  useSceneStore.getState().showNotice('Scene deleted')
+}
+
+/** A project always keeps at least one scene — deleting the last one is a no-op. */
+export function deleteScene(sceneId: string) {
+  return serializeProjectTransition(() => deleteSceneNow(sceneId))
 }
 
 async function createProjectNow(name: string, saveCurrent: boolean, folderId: string | null = null) {
@@ -542,6 +806,7 @@ async function createProjectNow(name: string, saveCurrent: boolean, folderId: st
   }
 
   createdAtById.set(id, Date.now())
+  const sceneId = makeSceneId('scene')
   useProjectStore.getState().loadProject({
     projectId: id,
     name,
@@ -549,6 +814,9 @@ async function createProjectNow(name: string, saveCurrent: boolean, folderId: st
     guidelines: '',
     savedPrompts: [],
     skills: [],
+    activeSceneId: sceneId,
+    sceneName: 'Scene 1',
+    scenes: [{ id: sceneId, name: 'Scene 1' }],
     shots: [],
     folderId,
   })
@@ -587,7 +855,7 @@ export async function renameProject(projectId: string, name: string) {
     await refreshProjectList()
     return
   }
-  const record = await idbGet<ProjectRecord>(STORES.projects, projectId)
+  const record = await getProjectRecord(projectId)
   if (!record) return
   await idbPut(STORES.projects, { ...record, name: next, updatedAt: Date.now() })
   await refreshProjectList()
@@ -601,14 +869,14 @@ export async function moveProjectToFolder(projectId: string, folderId: string | 
     await refreshProjectList()
     return
   }
-  const record = await idbGet<ProjectRecord>(STORES.projects, projectId)
+  const record = await getProjectRecord(projectId)
   if (!record) return
   await idbPut(STORES.projects, { ...record, folderId, updatedAt: Date.now() })
   await refreshProjectList()
 }
 
 export async function removeFolder(folderId: string) {
-  const records = await idbGetAll<ProjectRecord>(STORES.projects)
+  const records = await getAllProjectRecords()
   const now = Date.now()
   await Promise.all(
     records

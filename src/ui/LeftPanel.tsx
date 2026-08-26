@@ -12,7 +12,7 @@ import { useRigStore } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { generateRacingDroneCameras } from '../lib/cameraBatch/generateRacingDroneCameras'
-import { AddSceneMenu, addDrawnPath } from './AddSceneMenu'
+import { AddObjectMenu, addDrawnPath } from './AddObjectMenu'
 import {
   CameraIcon,
   CubeIcon,
@@ -622,7 +622,7 @@ export function LeftPanel() {
           <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">
             Scene
           </span>
-          <AddSceneMenu compact title="Add a shape or import a model" />
+          <AddObjectMenu compact title="Add a shape or import a model" />
         </div>
         <div className="flex flex-col gap-0.5">
           {pendingLifts

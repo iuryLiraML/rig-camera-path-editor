@@ -185,7 +185,8 @@ export function ProjectCard({
             </h3>
           )}
           <p className="mt-0.5 text-xs text-ink-dim">
-            {project.shotCount} {project.shotCount === 1 ? 'scene' : 'scenes'} ·{' '}
+            {project.scenes.length} {project.scenes.length === 1 ? 'scene' : 'scenes'} ·{' '}
+            {project.shotCount} {project.shotCount === 1 ? 'shot' : 'shots'} ·{' '}
             {relativeTime(project.updatedAt)}
           </p>
         </div>

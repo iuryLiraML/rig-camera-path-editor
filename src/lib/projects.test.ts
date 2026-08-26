@@ -37,11 +37,15 @@ import {
   AUTOSAVE_MS,
   flushActiveProject,
   installPersistFlush,
+  liveBufferKeys,
   renameProject,
   saveActiveProject,
   scheduleAutosave,
+  switchScene,
+  type ProjectRecord,
 } from './projects'
 import { idbGet, idbGetAll, idbPut, STORES } from './idb'
+import { makeEmptyRigSnapshot } from '../state/useCameraOptionsStore'
 
 beforeEach(() => {
   memory.clear()
@@ -55,6 +59,9 @@ beforeEach(() => {
     guidelines: '',
     savedPrompts: [],
     skills: [],
+    activeSceneId: 'scene-1',
+    sceneName: 'Scene 1',
+    scenes: [{ id: 'scene-1', name: 'Scene 1' }],
     shots: [],
     directorChat: [],
     directorLessons: [],
@@ -164,5 +171,144 @@ describe('idbGetAll after save', () => {
     expect(all.some((record) => record.id === 'proj-round')).toBe(true)
     const stored = await idbGet<{ id: string; name: string }>(STORES.projects, 'proj-round')
     expect(stored?.name).toBe('Roundtrip')
+  })
+})
+
+describe('legacy record migration', () => {
+  it('synthesizes one scene from a pre-Scene-tier record on read', async () => {
+    const emptyRig = makeEmptyRigSnapshot()
+    memory.set('proj-legacy', {
+      id: 'proj-legacy',
+      name: 'Old project',
+      createdAt: 1,
+      guidelines: 'Keep it moody',
+      savedPrompts: [],
+      skills: [],
+      shots: [
+        {
+          id: 'shot-1',
+          name: 'Shot 1',
+          order: 0,
+          rig: emptyRig,
+          format: { aspect: '16:9', res: 1080, custom: [1920, 1080] },
+          duration: 6,
+          thumbnail: null,
+        },
+      ],
+      directorChat: [],
+      directorLessons: [],
+      sceneMeta: [],
+      rig: emptyRig,
+    } as unknown as { id: string; name: string })
+
+    await renameProject('proj-legacy', 'Renamed project')
+
+    const migrated = memory.get('proj-legacy') as unknown as ProjectRecord
+    expect(migrated.name).toBe('Renamed project')
+    expect(migrated.scenes).toHaveLength(1)
+    expect(migrated.activeSceneId).toBe(migrated.scenes[0].id)
+    expect(migrated.scenes[0].shots).toHaveLength(1)
+    expect(migrated.scenes[0].shots[0].id).toBe('shot-1')
+    expect(migrated.guidelines).toBe('Keep it moody')
+  })
+})
+
+describe('liveBufferKeys', () => {
+  const emptyRig = makeEmptyRigSnapshot()
+
+  it('keeps a buffer referenced only by an inactive scene in the same project', () => {
+    const records: ProjectRecord[] = [
+      {
+        id: 'proj-1',
+        name: 'Multi-scene',
+        createdAt: 1,
+        guidelines: '',
+        savedPrompts: [],
+        skills: [],
+        activeSceneId: 'scene-a',
+        scenes: [
+          { id: 'scene-a', name: 'A', order: 0, createdAt: 1, sceneMeta: [], rig: emptyRig, shots: [] },
+          {
+            id: 'scene-b',
+            name: 'B',
+            order: 1,
+            createdAt: 1,
+            sceneMeta: [
+              {
+                id: 'obj-1',
+                name: 'Hull',
+                shade: 0.4,
+                bufferKey: 'buf-scene-b',
+                transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+                keys: [],
+                playClips: false,
+              },
+            ],
+            rig: emptyRig,
+            shots: [],
+          },
+        ],
+      },
+    ]
+    // the live stage currently shows (empty) scene A — scene B's buffer isn't "live" right now, but must survive
+    const keys = liveBufferKeys(records, [])
+    expect(keys.has('buf-scene-b')).toBe(true)
+  })
+
+  it('drops a buffer no scene in any project references', () => {
+    const records: ProjectRecord[] = [
+      {
+        id: 'proj-1',
+        name: 'P',
+        createdAt: 1,
+        guidelines: '',
+        savedPrompts: [],
+        skills: [],
+        activeSceneId: 'scene-a',
+        scenes: [{ id: 'scene-a', name: 'A', order: 0, createdAt: 1, sceneMeta: [], rig: emptyRig, shots: [] }],
+      },
+    ]
+    const keys = liveBufferKeys(records, [])
+    expect(keys.has('buf-orphan')).toBe(false)
+  })
+})
+
+describe('switchScene', () => {
+  it('switches the active scene and preserves both scenes in storage', async () => {
+    const emptyRig = makeEmptyRigSnapshot()
+    useProjectStore.setState({
+      projectId: 'proj-multi',
+      name: 'Multi',
+      activeSceneId: 'scene-a',
+      sceneName: 'Scene A',
+      scenes: [
+        { id: 'scene-a', name: 'Scene A' },
+        { id: 'scene-b', name: 'Scene B' },
+      ],
+    })
+    memory.set('proj-multi', {
+      id: 'proj-multi',
+      name: 'Multi',
+      createdAt: 1,
+      guidelines: '',
+      savedPrompts: [],
+      skills: [],
+      activeSceneId: 'scene-a',
+      scenes: [
+        { id: 'scene-a', name: 'Scene A', order: 0, createdAt: 1, sceneMeta: [], rig: emptyRig, shots: [], paths: [] },
+        { id: 'scene-b', name: 'Scene B', order: 1, createdAt: 1, sceneMeta: [], rig: emptyRig, shots: [], paths: [] },
+      ],
+    } as unknown as { id: string; name: string })
+
+    await switchScene('scene-b')
+    expect(useProjectStore.getState().activeSceneId).toBe('scene-b')
+    expect(useProjectStore.getState().sceneName).toBe('Scene B')
+
+    const afterSwitch = memory.get('proj-multi') as unknown as ProjectRecord
+    expect(afterSwitch.scenes.map((s) => s.id).sort()).toEqual(['scene-a', 'scene-b'])
+
+    await switchScene('scene-a')
+    expect(useProjectStore.getState().activeSceneId).toBe('scene-a')
+    expect(useProjectStore.getState().sceneName).toBe('Scene A')
   })
 })

@@ -22,7 +22,7 @@ export type ExportAspect = '16:9' | '1:1' | '9:16'
 export type ExportRes = 720 | 1080 | 'custom'
 export type QuickView = 'front' | 'top' | 'right'
 export type ViewMode = 'clay' | 'depth' | 'outline' | 'normals'
-export type AppView = 'projects' | 'editor' | 'board' | 'intake'
+export type AppView = 'projects' | 'editor' | 'board'
 export type PanelTab = 'design' | 'assistant'
 /** Job the editor chrome is serving. Same 3D scene; different overlays. */
 export type WorkspaceMode = 'build' | 'compose' | 'visualize'
