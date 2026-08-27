@@ -21,11 +21,12 @@ export type GizmoMode = 'translate' | 'rotate' | 'scale'
 export type ExportAspect = '16:9' | '1:1' | '9:16'
 export type ExportRes = 720 | 1080 | 'custom'
 export type QuickView = 'front' | 'top' | 'right'
-export type ViewMode = 'clay' | 'depth' | 'outline' | 'normals'
-export type AppView = 'projects' | 'editor' | 'board' | 'intake'
+export type ViewMode = 'look' | 'clay' | 'depth' | 'outline' | 'normals'
+export type AppView = 'projects' | 'editor' | 'board'
 export type PanelTab = 'design' | 'assistant'
 /** Job the editor chrome is serving. Same 3D scene; different overlays. */
 export type WorkspaceMode = 'build' | 'compose' | 'visualize'
+export type AddDrawerChip = 'primitives' | 'assets' | 'generate' | 'environment'
 export type ComposeDock = 'sequence' | 'timeline'
 export type ObjectBarPanel = 'none' | 'transform' | 'name' | 'properties' | 'more'
 /** Floating camera inspector in Compose — not inside the outliner tree. */
@@ -38,6 +39,7 @@ export type SelectableId =
   | 'camera-path'
   | 'cinema-camera'
   | 'target'
+  | 'env'
   | `obj:${string}`
 
 interface EditorState {
@@ -89,6 +91,8 @@ interface EditorState {
   showOutliner: boolean
   /** Add-an-object drawer (Build). */
   showAddDrawer: boolean
+  /** Active chip in the Add drawer so a CTA can open Environment. */
+  addDrawerChip: AddDrawerChip
   /** Which object-bar popover is open. */
   objectBarPanel: ObjectBarPanel
   /** Compose camera inspector (Adjust / FX). Independent of the outliner. */
@@ -170,6 +174,8 @@ interface EditorState {
   toggleOutliner: () => void
   setShowAddDrawer: (on: boolean) => void
   toggleAddDrawer: () => void
+  setAddDrawerChip: (chip: AddDrawerChip) => void
+  openAddDrawerChip: (chip: AddDrawerChip) => void
   setObjectBarPanel: (panel: ObjectBarPanel) => void
   setCameraPanel: (panel: CameraPanel) => void
   setShowImportModal: (on: boolean) => void
@@ -225,6 +231,7 @@ export const useEditorStore = create<EditorState>((set) => ({
   composeDock: 'sequence',
   showOutliner: false,
   showAddDrawer: false,
+  addDrawerChip: 'primitives',
   objectBarPanel: 'none',
   cameraPanel: 'closed',
   showImportModal: false,
@@ -293,7 +300,8 @@ export const useEditorStore = create<EditorState>((set) => ({
       gizmoMode,
       // W / E / R is how Transform is invoked — open the numeric panel so the
       // per-parameter keyframe diamonds are on screen, not only on ObjectBar Move.
-      objectBarPanel: s.selection?.startsWith('obj:') ? 'transform' : s.objectBarPanel,
+      objectBarPanel:
+        s.selection?.startsWith('obj:') || s.selection === 'env' ? 'transform' : s.objectBarPanel,
     })),
   setPlayMode: (playMode) => set({ playMode }),
   setCameraView: (cameraView) =>
@@ -351,6 +359,13 @@ export const useEditorStore = create<EditorState>((set) => ({
   toggleOutliner: () => set((s) => ({ showOutliner: !s.showOutliner })),
   setShowAddDrawer: (showAddDrawer) => set({ showAddDrawer }),
   toggleAddDrawer: () => set((s) => ({ showAddDrawer: !s.showAddDrawer })),
+  setAddDrawerChip: (addDrawerChip) => set({ addDrawerChip }),
+  openAddDrawerChip: (addDrawerChip) =>
+    set({
+      workspaceMode: 'build',
+      showAddDrawer: true,
+      addDrawerChip,
+    }),
   setObjectBarPanel: (objectBarPanel) => set({ objectBarPanel }),
   setCameraPanel: (cameraPanel) => set({ cameraPanel }),
   setShowImportModal: (showImportModal) => set({ showImportModal }),

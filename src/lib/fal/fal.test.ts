@@ -3,20 +3,34 @@ import { consumeLiftAttachment, getLiftAttachment, setLiftAttachment } from './a
 import { configureFal, resetFalForTests, setFalTransportForTests } from './client'
 import { requireModelGlb } from './files'
 import { generateFromImage, generateFromText } from './generate3d'
-import { liftPerson, liftPersonDetailed, liftProp } from './lift'
+import { liftPerson, liftPersonDetailed, liftProp, liftPropDetailed } from './lift'
 import {
   GENERATE_FACE_LIMIT,
   MESHY_TARGET_POLYCOUNT,
   MESHY_V7_IMAGE_TO_3D,
+  MESHY_MULTI_ANIMATION,
   SAM_3D_BODY,
   SAM_3D_OBJECTS,
+  SAM_3D_ALIGN,
   SAM_IMAGE_MODELS,
   TRIPO_H31_TEXT_TO_3D,
   TRIPO_REMESH,
+  TRIPO_SPLAT,
+  TRIPO_SPLAT_GAUSSIANS,
 } from './models'
+import { generateTripoSplat } from './tripoSplat'
+import { makeFixtureSplatPly } from '../environment'
+import { alignBodyToImage } from './samAlign'
+import { animatePersonWithMeshy, MESHY_CURATED_CLIPS } from './meshyAnimation'
 import { liftAttachedStill, runMaskThenLift } from './pipeline'
 import { remeshGlb } from './remesh'
 import { segmentImage, segmentImageWithFallback } from './segment'
+
+function fakeGlbBytes(): Uint8Array {
+  const bytes = new Uint8Array(12)
+  new DataView(bytes.buffer).setUint32(0, 0x46546c67, true)
+  return bytes
+}
 
 afterEach(() => {
   resetFalForTests()
@@ -142,14 +156,19 @@ describe('lift', () => {
       input: {
         image_url: 'https://photo',
         mask_url: 'https://mask',
-        export_meshes: true,
+        export_meshes: false,
         include_3d_keypoints: false,
         include_mhr_params: false,
       },
     })
     expect(calls[1]).toEqual({
       modelId: SAM_3D_OBJECTS,
-      input: { image_url: 'https://photo', mask_urls: ['https://mask'], prompt: 'helmet' },
+      input: {
+        image_url: 'https://photo',
+        mask_urls: ['https://mask'],
+        prompt: 'helmet',
+        export_textured_glb: false,
+      },
     })
   })
 
@@ -167,7 +186,7 @@ describe('lift', () => {
     )
     expect(calls[0]).toEqual({
       image_url: 'https://photo',
-      export_meshes: true,
+      export_meshes: false,
       include_3d_keypoints: false,
       include_mhr_params: false,
     })
@@ -187,6 +206,61 @@ describe('lift', () => {
     })
     await liftPersonDetailed({ imageUrl: 'https://photo', includeMhrParams: true })
     expect(calls[0]).toMatchObject({ include_mhr_params: true })
+  })
+
+  it('does not treat the 3d-objects gaussian_splat as a clay GLB', async () => {
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async () => ({
+        gaussian_splat: { url: 'https://cdn.example/object.ply', file_name: 'object.ply' },
+        individual_splats: [{ url: 'https://cdn.example/object.ply' }],
+      }),
+    })
+    await expect(
+      liftPropDetailed({ imageUrl: 'https://photo', maskUrl: 'https://mask', prompt: 'chair' }),
+    ).rejects.toThrow(/Gaussian splat/)
+  })
+
+  it('prefers an individual GLB when model_glb is a splat URL', async () => {
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async () => ({
+        gaussian_splat: { url: 'https://cdn.example/scene.ply', file_name: 'scene.ply' },
+        model_glb: { url: 'https://cdn.example/scene.ply', file_name: 'scene.ply' },
+        individual_glbs: [{ url: 'https://cdn.example/chair.glb', file_name: 'chair.glb' }],
+      }),
+    })
+    await expect(
+      liftPropDetailed({ imageUrl: 'https://photo', maskUrl: 'https://mask', prompt: 'chair' }),
+    ).resolves.toMatchObject({ glbUrl: 'https://cdn.example/chair.glb' })
+  })
+})
+
+describe('align', () => {
+  it('sends body mesh and mask without an object mesh', async () => {
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { metadata: { translation: [0, 0, 0] }, model_glb: { url: 'https://cdn.example/aligned.glb' } }
+      },
+    })
+    await expect(
+      alignBodyToImage({
+        imageUrl: 'https://photo',
+        bodyMeshUrl: 'https://body.glb',
+        bodyMaskUrl: 'https://mask',
+      }),
+    ).resolves.toMatchObject({ glbUrl: 'https://cdn.example/aligned.glb' })
+    expect(calls[0]).toEqual({
+      modelId: SAM_3D_ALIGN,
+      input: {
+        image_url: 'https://photo',
+        body_mesh_url: 'https://body.glb',
+        body_mask_url: 'https://mask',
+      },
+    })
   })
 })
 
@@ -302,7 +376,7 @@ describe('liftAttachedStill', () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       if (String(input) === 'https://prop.glb') {
-        return new Response(new Uint8Array([1, 2, 3]), { status: 200 })
+        return new Response(fakeGlbBytes(), { status: 200 })
       }
       throw new Error(`unexpected fetch ${String(input)}`)
     }) as typeof fetch
@@ -322,7 +396,8 @@ describe('liftAttachedStill', () => {
         endLift: (id) => ended.push(id),
       })
       expect(message).toContain('obj-1')
-      expect(message).toContain('pose_object')
+      expect(message).toContain('Added to Unplaced')
+      expect(message).toContain('Do not pose_object')
       expect(ended).toEqual(['lift-1'])
       expect(getLiftAttachment()?.name).toBe('helmet.jpg')
     } finally {
@@ -344,7 +419,7 @@ describe('liftAttachedStill', () => {
     const originalFetch = globalThis.fetch
     globalThis.fetch = (async (input: RequestInfo | URL) => {
       if (String(input) === 'https://people.glb') {
-        return new Response(new Uint8Array([1, 2, 3]), { status: 200 })
+        return new Response(fakeGlbBytes(), { status: 200 })
       }
       throw new Error(`unexpected fetch ${String(input)}`)
     }) as typeof fetch
@@ -407,10 +482,10 @@ describe('requireModelGlb', () => {
     expect(requireModelGlb({ model_glb: { url: 'https://b.glb' } }, 'meshy')).toBe('https://b.glb')
   })
 
-  it('rejects FBX even when a url is present', () => {
+  it('rejects a Gaussian splat posing as a mesh', () => {
     expect(() =>
-      requireModelGlb({ model_mesh: { url: 'https://a.fbx', file_name: 'out.fbx' } }, 'tripo'),
-    ).toThrow(/FBX/)
+      requireModelGlb({ model_mesh: { url: 'https://a.ply', file_name: 'room.ply' } }, 'triposplat'),
+    ).toThrow(/Gaussian splat/)
   })
 })
 
@@ -501,5 +576,85 @@ describe('remeshGlb', () => {
     })
     await remeshGlb({ meshUrl: 'https://source.glb' })
     expect(optsSeen[0]?.logs).toBe(true)
+  })
+})
+
+describe('generateTripoSplat', () => {
+  it('requests ply and downloads binary splat bytes', async () => {
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { model_mesh: { url: 'https://cdn.example/room.ply', file_name: 'room.ply' } }
+      },
+    })
+    const ply = makeFixtureSplatPly()
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(ply, { status: 200 })) as typeof fetch
+    try {
+      const result = await generateTripoSplat({ imageUrl: 'https://photo' })
+      expect(calls[0]?.modelId).toBe(TRIPO_SPLAT)
+      expect(calls[0]?.input.output_format).toBe('ply')
+      expect(calls[0]?.input.num_gaussians).toBe(TRIPO_SPLAT_GAUSSIANS)
+      expect(calls[0]?.input.image_url).toBe('https://photo')
+      expect(result.fileName).toBe('room.ply')
+      expect(result.format).toBe('ply')
+      expect(result.buffer.byteLength).toBe(ply.byteLength)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('rejects ASCII PLY before the viewport loader hangs', async () => {
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async () => ({
+        model_mesh: { url: 'https://cdn.example/room.ply', file_name: 'room.ply' },
+      }),
+    })
+    const ascii = new TextEncoder().encode(
+      'ply\nformat ascii 1.0\nelement vertex 0\nend_header\n',
+    )
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => new Response(ascii, { status: 200 })) as typeof fetch
+    try {
+      await expect(generateTripoSplat({ imageUrl: 'https://photo' })).rejects.toThrow(/ASCII PLY/)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('animatePersonWithMeshy', () => {
+  it('sends curated Meshy action ids and downloads the rigged GLB', async () => {
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return {
+          rigged_character_glb: { url: 'https://cdn.example/rigged.glb' },
+          animations: [{ action_id: 0, animation_glb: { url: 'https://cdn.example/idle.glb' } }],
+        }
+      },
+    })
+    const originalFetch = globalThis.fetch
+    const fetched: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      fetched.push(String(input))
+      return new Response(fakeGlbBytes(), { status: 200 })
+    }) as typeof fetch
+    try {
+      const result = await animatePersonWithMeshy({ modelUrl: 'https://mesh.glb' })
+      expect(calls[0]?.modelId).toBe(MESHY_MULTI_ANIMATION)
+      expect(calls[0]?.input.model_url).toBe('https://mesh.glb')
+      expect(calls[0]?.input.animation_action_ids).toEqual(MESHY_CURATED_CLIPS.map((clip) => clip.id))
+      expect(new Uint8Array(result.buffer).subarray(0, 4)).toEqual(fakeGlbBytes().subarray(0, 4))
+      expect(fetched).toContain('https://cdn.example/rigged.glb')
+      expect(fetched).toContain('https://cdn.example/idle.glb')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 })

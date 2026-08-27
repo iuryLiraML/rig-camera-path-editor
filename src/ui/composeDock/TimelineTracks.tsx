@@ -13,9 +13,9 @@ import {
   uToInW,
   uToOutW,
 } from '../../lib/intervalSpacing'
-import { useRigStore, type RigChannel } from '../../state/useRigStore'
+import { CHANNEL_FIELD, useRigStore, type RigChannel } from '../../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../../state/usePathStore'
-import { useSceneStore, type Transform } from '../../state/useSceneStore'
+import { useSceneStore, type Transform, type Vec3 } from '../../state/useSceneStore'
 import {
   evalModelTransform,
   evalValue,
@@ -28,6 +28,7 @@ import {
   type ModelKey,
   type ObjectChannel,
   type ProgressKey,
+  type ValueKey,
 } from '../../lib/keyframes'
 import { type EaseKind } from '../../lib/easing'
 import {
@@ -37,12 +38,28 @@ import {
   valueToLaneY,
   type ValueRange,
 } from '../../lib/lanePlot'
-import { insertChannelKeyAt } from '../../lib/timelineKey'
+import {
+  insertChannelKeyAt,
+  insertVec3GroupAt,
+  moveVec3GroupKeysAt,
+  removeVec3GroupKeysAt,
+  uniqueKeyTimes,
+} from '../../lib/timelineKey'
 import { writeFov, writeObjectTransform, writeRoll, writeVec3Axis } from '../../lib/autoKey'
+import { findKeyAtTime } from '../../lib/keyAtPlayhead'
 import { timeToX } from '../../lib/timeView'
 import { CAMERA_AXIS_TRACKS, CAMERA_CHANNELS, FX_PARAM_CHANNELS } from '../cameraChannels'
 import { NumberInput, Slider, XYZInput } from '../primitives'
-import { axisIndexOf, vec3GroupOf, type Vec3AxisChannel } from '../../lib/vec3Axes'
+import {
+  axisIndexOf,
+  evalSeparatedVec3,
+  isVec3AxisChannel,
+  VEC3_AXIS_CHANNELS,
+  VEC3_GROUP_LABELS,
+  vec3GroupOf,
+  type Vec3AxisChannel,
+  type Vec3GroupId,
+} from '../../lib/vec3Axes'
 import { normalizeSamples, sampleOverTime, TrackCurve } from '../TrackCurve'
 import type { KeyableFocus } from '../../lib/keyAtPlayhead'
 import { TimeViewCtx, timeFromEvent, TRACK_ADD_CLASS, TRACK_LABEL_CLASS } from './timelineShared'
@@ -718,6 +735,138 @@ function objectChannelCurve(
   )
 }
 
+function vec3DeltaCurve(
+  xKeys: ValueKey[],
+  yKeys: ValueKey[],
+  zKeys: ValueKey[],
+  rest: Vec3,
+  ease: EaseKind,
+): number[] | undefined {
+  if (xKeys.length + yKeys.length + zKeys.length < 2) return undefined
+  return normalizeSamples(
+    sampleOverTime((time) => {
+      const value = evalSeparatedVec3(time, xKeys, yKeys, zKeys, rest, ease)
+      return Math.hypot(value[0] - rest[0], value[1] - rest[1], value[2] - rest[2])
+    }),
+  )
+}
+
+function Vec3GroupTrack({
+  group,
+  label,
+  t,
+  duration,
+  ease,
+  axisKeys,
+  rest,
+  selectedKeyframe,
+}: {
+  group: Exclude<Vec3GroupId, 'staticRot'>
+  label: string
+  t: number
+  duration: number
+  ease: EaseKind
+  axisKeys: Record<Vec3AxisChannel, ValueKey[]>
+  rest: Vec3
+  selectedKeyframe: SelectedTimelineKey | null
+}) {
+  const channels = VEC3_AXIS_CHANNELS[group]
+  const xKeys = axisKeys[channels[0]]
+  const yKeys = axisKeys[channels[1]]
+  const zKeys = axisKeys[channels[2]]
+  const live = evalSeparatedVec3(t, xKeys, yKeys, zKeys, rest, ease)
+  const times = uniqueKeyTimes([xKeys, yKeys, zKeys])
+  const realKeyAt = (time: number) => {
+    for (const channel of channels) {
+      const key = findKeyAtTime(axisKeys[channel], time)
+      if (key) return { channel, key }
+    }
+    return null
+  }
+  const laneKeys = times.map((time) => {
+    const hit = realKeyAt(time)!
+    return {
+      id: hit.key.id,
+      time,
+      title: `${(time * duration).toFixed(1)}s — ${label}`,
+    }
+  })
+  let selectedId: string | null = null
+  if (
+    selectedKeyframe?.kind === 'rig' &&
+    isVec3AxisChannel(selectedKeyframe.channel) &&
+    vec3GroupOf(selectedKeyframe.channel) === group
+  ) {
+    const hit = axisKeys[selectedKeyframe.channel].find((key) => key.id === selectedKeyframe.id)
+    if (hit) {
+      const lane = laneKeys.find((key) => Math.abs(key.time - hit.time) < KEY_MERGE_EPS)
+      selectedId = lane?.id ?? null
+    }
+  }
+  const timeOfLane = (id: string) => {
+    const rig = useRigStore.getState()
+    for (const channel of channels) {
+      const key = (rig[CHANNEL_FIELD[channel]] as ValueKey[]).find((item) => item.id === id)
+      if (key) return key.time
+    }
+    return laneKeys.find((key) => key.id === id)?.time
+  }
+
+  return (
+    <Track
+      label={label}
+      trackId={group}
+      selectId="cinema-camera"
+      color="#60a5fa"
+      focus={channels[0]}
+      onFocus={() => useEditorStore.getState().setKeyableFocus(channels[0])}
+      values={<XYZInput value={live} onChange={(axis, value) => writeVec3Axis(group, axis, value)} />}
+      keys={laneKeys}
+      onMove={(id, time) => {
+        const from = timeOfLane(id)
+        if (from == null) return
+        moveVec3GroupKeysAt(group, from, time)
+      }}
+      onDelete={(id) => {
+        const from = timeOfLane(id)
+        if (from == null) return
+        removeVec3GroupKeysAt(group, from)
+        useEditorStore.getState().selectKeyframe(null)
+      }}
+      onAdd={() => insertVec3GroupAt(group)}
+      onAddAt={(time) => insertVec3GroupAt(group, time)}
+      addTitle={`Add a ${label} keyframe at the playhead`}
+      curve={vec3DeltaCurve(xKeys, yKeys, zKeys, rest, ease)}
+      onBezier={(id, bezier) => {
+        const from = timeOfLane(id)
+        if (from == null) return
+        for (const channel of channels) {
+          const key = findKeyAtTime(axisKeys[channel], from)
+          if (key) useRigStore.getState().setKeyBezier(channel, key.id, bezier)
+        }
+      }}
+      onSpacing={(id, side, weight) => {
+        const from = timeOfLane(id)
+        if (from == null) return
+        for (const channel of channels) {
+          const key = findKeyAtTime(axisKeys[channel], from)
+          if (key) applyChannelSpacing(channel, key.id, side, weight)
+        }
+      }}
+      selectedId={selectedId}
+      onSelectKey={(id) => {
+        for (const channel of channels) {
+          if (axisKeys[channel].some((key) => key.id === id)) {
+            selectRigKey(channel, id)
+            return
+          }
+        }
+      }}
+      defaultEase={ease}
+    />
+  )
+}
+
 export function TimelineTracks(props: {
   cameraKind: 'path' | 'static'
   t: number
@@ -811,7 +960,7 @@ export function TimelineTracks(props: {
         <div className="flex flex-col gap-2 pb-1 pt-1.5">
           {cameraKind !== 'static' && (
           <Track
-            label="Camera"
+            label="Position"
             trackId="progress"
             selectId="cinema-camera"
             color="#3b82f6"
@@ -838,6 +987,28 @@ export function TimelineTracks(props: {
             defaultEase={ease}
           />
           )}
+          {cameraKind === 'static' && (
+            <Vec3GroupTrack
+              group="staticPos"
+              label={VEC3_GROUP_LABELS.staticPos}
+              t={t}
+              duration={duration}
+              ease={ease}
+              axisKeys={axisKeys}
+              rest={staticPose.position}
+              selectedKeyframe={selectedKeyframe}
+            />
+          )}
+          <Vec3GroupTrack
+            group={tracking ? 'lookOffset' : 'target'}
+            label={tracking ? VEC3_GROUP_LABELS.lookOffset : VEC3_GROUP_LABELS.target}
+            t={t}
+            duration={duration}
+            ease={ease}
+            axisKeys={axisKeys}
+            rest={tracking ? lookOffset : target}
+            selectedKeyframe={selectedKeyframe}
+          />
           {cameraNoise.enabled && (
             <Track
               label="FX"
@@ -931,6 +1102,7 @@ export function TimelineTracks(props: {
             })}
           {CAMERA_CHANNELS.map((channel) => {
             const keys = channel.pick({ fovKeys, rollKeys })
+            if (keys.length === 0) return null
             const plot = channelPlots[channel.id]
             return (
               <Track
@@ -1005,9 +1177,9 @@ export function TimelineTracks(props: {
             )
           })}
           {CAMERA_AXIS_TRACKS.map((track) => {
+            if (track.when === 'target' || track.when === 'offset') return null
+            if (track.when === 'static' && vec3GroupOf(track.id) === 'staticPos') return null
             if (track.when === 'static' && cameraKind !== 'static') return null
-            if (track.when === 'target' && tracking) return null
-            if (track.when === 'offset' && !tracking) return null
             const keys = axisKeys[track.id]
             if (keys.length === 0) return null
             const plot = axisPlots[track.id]
@@ -1172,8 +1344,8 @@ export function TimelineTracks(props: {
           {objects.every((object) => object.follow || object.keys.length === 0) &&
             CAMERA_AXIS_TRACKS.every((track) => axisKeys[track.id].length === 0) && (
               <p className="mt-1 border-t border-line/70 px-2.5 py-2.5 text-[11px] leading-5 text-ink-dim">
-                FOV and Roll use Add key on each row. To animate a scene object: select it, then +
-                Property.
+                Position and Look-At use Add key on each row. To animate a scene object: select it,
+                then + Property.
               </p>
             )}
         </div>

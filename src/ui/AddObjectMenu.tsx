@@ -24,10 +24,11 @@ function menuCoords(button: HTMLElement) {
 }
 
 /**
- * Add primitives / import GLB. Portaled onto document.body so the toolbar's
- * overflow-x-auto and the left panel's overflow-hidden cannot clip the menu.
+ * Add primitives / import GLB onto the active scene's stage. Portaled onto
+ * document.body so the toolbar's overflow-x-auto and the left panel's
+ * overflow-hidden cannot clip the menu.
  */
-export function AddSceneMenu({
+export function AddObjectMenu({
   includePath = false,
   compact = false,
   title,

@@ -13,6 +13,8 @@ describe('uploadUsesDataUri', () => {
       uploadUsesDataUri(new File([new Uint8Array(12)], 'car.glb', { type: 'model/gltf-binary' })),
     ).toBe(false)
     expect(uploadUsesDataUri(new File([new Uint8Array(12)], 'car.glb'))).toBe(false)
+    expect(uploadUsesDataUri(new File([new Uint8Array(12)], 'room.ply'))).toBe(false)
+    expect(uploadUsesDataUri(new File([new Uint8Array(12)], 'room.splat'))).toBe(false)
   })
 
   it('sends large files through storage upload', () => {

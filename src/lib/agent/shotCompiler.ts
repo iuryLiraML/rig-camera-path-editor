@@ -9,6 +9,7 @@ import {
 } from './parseShotPlan'
 import { buildJudgeInput, formatJudgeReport, objectCandidates, selectedObjectId } from './sceneSnapshot'
 import { skillBodiesForPlan } from './skills'
+import { isBlockSceneRequest } from '../sceneBlockPose'
 import { failChipsFor, parseVisionJudge, visionJudgeSystemPrompt } from './visionJudge'
 import { phaseStatus, toolsForPhase, type CompilerPhase } from './toolPhases'
 import type { JudgeBlame, ShotPlan } from './shotTypes'
@@ -104,6 +105,7 @@ export async function runShotCompiler(opts: {
             hasImage: Boolean(opts.hasImage),
             cycle,
             subjectId: plan.subject_id,
+            userText: opts.userText,
           }),
         ),
       )
@@ -192,7 +194,7 @@ export function liftToolFailure(messages: AgentMessage[]): string | null {
     last = message.content
   }
   if (last === null) return null
-  if (last.startsWith('Placed ')) return null
+  if (last.startsWith('Placed ') || last.startsWith('Added to Unplaced')) return null
   if (last.startsWith('Error:')) return last.replace(/^Error:\s*/, '')
   return last
 }
@@ -201,9 +203,13 @@ export function objectPhaseInstruction(opts: {
   hasImage: boolean
   cycle: number
   subjectId: string
+  userText?: string
 }): string {
+  if (opts.hasImage && opts.cycle === 0 && isBlockSceneRequest(opts.userText ?? '')) {
+    return 'Phase: objects. The image on this turn is the chat photo — not the 3D viewport. Ignore torus knot / primitives in scene_state. The user wants to block the whole scene. Call block_scene_from_image now. Do not call generate_prop, block_people_from_image, set_scene_environment, or pose_object. Then stop.'
+  }
   if (opts.hasImage && opts.cycle === 0) {
-    return 'Phase: objects. The image on this turn is the chat photo — not the 3D viewport. Ignore torus knot / primitives in scene_state. If the user wants people posed or retried from that still, call block_people_from_image now (SAM 3.1 then one 3D Body GLB per person). A new lift replaces the last people imports. After the lift returns ids, pose_object each person separately if they asked to pose/arrange them. Never pose objects that were already in the scene. Then stop.'
+    return 'Phase: objects. The image on this turn is the chat photo — not the 3D viewport. Ignore torus knot / primitives in scene_state. If the user wants people or props from that still, call block_people_from_image or generate_prop now. If the still is a location / palco / environment, call set_scene_environment. Lifts land in Unplaced — do not pose_object those ids. Never pose objects that were already in the scene. Then stop.'
   }
   return `Phase: objects. Subject is ${opts.subjectId}. Use object tools only. Then stop.`
 }

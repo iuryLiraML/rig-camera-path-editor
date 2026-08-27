@@ -10,7 +10,7 @@ export type AnimateMenuItem =
   | { kind: 'object'; channel: ObjectChannel; label: string }
   | {
       kind: 'rig'
-      channel: 'staticPosX' | 'staticPosY' | 'staticPosZ' | 'staticRotX' | 'staticRotY' | 'staticRotZ' | 'fov' | 'roll'
+      channel: 'staticPosX' | 'staticPosY' | 'staticPosZ' | 'staticRotX' | 'staticRotY' | 'staticRotZ'
       label: string
     }
 
@@ -21,14 +21,9 @@ const OBJECT_ITEMS: AnimateMenuItem[] = [
 ]
 
 const FREE_CAMERA_ITEMS: AnimateMenuItem[] = [
-  { kind: 'rig', channel: 'staticPosX', label: 'Position X' },
-  { kind: 'rig', channel: 'staticPosY', label: 'Position Y' },
-  { kind: 'rig', channel: 'staticPosZ', label: 'Position Z' },
   { kind: 'rig', channel: 'staticRotX', label: 'Rotation X' },
   { kind: 'rig', channel: 'staticRotY', label: 'Rotation Y' },
   { kind: 'rig', channel: 'staticRotZ', label: 'Rotation Z' },
-  { kind: 'rig', channel: 'fov', label: 'FOV' },
-  { kind: 'rig', channel: 'roll', label: 'Roll' },
 ]
 
 /** Properties the + Property menu offers for the current selection. */

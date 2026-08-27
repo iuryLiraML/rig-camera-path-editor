@@ -4,7 +4,20 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { makeEmptyRigSnapshot, useCameraOptionsStore } from '../../state/useCameraOptionsStore'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useProjectStore, type Shot } from '../../state/useProjectStore'
+import { useRigStore } from '../../state/useRigStore'
 import { VisualizeBar } from './VisualizeBar'
+
+const TRACK_RECT = {
+  x: 0,
+  y: 0,
+  top: 0,
+  left: 0,
+  bottom: 8,
+  right: 200,
+  width: 200,
+  height: 8,
+  toJSON: () => {},
+} as DOMRect
 
 function fakeShot(partial: Pick<Shot, 'id' | 'name' | 'order'>): Shot {
   return {
@@ -35,12 +48,14 @@ beforeEach(() => {
       fakeShot({ id: 'shot-b', name: 'Dive', order: 1 }),
     ],
   })
+  useRigStore.setState({ t: 0, playing: false, duration: 6, fps: 30 })
 })
 
 afterEach(() => {
   cleanup()
   useEditorStore.setState({ workspaceMode: 'build', activeShotId: null, viewMode: 'clay' })
   useProjectStore.setState({ shots: [] })
+  useRigStore.setState({ t: 0, playing: false, duration: 6, fps: 30 })
 })
 
 describe('VisualizeBar', () => {
@@ -62,9 +77,14 @@ describe('VisualizeBar', () => {
     created.mockRestore()
   })
 
+  it('reviews the Look compositor pass from the Visualize rail', () => {
+    const { getByTitle } = render(<VisualizeBar />)
+    fireEvent.click(getByTitle('Review as look'))
+    expect(useEditorStore.getState().viewMode).toBe('look')
+  })
+
   it('groups look, range, format and export without repeating pass checkboxes', () => {
     const { container, getByText, getByLabelText, queryByText } = render(<VisualizeBar />)
-    expect(getByText('Look')).toBeTruthy()
     expect(getByText('Range')).toBeTruthy()
     expect(getByText('Format')).toBeTruthy()
     expect(getByLabelText('Depth near')).toBeTruthy()
@@ -91,5 +111,21 @@ describe('VisualizeBar', () => {
     useEditorStore.setState({ viewMode: 'clay' })
     rerender(<VisualizeBar />)
     expect(queryByTitle('Hide scene objects')).toBeNull()
+  })
+
+  it('exposes a shot-time scrubber for picking an export frame', () => {
+    const { container, getByLabelText } = render(<VisualizeBar />)
+    expect(container.querySelector('[data-visualize-scrubber]')).not.toBeNull()
+    expect(getByLabelText('Shot time')).toBeTruthy()
+  })
+
+  it('scrubs t from the pointer and pauses playback', () => {
+    useRigStore.setState({ t: 0, playing: true, duration: 6, fps: 30 })
+    const { getByLabelText } = render(<VisualizeBar />)
+    const scrubber = getByLabelText('Shot time')
+    scrubber.getBoundingClientRect = () => TRACK_RECT
+    fireEvent.pointerMove(scrubber, { clientX: 50 })
+    expect(useRigStore.getState().t).toBeCloseTo(0.25)
+    expect(useRigStore.getState().playing).toBe(false)
   })
 })

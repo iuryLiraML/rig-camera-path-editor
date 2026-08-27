@@ -2,6 +2,9 @@ import { useRigStore } from '../state/useRigStore'
 import { usePathStore } from '../state/usePathStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
+import { cloneEnvTransform } from './environment'
+import { loadLiveEnvironmentBuffer } from './environmentJobs'
 
 /** Undoable slice of the app state (playback/tooling state is excluded). */
 function capture() {
@@ -9,6 +12,7 @@ function capture() {
   const p = usePathStore.getState()
   const s = useSceneStore.getState()
   const c = useCameraOptionsStore.getState()
+  const e = useEnvironmentStore.getState()
   return {
     // Deleting a camera was outside the undoable slice, so a mis-click threw
     // away a whole named rig (path, duration, curve, lens and its keyframes)
@@ -72,6 +76,11 @@ function capture() {
         follow: o.follow,
       })),
     },
+    environment: {
+      environmentId: e.environmentId,
+      environmentTransform: cloneEnvTransform(e.environmentTransform),
+      sceneBindings: e.sceneBindings.map((scene) => ({ ...scene })),
+    },
   }
 }
 
@@ -110,9 +119,26 @@ function apply(snapshot: Snapshot) {
   useSceneStore.setState(sceneRest)
   useSceneStore.getState().restoreObjects(objects)
   useCameraOptionsStore.setState(snapshot.cameras)
+  applyEnvironment(snapshot.environment)
   current = snapshot
   currentJson = JSON.stringify(snapshot)
   applying = false
+}
+
+function applyEnvironment(next: Snapshot['environment']) {
+  const env = useEnvironmentStore.getState()
+  const idChanged = env.environmentId !== next.environmentId
+  useEnvironmentStore.setState({
+    environmentId: next.environmentId,
+    environmentTransform: cloneEnvTransform(next.environmentTransform),
+    sceneBindings: next.sceneBindings.map((scene) => ({ ...scene })),
+  })
+  if (!idChanged) return
+  if (next.environmentId) void loadLiveEnvironmentBuffer()
+  else {
+    useEnvironmentStore.getState().setLiveBuffer(null, null)
+    useEnvironmentStore.getState().setSourceImage(null)
+  }
 }
 
 function onStoreChange() {
@@ -144,11 +170,21 @@ export function resetHistory() {
 }
 
 export function setHistorySuspended(value: boolean) {
-  suspended = value
-  if (!value) {
-    current = capture()
-    currentJson = JSON.stringify(current)
+  if (value) {
+    clearTimeout(commitTimer)
+    suspended = true
+    return
   }
+  suspended = false
+  const next = capture()
+  const nextJson = JSON.stringify(next)
+  if (nextJson === currentJson) return
+  past.push(current)
+  if (past.length > MAX_HISTORY) past.shift()
+  future = []
+  current = next
+  currentJson = nextJson
+  clock += 1
 }
 
 let subscribed = false
@@ -161,6 +197,7 @@ export function initHistory() {
   usePathStore.subscribe(onStoreChange)
   useSceneStore.subscribe(onStoreChange)
   useCameraOptionsStore.subscribe(onStoreChange)
+  useEnvironmentStore.subscribe(onStoreChange)
 }
 
 export function undo() {

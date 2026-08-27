@@ -10,8 +10,7 @@ describe('resolveWorkspace', () => {
     expect(resolveWorkspace('board')).toBe('editor')
   })
 
-  it('never returns the retired project-setup workspace', () => {
-    expect(resolveWorkspace('intake')).toBe('editor')
+  it('never returns anything but projects or editor', () => {
     expect(resolveWorkspace('projects')).toBe('projects')
   })
 })

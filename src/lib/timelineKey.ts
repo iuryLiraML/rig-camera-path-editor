@@ -1,5 +1,11 @@
-import { evalProgress, evalValue, keysForObjectChannel, objectKeyChannel, type ValueKey } from './keyframes'
-import { evalSeparatedVec3, isVec3AxisChannel, VEC3_AXIS_CHANNELS, type Vec3GroupId } from './vec3Axes'
+import { evalProgress, evalValue, KEY_MERGE_EPS, keysForObjectChannel, objectKeyChannel, type ValueKey } from './keyframes'
+import {
+  evalSeparatedVec3,
+  isVec3AxisChannel,
+  VEC3_AXIS_CHANNELS,
+  vec3GroupOf,
+  type Vec3GroupId,
+} from './vec3Axes'
 import { useEditorStore, type SelectedTimelineKey } from '../state/useEditorStore'
 import {
   CHANNEL_FIELD,
@@ -122,6 +128,55 @@ export function insertVec3GroupAt(group: Vec3GroupId, time?: number) {
   requestPersistFlush()
 }
 
+/** Position / Look-At / Offset are authored as one vec3 on the timeline (not FOV/Roll). */
+export function groupedTimelineVec3(focus: string | null): Vec3GroupId | null {
+  if (!focus || !isVec3AxisChannel(focus)) return null
+  const group = vec3GroupOf(focus)
+  return group === 'staticRot' ? null : group
+}
+
+export function uniqueKeyTimes(lists: { time: number }[][]): number[] {
+  const times: number[] = []
+  for (const list of lists) {
+    for (const key of list) {
+      if (!times.some((time) => Math.abs(time - key.time) < KEY_MERGE_EPS)) times.push(key.time)
+    }
+  }
+  return times.sort((a, b) => a - b)
+}
+
+export function moveVec3GroupKeysAt(group: Vec3GroupId, fromTime: number, toTime: number) {
+  const rig = useRigStore.getState()
+  const t = Math.min(1, Math.max(0, toTime))
+  for (const channel of VEC3_AXIS_CHANNELS[group]) {
+    const keys = rig[CHANNEL_FIELD[channel]] as ValueKey[]
+    for (const key of keys) {
+      if (Math.abs(key.time - fromTime) < KEY_MERGE_EPS) {
+        rig.updateChannelKeyTime(channel, key.id, t)
+      }
+    }
+  }
+}
+
+export function removeVec3GroupKeysAt(group: Vec3GroupId, time: number) {
+  const rig = useRigStore.getState()
+  for (const channel of VEC3_AXIS_CHANNELS[group]) {
+    const keys = rig[CHANNEL_FIELD[channel]] as ValueKey[]
+    const hit = keys.find((key) => Math.abs(key.time - time) < KEY_MERGE_EPS)
+    if (hit) rig.removeChannelKey(channel, hit.id)
+  }
+  requestPersistFlush()
+}
+
+export function vec3GroupHasKeyAt(group: Vec3GroupId, time: number): boolean {
+  const rig = useRigStore.getState()
+  return VEC3_AXIS_CHANNELS[group].some((channel) =>
+    (rig[CHANNEL_FIELD[channel]] as ValueKey[]).some(
+      (key) => Math.abs(key.time - time) < KEY_MERGE_EPS,
+    ),
+  )
+}
+
 export function deleteSelectedTimelineKey(): boolean {
   const editor = useEditorStore.getState()
   const sel = editor.selectedKeyframe
@@ -179,6 +234,13 @@ export function deleteKeyframeAtPlayhead(): boolean {
   if (isObjectKeyFocus(focus) || poseKeyable(editor)) {
     if (deleteObjectChannelsAtPlayhead()) return true
     if (isObjectKeyFocus(focus)) return false
+  }
+
+  const grouped = groupedTimelineVec3(focus)
+  if (grouped && !editor.timelineGraph && vec3GroupHasKeyAt(grouped, rig.t)) {
+    removeVec3GroupKeysAt(grouped, rig.t)
+    editor.selectKeyframe(null)
+    return true
   }
 
   if (isKeyChannel(focus)) {

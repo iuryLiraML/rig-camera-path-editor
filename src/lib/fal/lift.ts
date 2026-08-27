@@ -1,11 +1,15 @@
+import { assertGlbMesh } from '../assetSniff'
 import { subscribe, type FalSubscribeOpts } from './client'
+import { falFileUrl, falLooksLikeGlb } from './files'
 import { SAM_3D_BODY, SAM_3D_OBJECTS } from './models'
 
-type FalFile = { url?: string } | string
+type FalFile = { url?: string; file_name?: string } | string
 
 type LiftResult = {
   model_glb?: FalFile
   model_urls?: { glb?: FalFile }
+  gaussian_splat?: FalFile
+  individual_glbs?: FalFile[]
   metadata?: unknown
 }
 
@@ -14,16 +18,24 @@ export type PersonLift = {
   metadata?: unknown
 }
 
-function fileUrl(file: FalFile | undefined): string | null {
-  if (!file) return null
-  if (typeof file === 'string') return file
-  return file.url ?? null
+function requireGlb(data: LiftResult, modelId: string): string {
+  const url = falFileUrl(data.model_glb) ?? falFileUrl(data.model_urls?.glb)
+  if (!url) throw new Error(`${modelId} returned no GLB.`)
+  if (!falLooksLikeGlb(data.model_glb ?? data.model_urls?.glb)) {
+    throw new Error(`${modelId} returned no GLB.`)
+  }
+  return url
 }
 
-function requireGlb(data: LiftResult, modelId: string): string {
-  const url = fileUrl(data.model_glb) ?? fileUrl(data.model_urls?.glb)
-  if (!url) throw new Error(`${modelId} returned no GLB.`)
-  return url
+function requireObjectGlb(data: LiftResult, modelId: string): string {
+  const candidates: FalFile[] = []
+  if (data.model_glb) candidates.push(data.model_glb)
+  if (data.model_urls?.glb) candidates.push(data.model_urls.glb)
+  for (const file of data.individual_glbs ?? []) candidates.push(file)
+  for (const file of candidates) {
+    if (falLooksLikeGlb(file)) return falFileUrl(file)!
+  }
+  throw new Error(`${modelId} returned no GLB mesh (only a Gaussian splat).`)
 }
 
 export async function liftPersonDetailed(opts: {
@@ -39,7 +51,7 @@ export async function liftPersonDetailed(opts: {
     {
       image_url: opts.imageUrl,
       ...(opts.maskUrl ? { mask_url: opts.maskUrl } : {}),
-      export_meshes: true,
+      export_meshes: false,
       include_3d_keypoints: false,
       include_mhr_params: opts.includeMhrParams ?? false,
     },
@@ -65,6 +77,16 @@ export async function liftProp(opts: {
   signal?: AbortSignal
   onQueueUpdate?: FalSubscribeOpts['onQueueUpdate']
 }): Promise<string> {
+  return (await liftPropDetailed(opts)).glbUrl
+}
+
+export async function liftPropDetailed(opts: {
+  imageUrl: string
+  maskUrl: string
+  prompt: string
+  signal?: AbortSignal
+  onQueueUpdate?: FalSubscribeOpts['onQueueUpdate']
+}): Promise<{ glbUrl: string; metadata?: unknown }> {
   const prompt = opts.prompt.trim()
   if (!prompt) throw new Error('liftProp requires an object noun (Fal defaults to "car").')
   const data = await subscribe<LiftResult>(
@@ -73,16 +95,23 @@ export async function liftProp(opts: {
       image_url: opts.imageUrl,
       mask_urls: [opts.maskUrl],
       prompt,
+      export_textured_glb: false,
     },
     { signal: opts.signal, onQueueUpdate: opts.onQueueUpdate },
   )
-  return requireGlb(data, SAM_3D_OBJECTS)
+  return { glbUrl: requireObjectGlb(data, SAM_3D_OBJECTS), metadata: data.metadata }
 }
 
-export async function downloadGlb(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+export async function downloadFalBytes(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
   const response = await fetch(url, { signal })
   if (!response.ok) {
     throw new Error(`Could not download the 3D model (${response.status}).`)
   }
   return response.arrayBuffer()
+}
+
+export async function downloadGlb(url: string, signal?: AbortSignal): Promise<ArrayBuffer> {
+  const buffer = await downloadFalBytes(url, signal)
+  assertGlbMesh(buffer)
+  return buffer
 }

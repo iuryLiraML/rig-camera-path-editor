@@ -560,7 +560,7 @@ export function buildGraphChannels(input: {
   const channels: GraphChannel[] = [
     {
       id: 'progress',
-      label: 'Camera',
+      label: 'Position',
       color: '#3b82f6',
       keys: input.progressKeys,
       curve: input.progressPlot.curve,
@@ -611,6 +611,7 @@ export function buildGraphChannels(input: {
       fovKeys: input.fovKeys,
       rollKeys: input.rollKeys,
     })
+    if (keys.length === 0) continue
     const plot = input.channelPlots[channel.id]
     channels.push({
       id: channel.id,
@@ -639,7 +640,11 @@ export function buildGraphChannels(input: {
     if (track.when === 'target' && input.tracking) continue
     if (track.when === 'offset' && !input.tracking) continue
     const keys = input.axisKeys[track.id] ?? []
-    if (keys.length === 0) continue
+    const alwaysShow =
+      track.when === 'target' ||
+      track.when === 'offset' ||
+      (track.when === 'static' && track.id.startsWith('staticPos'))
+    if (keys.length === 0 && !alwaysShow) continue
     const plot = input.axisPlots[track.id]
     channels.push({
       id: track.id,

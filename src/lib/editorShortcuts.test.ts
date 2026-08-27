@@ -11,6 +11,7 @@ import {
 import { insertKeyframeAtPlayhead } from './insertKeyframe'
 import { useSaveStatusStore } from './saveStatus'
 import { useEditorStore } from '../state/useEditorStore'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { usePathStore } from '../state/usePathStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
@@ -30,10 +31,12 @@ beforeEach(() => {
   usePathStore.setState({ selectedAnchorIds: [] })
   useSceneStore.setState({ objects: [], pendingLifts: [] })
   useRigStore.setState({ t: 0.4, fovKeys: [] })
+  useEnvironmentStore.setState({ environmentId: null })
 })
 
 afterEach(() => {
   useSceneStore.setState({ objects: [], pendingLifts: [] })
+  useEnvironmentStore.setState({ environmentId: null })
   useEditorStore.setState({
     selection: null,
     selectedKeyframe: null,
@@ -163,6 +166,14 @@ describe('applyDeleteShortcut', () => {
     const leftover = useSceneStore.getState().objects[0].keys
     expect(leftover.map((k) => k.channel).sort()).toEqual(['rotation', 'scale'])
     expect(useSceneStore.getState().objects).toHaveLength(1)
+  })
+
+  it('clears the palco when Environment is selected', () => {
+    useEnvironmentStore.setState({ environmentId: 'beach' })
+    useEditorStore.setState({ selection: 'env' })
+    expect(applyDeleteShortcut('Delete', { keyableField: false })).toBe(true)
+    expect(useEnvironmentStore.getState().environmentId).toBeNull()
+    expect(useEditorStore.getState().selection).toBeNull()
   })
 })
 

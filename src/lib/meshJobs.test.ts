@@ -6,6 +6,7 @@ import { syncFalSettings } from './fal/settings'
 import { setHistoryClockForTests } from './history'
 import {
   cancelMeshJob,
+  generateObjectFromText,
   remeshProgressFromQueueUpdate,
   remeshSceneObject,
   resetMeshJobsForTests,
@@ -18,6 +19,7 @@ import {
   undoLastMeshRevision,
 } from './sceneIO'
 import { makeObject, objectGraveyard, useSceneStore } from '../state/useSceneStore'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
 
 const { idbMemory } = vi.hoisted(() => ({
   idbMemory: new Map<string, ArrayBuffer>(),
@@ -47,6 +49,7 @@ afterEach(() => {
   idbMemory.clear()
   objectGraveyard.clear()
   useSceneStore.setState({ objects: [], pendingLifts: [], notice: null })
+  useEnvironmentStore.setState({ unplacedAssets: [] })
 })
 
 function encodeTriangleGlb(triangles: 1 | 2): ArrayBuffer {
@@ -417,6 +420,35 @@ describe('remeshSceneObject', () => {
       expect(useSceneStore.getState().objects.find((item) => item.id === 'car-copy')?.bufferKey).toBe(
         'car-1',
       )
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('generateObjectFromText', () => {
+  it('parks the GLB on Unplaced instead of dropping it in the scene', async () => {
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    setFalTransportForTests({
+      subscribe: async () => ({ model_mesh: { url: 'https://out.glb' } }),
+      upload: async () => 'https://up',
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://out.glb') {
+        return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${String(input)}`)
+    }) as typeof fetch
+    try {
+      await generateObjectFromText('helmet')
+      expect(useSceneStore.getState().objects).toHaveLength(0)
+      const shelf = useEnvironmentStore.getState().unplacedAssets
+      expect(shelf).toHaveLength(1)
+      expect(shelf[0]?.name).toBe('helmet')
+      expect(shelf[0]?.rigKind).toBe('none')
+      expect(useSceneStore.getState().notice).toContain('Unplaced')
     } finally {
       globalThis.fetch = originalFetch
     }

@@ -35,6 +35,7 @@ import {
 import { easeGroups, easeDef, type EaseKind } from '../lib/easing'
 import { exportDimensions } from '../lib/recorder'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
+import { animateSelectedPerson } from '../lib/animatePerson'
 import { PRIMITIVE_DEFS } from '../lib/primitiveGeometry'
 import {
   ColorField,
@@ -425,6 +426,22 @@ function ObjectSections({ objectId }: { objectId: string }) {
                 onChange={(v) => scene.setPlayClips(object.id, v === 'on')}
               />
             </Row>
+          )}
+          {object.rigKind === 'dummy' && object.clips.length > 1 && (
+            <Row label="Clip">
+              <Segmented
+                options={object.clips.map((clip) => ({ value: clip.name, label: clip.name }))}
+                value={object.activeClip ?? 'Idle'}
+                onChange={(name) => scene.setActiveClip(object.id, name)}
+              />
+            </Row>
+          )}
+          {object.rigKind === 'sam-person' && (
+            <PanelButton
+              label="Animate"
+              title="Rig this person with Meshy Idle / Walk / Run"
+              onClick={() => void animateSelectedPerson(object.id)}
+            />
           )}
         </Section>
       )}

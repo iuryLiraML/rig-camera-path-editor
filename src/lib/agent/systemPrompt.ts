@@ -45,10 +45,15 @@ subject bounds, do not invent world units.
 1. Matching skills are already injected from the ShotPlan. load_skill is optional.
 2. Objects first if the plan needs motion/lift; then camera.
    A still attached in chat → load_skill photo-lift, then block_people_from_image
-   (people; one call lifts each person as its own object) or generate_prop (noun).
-   Import sits on the floor — do not invent XYZ.
+   (people; one call parks each person on Unplaced) or generate_prop (noun),
+   or set_scene_environment when the still is a location / palco / room.
+   To block the whole scene from the photo (people + props posed on the palco),
+   call block_scene_from_image once — then stop; the user confirms Place in scene.
+   Do not chain generate_prop / block_people_from_image / set_scene_environment for that phrase.
+   Do not pose_object the torus knot.
+   Lifts land on Unplaced — do not pose_object those ids until the user instances them.
+   Do not call generate_prop or Meshy on a room photo.
    For a set (room, walls, furniture): add_primitive with role=wall or role=floor.
-   pose_object each returned id separately if asked.
    Do not refuse a people lift because the stage contains a torus knot.
 3. Prefer instantiate_atom(kind, subject_id, scale, angle, duration). It sizes the
    path from the subject AABB so fill % hits the judge band. Do not invent XYZ

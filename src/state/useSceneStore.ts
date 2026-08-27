@@ -133,10 +133,13 @@ export interface SceneObject {
   /** animation clips embedded in the imported GLB */
   clips: THREE.AnimationClip[]
   playClips: boolean
+  /** which embedded clip the mixer samples; dummy defaults to Idle */
+  activeClip?: string
   /** when set, the object rides a motion path instead of its pose keyframes */
   follow?: FollowConfig
   /** Cached so ObjectBar remesh does not walk a dense live mesh every render. */
   triangleCount?: number
+  rigKind?: import('../lib/environment').RigKind
 }
 
 let nextId = 1
@@ -183,7 +186,7 @@ export function makeObject(
   options: Partial<
     Pick<
       SceneObject,
-      'id' | 'shade' | 'bufferKey' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'follow' | 'triangleCount'
+      'id' | 'shade' | 'bufferKey' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'rigKind'
     >
   > = {},
 ): SceneObject {
@@ -202,8 +205,10 @@ export function makeObject(
     keys: options.keys ?? [],
     clips: options.clips ?? [],
     playClips: options.playClips ?? true,
+    activeClip: options.activeClip,
     follow: options.follow,
     triangleCount: options.triangleCount,
+    rigKind: options.rigKind ?? 'none',
   }
 }
 
@@ -290,6 +295,7 @@ interface SceneState {
   clearObjectKeys: (id: string) => void
   applySpinPreset: (id: string) => void
   setPlayClips: (id: string, on: boolean) => void
+  setActiveClip: (id: string, name: string) => void
   /** attach/detach an object to a motion path (null = free, keyframe-driven) */
   setFollow: (id: string, follow: FollowConfig | null) => void
   /**
@@ -409,8 +415,10 @@ export const useSceneStore = create<SceneState>()(
               transform: { ...src.transform, position: shifted },
               keys: src.keys.map((k) => ({ ...k })),
               playClips: src.playClips,
+              activeClip: src.activeClip,
               shade: src.shade,
               follow: src.follow ? { ...src.follow } : undefined,
+              rigKind: src.rigKind,
             }
             // rebuild primitives from their spec; clone meshes for GLBs
             const copy = src.primitive
@@ -570,6 +578,7 @@ export const useSceneStore = create<SceneState>()(
           })),
 
         setPlayClips: (id, playClips) => updateObject(id, () => ({ playClips })),
+        setActiveClip: (id, activeClip) => updateObject(id, () => ({ activeClip })),
 
         setFollow: (id, follow) => updateObject(id, () => ({ follow: follow ?? undefined })),
 

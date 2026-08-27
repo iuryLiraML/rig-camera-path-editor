@@ -32,10 +32,11 @@ import {
 } from '../../state/useCameraOptionsStore'
 import { setCameraPathSpace, setTrackObjectId } from '../pathSpaceBind'
 import { vec3GroupHasKeys } from '../timelineKey'
-import { getLiftAttachment } from '../fal/attachment'
+import { getLiftAttachment, isVideoFile } from '../fal/attachment'
 import { liftAttachedStill } from '../fal/pipeline'
 import { readFalSettings } from '../fal/settings'
-import { importModelBuffer } from '../sceneIO'
+import { generateEnvironmentFromPhoto, parkUnplacedAsset } from '../environmentJobs'
+import { proposeSceneBlockFromAttachment } from '../sceneBlock'
 import {
   asPrimitiveKind,
   asPrimitiveRole,
@@ -360,13 +361,13 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'block_people_from_image',
     description:
-      'Lift every person in the attached photo into the scene as separate clay figures (SAM 3.1 masks, then one SAM 3D Body GLB per person). A group photo becomes Person 1, Person 2, … — pose_object each id on its own. Import sits them on the floor side by side. Do not invent extra XYZ.',
+      'Lift every person in the attached photo onto the Unplaced shelf (SAM 3.1 masks, then one SAM 3D Body GLB per person). A group photo becomes Person 1, Person 2, … — the user instances them. Do not pose_object Unplaced ids. Do not invent extra XYZ.',
     input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'generate_prop',
     description:
-      'Lift a single prop from the attached photo into the scene as a GLB. prompt is the object noun, e.g. helmet. Import sits it on the floor — do not invent XYZ.',
+      'Lift a single prop from the attached photo onto the Unplaced shelf as a GLB. prompt is the object noun, e.g. helmet. The user instances it. Do not pose_object Unplaced ids. Do not invent XYZ.',
     input_schema: {
       type: 'object',
       properties: {
@@ -374,6 +375,18 @@ export const TOOL_DEFS: ToolDef[] = [
       },
       required: ['prompt'],
     },
+  },
+  {
+    name: 'set_scene_environment',
+    description:
+      'Turn the attached still into the active scene Location (photoreal palco via TripoSplat). Same write as the Environment chip. Use this for a room / location / environment photo — never generate_prop or Meshy on a whole room.',
+    input_schema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'block_scene_from_image',
+    description:
+      'Propose a Block-this-scene list from the attached still (SAM 3.1 masks). Opens the review panel. Do not lift or pose yet. Use when the user wants to block the whole scene from the photo. Not for a single person or a single prop.',
+    input_schema: { type: 'object', properties: {} },
   },
   {
     name: 'create_object_path',
@@ -809,16 +822,13 @@ const EXECUTORS: Record<string, Executor> = {
       prompt: 'person',
       falKey,
       version: samImageVersion,
-      importBuffer: importModelBuffer,
+      importBuffer: async (buffer, name) =>
+        parkUnplacedAsset({ buffer, name, rigKind: 'sam-person' }).then((item) => ({
+          objectId: item.assetId,
+          objectName: item.objectName,
+        })),
       beginLift: scene.beginLift,
       endLift: scene.endLift,
-      replacePrevious: (objectId) => scene.removeObject(objectId),
-      placeObject: (objectId, position) => {
-        const live = useSceneStore.getState()
-        const object = live.objects.find((item) => item.id === objectId)
-        if (!object) return
-        live.setTransformAll(objectId, { ...object.transform, position })
-      },
     })
   },
 
@@ -830,12 +840,26 @@ const EXECUTORS: Record<string, Executor> = {
       prompt: String(input.prompt ?? ''),
       falKey,
       version: samImageVersion,
-      importBuffer: importModelBuffer,
+      importBuffer: async (buffer, name) =>
+        parkUnplacedAsset({ buffer, name, rigKind: 'none' }).then((item) => ({
+          objectId: item.assetId,
+          objectName: item.objectName,
+        })),
       beginLift: scene.beginLift,
       endLift: scene.endLift,
-      replacePrevious: (objectId) => scene.removeObject(objectId),
     })
   },
+
+  set_scene_environment: async () => {
+    const file = getLiftAttachment()
+    if (!file) return 'Attach a photo in the chat, then ask again.'
+    if (isVideoFile(file)) return 'This tool needs a still. Attach a photo of the location.'
+    const id = await generateEnvironmentFromPhoto(file)
+    if (!id) return useSceneStore.getState().notice ?? 'Environment generate failed'
+    return `Set the scene environment from "${file.name}".`
+  },
+
+  block_scene_from_image: () => proposeSceneBlockFromAttachment(),
 
   create_object_path: (input) => {
     const anchors = (input.anchors as unknown[]).map(asVec3)

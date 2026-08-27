@@ -1,12 +1,13 @@
 import type { Object3D } from 'three'
 
-export type PickKind = 'gizmo' | 'object' | 'camera' | 'target' | 'path-anchor' | 'path-line'
+export type PickKind = 'gizmo' | 'object' | 'camera' | 'target' | 'env' | 'path-anchor' | 'path-line'
 
 const RANK: Record<PickKind, number> = {
   gizmo: 0,
   object: 1,
   camera: 2,
   target: 2,
+  env: 3,
   'path-anchor': 3,
   'path-line': 4,
 }
@@ -116,6 +117,13 @@ function takeClosest<T>(hits: TaggedHit<T>[]): TaggedHit<T>[] {
  */
 export function preferTaggedHits<T>(tagged: TaggedHit<T>[]): TaggedHit<T>[] {
   if (tagged.length === 0) return tagged
+
+  const blockers = tagged.filter(
+    (item) => item.kind !== 'env' && item.kind !== 'path-line',
+  )
+  if (blockers.length > 0) {
+    tagged = tagged.filter((item) => item.kind !== 'env')
+  }
 
   const gizmos = tagged.filter((item) => item.kind === 'gizmo')
   if (gizmos.length > 0) return takeClosest(gizmos)

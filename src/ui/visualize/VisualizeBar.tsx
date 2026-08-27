@@ -1,8 +1,8 @@
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react'
 import { applyShot } from '../../lib/projects'
 import { applyTogglePlayback } from '../../lib/playback'
 import { exportDimensions } from '../../lib/recorder'
-import { formatTimecode } from '../../lib/timeView'
+import { formatTimecode, frameToTime, snapToFrame, timeToFrame } from '../../lib/timeView'
 import { useCameraReady } from '../../state/cameraPathLink'
 import { useCameraOptionsStore } from '../../state/useCameraOptionsStore'
 import { useEditorStore, type ViewMode } from '../../state/useEditorStore'
@@ -20,6 +20,7 @@ import {
 } from '../viewportInsets'
 
 const VIEW_MODES: { value: ViewMode; label: string }[] = [
+  { value: 'look', label: 'Look' },
   { value: 'clay', label: 'Clay' },
   { value: 'depth', label: 'Depth' },
   { value: 'outline', label: 'Outline' },
@@ -58,6 +59,88 @@ function BarGroup({ label, children }: { label: string; children: ReactNode }) {
 
 function BarRule() {
   return <span className="h-5 w-px shrink-0 bg-line" aria-hidden />
+}
+
+function VisualizeScrubber() {
+  const t = useRigStore((s) => s.t)
+  const duration = useRigStore((s) => s.duration)
+  const fps = useRigStore((s) => s.fps)
+  const trackRef = useRef<HTMLDivElement>(null)
+
+  const seekFromClientX = (clientX: number) => {
+    const el = trackRef.current
+    if (!el) return
+    const rect = el.getBoundingClientRect()
+    const x = (clientX - rect.left) / Math.max(1e-6, rect.width)
+    const next = snapToFrame(Math.min(1, Math.max(0, x)), duration, fps)
+    const rig = useRigStore.getState()
+    if (rig.playing) rig.setPlaying(false)
+    rig.setT(next)
+  }
+
+  const stepFrame = (delta: number) => {
+    const rig = useRigStore.getState()
+    if (rig.playing) rig.setPlaying(false)
+    const frame = timeToFrame(rig.t, rig.duration, rig.fps)
+    rig.setT(frameToTime(frame + delta, rig.duration, rig.fps))
+  }
+
+  const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId)
+    seekFromClientX(e.clientX)
+  }
+
+  const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
+    seekFromClientX(e.clientX)
+  }
+
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      stepFrame(-1)
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      stepFrame(1)
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      const rig = useRigStore.getState()
+      if (rig.playing) rig.setPlaying(false)
+      rig.setT(0)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      const rig = useRigStore.getState()
+      if (rig.playing) rig.setPlaying(false)
+      rig.setT(1)
+    }
+  }
+
+  return (
+    <div
+      ref={trackRef}
+      data-visualize-scrubber
+      role="slider"
+      tabIndex={0}
+      aria-label="Shot time"
+      aria-valuemin={0}
+      aria-valuemax={1}
+      aria-valuenow={t}
+      title="Hover or drag to pick a frame"
+      className="relative h-[22px] w-full shrink-0 cursor-ew-resize select-none outline-none focus-visible:ring-1 focus-visible:ring-accent/50"
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onKeyDown={onKeyDown}
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 rounded-full bg-panel-3" />
+      <div
+        className="pointer-events-none absolute top-1/2 h-1 -translate-y-1/2 rounded-full bg-accent/35"
+        style={{ width: `${t * 100}%` }}
+      />
+      <div
+        className="pointer-events-none absolute top-1/2 h-3 w-0.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-accent"
+        style={{ left: `${t * 100}%` }}
+      />
+    </div>
+  )
 }
 
 function VisualizeLetterbox() {
@@ -220,7 +303,7 @@ export function VisualizeBar() {
       <VisualizeLetterbox />
       <div
         data-visualize-bar
-        className="panel absolute z-20 flex flex-col justify-between overflow-hidden px-3 py-2"
+        className="panel absolute z-20 flex flex-col gap-1 overflow-hidden px-3 py-2"
         style={{
           left: band.left,
           width: band.width,
@@ -298,7 +381,9 @@ export function VisualizeBar() {
           <ExportActions compact includeRig={false} />
         </div>
 
-        <div className="flex min-h-9 min-w-0 items-center gap-3 overflow-x-auto">
+        <VisualizeScrubber />
+
+        <div className="flex min-h-9 min-w-0 flex-1 items-center gap-3 overflow-x-auto">
           <BarGroup label="Look">
             <div className="flex rounded-md bg-panel-2 p-0.5">
               {VIEW_MODES.map((mode) => (

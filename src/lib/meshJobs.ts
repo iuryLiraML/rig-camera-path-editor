@@ -1,6 +1,7 @@
 import { configureFal, falUsable, uploadFile, uploadImage } from './fal/client'
 import { generateFromImage, generateFromText } from './fal/generate3d'
 import { downloadGlb } from './fal/lift'
+import { cancelFalJob, finishFalJobAbort, resetFalJobAborts, startFalJobAbort } from './fal/jobAbort'
 import { remeshGlb } from './fal/remesh'
 import { readFalSettings } from './fal/settings'
 import { persistModelBuffer, fileFromBuffer, fileFromStoredBuffer } from './readModelFile'
@@ -8,7 +9,6 @@ import { idbGet, STORES } from './idb'
 import {
   FAL_REMESH_MAX_BYTES,
   discardParkedMesh,
-  importModelBuffer,
   parkMeshForRemesh,
   remeshTooLargeCopy,
   replaceImportedBuffer,
@@ -16,11 +16,12 @@ import {
   setDenseRemeshEnqueue,
   yieldToBrowser,
 } from './sceneIO'
+import { parkUnplacedAsset } from './environmentJobs'
 import { useEditorStore } from '../state/useEditorStore'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { makeSceneId, objectGraveyard, onSceneObjectRemoved, useSceneStore } from '../state/useSceneStore'
 
 const busy = new Set<string>()
-const controllers = new Map<string, AbortController>()
 
 type RemeshJob = {
   objectId: string
@@ -61,13 +62,12 @@ function beginJob(busyKey: string, name: string, kind: 'generate' | 'remesh', ob
   const scene = useSceneStore.getState()
   const liftId = scene.beginLift(name, kind, objectId)
   busy.add(busyKey)
-  const controller = new AbortController()
-  controllers.set(liftId, controller)
-  return { liftId, signal: controller.signal, scene }
+  const signal = startFalJobAbort(liftId)
+  return { liftId, signal, scene }
 }
 
 function endJob(busyKey: string, liftId: string) {
-  controllers.delete(liftId)
+  finishFalJobAbort(liftId)
   busy.delete(busyKey)
   useSceneStore.getState().endLift(liftId)
 }
@@ -81,12 +81,11 @@ function dropPlaceholder(objectId: string) {
 }
 
 export function cancelMeshJob(liftId: string) {
-  controllers.get(liftId)?.abort()
+  cancelFalJob(liftId)
 }
 
 export function resetMeshJobsForTests() {
-  for (const controller of controllers.values()) controller.abort()
-  controllers.clear()
+  resetFalJobAborts()
   busy.clear()
   const pending = remeshQueue.splice(0)
   remeshPumping = false
@@ -146,8 +145,7 @@ export async function generateObjectFromText(prompt: string): Promise<void> {
   try {
     const url = await generateFromText({ prompt, signal })
     const buffer = await downloadGlb(url, signal)
-    const imported = await importModelBuffer(buffer, name)
-    if (!imported) scene.showNotice('Generated a model but it could not be imported.')
+    await parkUnplacedAsset({ buffer, name, rigKind: 'none' })
   } catch (error) {
     scene.showNotice(isAbortError(error) ? 'Generation cancelled.' : error instanceof Error ? error.message : String(error))
   } finally {
@@ -169,11 +167,10 @@ export async function generateObjectFromImage(file: File): Promise<void> {
   const name = file.name.replace(/\.[^.]+$/, '') || 'Generated'
   const { liftId, signal, scene } = beginJob('generate', `${name} — Generating…`, 'generate')
   try {
-    const imageUrl = await uploadImage(file, signal)
+    const imageUrl = await uploadImage(file, signal, { storage: true })
     const url = await generateFromImage({ imageUrl, signal })
     const buffer = await downloadGlb(url, signal)
-    const imported = await importModelBuffer(buffer, name)
-    if (!imported) scene.showNotice('Generated a model but it could not be imported.')
+    await parkUnplacedAsset({ buffer, name, rigKind: 'none' })
   } catch (error) {
     scene.showNotice(isAbortError(error) ? 'Generation cancelled.' : error instanceof Error ? error.message : String(error))
   } finally {
@@ -259,10 +256,13 @@ async function isolateSharedRemeshBuffer(
   sourceBuffer?: ArrayBuffer,
 ): Promise<string | undefined> {
   if (!bufferKey) return undefined
-  const shared = useSceneStore
+  const sharedOnScene = useSceneStore
     .getState()
     .objects.some((item) => item.id !== objectId && item.bufferKey === bufferKey)
-  if (!shared) return undefined
+  const sharedOnShelf = useEnvironmentStore
+    .getState()
+    .unplacedAssets.some((asset) => asset.bufferKey === bufferKey)
+  if (!sharedOnScene && !sharedOnShelf) return undefined
   const nextKey = objectId === bufferKey ? makeSceneId('buf') : objectId
   const source =
     sourceBuffer && sourceBuffer.byteLength > 0

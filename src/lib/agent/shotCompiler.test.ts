@@ -25,8 +25,11 @@ describe('skill index', () => {
       'orbit-reveal',
       'dolly-push',
       'photo-lift',
+      'scene-block',
       'set-blocking',
     ])
+    expect(AGENT_SKILLS.find((s) => s.name === 'scene-block')?.body).toContain('block_scene_from_image')
+    expect(AGENT_SKILLS.find((s) => s.name === 'photo-lift')?.body).toMatch(/do \*\*not\*\* pose_object those ids/i)
   })
 })
 
@@ -72,6 +75,15 @@ describe('objectPhaseInstruction', () => {
       subjectId: 'knot-1',
     })
     expect(still).toContain('block_people_from_image')
+    expect(still).toContain('set_scene_environment')
+    const block = objectPhaseInstruction({
+      hasImage: true,
+      cycle: 0,
+      subjectId: 'knot-1',
+      userText: 'Block this scene',
+    })
+    expect(block).toContain('block_scene_from_image')
+    expect(block).toMatch(/Do not call generate_prop/)
     const later = objectPhaseInstruction({
       hasImage: true,
       cycle: 1,
@@ -164,7 +176,17 @@ describe('liftToolFailure', () => {
           role: 'tool',
           toolCallId: '2',
           name: 'block_people_from_image',
-          content: 'Placed Person (obj-1) on the floor.',
+          content: 'Added to Unplaced: Person (obj-1). Open My assets and instance each item.',
+        },
+      ]),
+    ).toBeNull()
+    expect(
+      liftToolFailure([
+        {
+          role: 'tool',
+          toolCallId: 'legacy',
+          name: 'generate_prop',
+          content: 'Placed Helmet (obj-1) on the floor.',
         },
       ]),
     ).toBeNull()

@@ -81,6 +81,11 @@ interface ProjectState {
   guidelines: string
   savedPrompts: SavedPrompt[]
   skills: CustomSkill[]
+  /** the active scene: a place within this project, its own stage + shots */
+  activeSceneId: string
+  sceneName: string
+  /** every scene in the current project, for the scene switcher */
+  scenes: ProjectSceneSummary[]
   shots: Shot[]
   directorChat: DirectorChatEntry[]
   directorLessons: string[]
@@ -107,6 +112,17 @@ interface ProjectState {
   setFolderId: (folderId: string | null) => void
   setDirectorChat: (chat: DirectorChatEntry[]) => void
   addDirectorLesson: (line: string) => void
+  setSceneName: (name: string) => void
+  setScenes: (scenes: ProjectSceneSummary[]) => void
+  /** switch scene within the same project (persistence lives in lib/projects) */
+  loadScene: (data: {
+    activeSceneId: string
+    sceneName: string
+    scenes: ProjectSceneSummary[]
+    shots: Shot[]
+    directorChat?: DirectorChatEntry[]
+    directorLessons?: string[]
+  }) => void
   /** wholesale load when switching projects (persistence lives in lib/projects) */
   loadProject: (data: {
     projectId: string
@@ -115,6 +131,9 @@ interface ProjectState {
     guidelines: string
     savedPrompts: SavedPrompt[]
     skills: CustomSkill[]
+    activeSceneId: string
+    sceneName: string
+    scenes: ProjectSceneSummary[]
     shots: Shot[]
     directorChat?: DirectorChatEntry[]
     directorLessons?: string[]
@@ -131,6 +150,9 @@ export const useProjectStore = create<ProjectState>((set) => ({
   guidelines: '',
   savedPrompts: [],
   skills: [],
+  activeSceneId: '',
+  sceneName: 'Scene 1',
+  scenes: [],
   shots: [],
   directorChat: [],
   directorLessons: [],
@@ -205,6 +227,25 @@ export const useProjectStore = create<ProjectState>((set) => ({
       if (!text) return s
       const directorLessons = [...s.directorLessons.filter((l) => l !== text), text].slice(-12)
       return { directorLessons }
+    }),
+
+  setSceneName: (sceneName) =>
+    set((state) => ({
+      sceneName,
+      scenes: state.scenes.map((scene) =>
+        scene.id === state.activeSceneId ? { ...scene, name: sceneName } : scene,
+      ),
+    })),
+  setScenes: (scenes) => set({ scenes }),
+
+  loadScene: (data) =>
+    set({
+      activeSceneId: data.activeSceneId,
+      sceneName: data.sceneName,
+      scenes: data.scenes,
+      shots: data.shots,
+      directorChat: data.directorChat ?? [],
+      directorLessons: data.directorLessons ?? [],
     }),
 
   loadProject: (data) =>

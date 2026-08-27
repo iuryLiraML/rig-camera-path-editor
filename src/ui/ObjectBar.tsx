@@ -13,7 +13,7 @@ import {
   SlidersIcon,
 } from './icons'
 import { DesignInspector } from './RightPanel'
-import { TransformPopover } from './TransformPopover'
+import { EnvironmentTransformPopover, TransformPopover } from './TransformPopover'
 import { useViewportInsets } from './viewportInsets'
 
 export function ObjectBar() {
@@ -24,8 +24,9 @@ export function ObjectBar() {
   const insets = useViewportInsets()
   const objectId = selection?.startsWith('obj:') ? selection.slice(4) : null
   const object = useSceneStore((s) => (objectId ? s.objects.find((o) => o.id === objectId) : null))
+  const envSelected = selection === 'env'
 
-  if (!objectId || !object) return null
+  if (!envSelected && (!objectId || !object)) return null
 
   const setPanel = (next: ObjectBarPanel) => {
     useEditorStore.getState().setObjectBarPanel(panel === next ? 'none' : next)
@@ -36,19 +37,22 @@ export function ObjectBar() {
       className="absolute z-30 flex -translate-x-1/2 flex-col items-center gap-2"
       style={{ left: insets.centre, bottom: insets.contentBottom }}
     >
-      {panel === 'transform' && <TransformPopover objectId={objectId} />}
-      {panel === 'name' && <NamePopover objectId={objectId} />}
-      {panel === 'properties' && (
+      {panel === 'transform' && envSelected && <EnvironmentTransformPopover />}
+      {panel === 'transform' && objectId && <TransformPopover objectId={objectId} />}
+      {panel === 'name' && objectId && <NamePopover objectId={objectId} />}
+      {panel === 'properties' && objectId && (
         <div className="panel max-h-[min(70vh,520px)] w-[280px] overflow-y-auto">
           <DesignInspector />
         </div>
       )}
-      {panel === 'more' && <MoreMenu objectId={objectId} />}
+      {panel === 'more' && objectId && <MoreMenu objectId={objectId} />}
 
       <div className="panel flex items-center gap-0.5 px-1.5 py-1">
-        <IconBtn title="Shape" active={panel === 'name'} onClick={() => setPanel('name')}>
-          <CubeIcon size={14} />
-        </IconBtn>
+        {!envSelected && (
+          <IconBtn title="Shape" active={panel === 'name'} onClick={() => setPanel('name')}>
+            <CubeIcon size={14} />
+          </IconBtn>
+        )}
         <IconBtn
           title="Outliner"
           active={showOutliner}
@@ -56,12 +60,16 @@ export function ObjectBar() {
         >
           <ListIcon size={14} />
         </IconBtn>
-        <IconBtn title="Properties" active={panel === 'properties'} onClick={() => setPanel('properties')}>
-          <SlidersIcon size={14} />
-        </IconBtn>
-        <IconBtn title="More" active={panel === 'more'} onClick={() => setPanel('more')}>
-          <DotsIcon size={14} />
-        </IconBtn>
+        {!envSelected && (
+          <IconBtn title="Properties" active={panel === 'properties'} onClick={() => setPanel('properties')}>
+            <SlidersIcon size={14} />
+          </IconBtn>
+        )}
+        {!envSelected && (
+          <IconBtn title="More" active={panel === 'more'} onClick={() => setPanel('more')}>
+            <DotsIcon size={14} />
+          </IconBtn>
+        )}
         <span className="mx-1 h-4 w-px bg-line" />
         <IconBtn title="Move (W)" active={panel === 'transform'} onClick={() => setPanel('transform')}>
           <MoveIcon size={14} />

@@ -19,6 +19,8 @@ const OBJECT_TOOLS = new Set([
   'add_primitive',
   'block_people_from_image',
   'generate_prop',
+  'set_scene_environment',
+  'block_scene_from_image',
   'set_playhead',
 ])
 

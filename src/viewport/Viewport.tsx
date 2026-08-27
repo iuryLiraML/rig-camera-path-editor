@@ -16,6 +16,7 @@ import { AXIS_GIZMO_RADIUS, bottomLeftStack, useViewportInsets } from '../ui/vie
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
 import { SceneObjects } from './SceneObjects'
+import { EnvironmentSplat } from './EnvironmentSplat'
 import { DrawTool } from './path/DrawTool'
 import { PenTool } from './path/PenTool'
 import { InactivePaths, PathEditor } from './path/PathEditor'
@@ -210,6 +211,7 @@ export function Viewport() {
       <directionalLight visible={!lightHidden} position={[-5, 3, -4]} intensity={0.35} />
 
       <SceneObjects />
+      <EnvironmentSplat />
 
       {tool === 'pen' && isPathEditing(playMode, workspaceMode) && !staticCamera && !tech && <PenTool />}
       {tool === 'draw' && isPathEditing(playMode, workspaceMode) && !cameraView && !tech && <DrawTool />}

@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { TransformPopover } from './TransformPopover'
+import { TransformPopover, EnvironmentTransformPopover } from './TransformPopover'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
 
 beforeEach(() => {
   useSceneStore.setState({ objects: [], pendingLifts: [] })
@@ -25,6 +26,9 @@ afterEach(() => {
     objectBarPanel: 'none',
     selectedKeyframe: null,
     selection: null,
+  })
+  useEnvironmentStore.setState({
+    environmentTransform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
   })
 })
 
@@ -65,5 +69,16 @@ describe('TransformPopover', () => {
     const objectId = useSceneStore.getState().objects[0].id
     render(<TransformPopover objectId={objectId} />)
     expect(useEditorStore.getState().keyableFocus).toBe('object')
+  })
+
+  it('writes the palco pose from the environment transform fields', () => {
+    useEnvironmentStore.setState({
+      environmentTransform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+    })
+    const { getByText, getAllByRole } = render(<EnvironmentTransformPopover />)
+    expect(getByText('Environment')).toBeTruthy()
+    const x = getAllByRole('spinbutton')[0] as HTMLInputElement
+    fireEvent.change(x, { target: { value: '4' } })
+    expect(useEnvironmentStore.getState().environmentTransform.position[0]).toBe(4)
   })
 })

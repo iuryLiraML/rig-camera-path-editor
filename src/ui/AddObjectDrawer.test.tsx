@@ -4,16 +4,18 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { NO_SERVER_KEYS } from '../lib/agent/serverKeys'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { AddObjectDrawer } from './AddObjectDrawer'
 
 beforeEach(() => {
   useAgentStore.setState({ falKey: '', serverKeys: NO_SERVER_KEYS })
-  useEditorStore.setState({ showSettings: false })
+  useEditorStore.setState({ showSettings: false, addDrawerChip: 'primitives' })
 })
 
 afterEach(() => {
   cleanup()
   useAgentStore.setState({ falKey: '', serverKeys: NO_SERVER_KEYS })
+  useEnvironmentStore.setState({ findOpen: false, findPlaceMode: 'unplaced' })
 })
 
 describe('AddObjectDrawer generate chip', () => {
@@ -28,6 +30,7 @@ describe('AddObjectDrawer generate chip', () => {
     expect(chips).toContain('Primitives')
     expect(chips).toContain('My assets')
     expect(chips).toContain('Generate')
+    expect(chips).toContain('Environment')
   })
 
   it('keeps From text / From image visible but disabled without a Fal key', () => {
@@ -49,6 +52,48 @@ describe('AddObjectDrawer generate chip', () => {
     fireEvent.click(getByText('From text'))
     expect(container.querySelector('textarea')).not.toBeNull()
   })
+
+  it('says generated props land in Unplaced', () => {
+    useAgentStore.setState({ falKey: 'test-key' })
+    const { container, getByText } = render(<AddObjectDrawer />)
+    fireEvent.click(getByText('Generate'))
+    expect(container.textContent).toContain('Lands in Unplaced')
+    expect(container.textContent).toContain('Photo → Unplaced')
+  })
+})
+
+describe('AddObjectDrawer environment chip', () => {
+  it('offers photo generate and ply import', () => {
+    const { container, getByText } = render(<AddObjectDrawer />)
+    fireEvent.click(getByText('Environment'))
+    expect(container.textContent).toContain('From photo')
+    expect(container.textContent).toContain('TripoSplat')
+    expect(container.textContent).toContain('.ply / .splat')
+  })
+
+  it('opens the Environment chip from the empty-palco CTA store action', () => {
+    useEditorStore.getState().openAddDrawerChip('environment')
+    const { container, getByText } = render(<AddObjectDrawer />)
+    expect(getByText('Environment').className).toContain('bg-accent')
+    expect(container.textContent).toContain('TripoSplat')
+  })
+})
+
+describe('AddObjectDrawer find objects', () => {
+  it('offers Detect objects beside Detect people', () => {
+    useEnvironmentStore.setState({ findOpen: true, findPlaceMode: 'unplaced' })
+    const { container } = render(<AddObjectDrawer />)
+    expect(container.textContent).toContain('Detect people')
+    expect(container.textContent).toContain('Detect objects')
+  })
+
+  it('offers Place in scene when blocking from chat', () => {
+    useEnvironmentStore.setState({ findOpen: true, findPlaceMode: 'scene' })
+    const { container } = render(<AddObjectDrawer />)
+    expect(container.textContent).toContain('Block this scene')
+    expect(container.textContent).toContain('Place in scene')
+    expect(container.textContent).not.toContain('Queue to Unplaced')
+  })
 })
 
 describe('AddObjectDrawer primitive previews', () => {
@@ -56,6 +101,7 @@ describe('AddObjectDrawer primitive previews', () => {
     const { container } = render(<AddObjectDrawer />)
     const tiles = Array.from(container.querySelectorAll('[data-primitive]'))
     expect(tiles.map((tile) => tile.getAttribute('data-primitive'))).toEqual([
+      'dummy',
       'box',
       'sphere',
       'cylinder',
@@ -63,9 +109,9 @@ describe('AddObjectDrawer primitive previews', () => {
       'plane',
       'torus',
     ])
-    const previews = tiles.map((tile) =>
-      tile.querySelector('[data-primitive-preview]')?.getAttribute('data-primitive-preview'),
-    )
+    const previews = tiles
+      .map((tile) => tile.querySelector('[data-primitive-preview]')?.getAttribute('data-primitive-preview'))
+      .filter((value): value is string => Boolean(value))
     expect(previews).toEqual(['box', 'sphere', 'cylinder', 'cone', 'plane', 'torus'])
     expect(container.querySelector('button[data-primitive] svg[viewBox="0 0 16 16"]')).toBeNull()
   })

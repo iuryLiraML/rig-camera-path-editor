@@ -6,7 +6,13 @@ import {
   type KeyableFocus,
   type KeyChannel,
 } from './keyAtPlayhead'
-import { insertChannelKeyAt, insertVec3GroupAt, selectRigKeyAtTime } from './timelineKey'
+import {
+  groupedTimelineVec3,
+  insertChannelKeyAt,
+  insertVec3GroupAt,
+  selectRigKeyAtTime,
+} from './timelineKey'
+import { VEC3_AXIS_CHANNELS, VEC3_GROUP_LABELS } from './vec3Axes'
 import { requestPersistFlush } from './persistFlush'
 import { keysForObjectChannel, OBJECT_CHANNEL_LABELS, type ValueKey } from './keyframes'
 import { useEditorStore } from '../state/useEditorStore'
@@ -29,6 +35,14 @@ export function insertKeyframeAtPlayhead() {
       useSceneStore.getState().showNotice('Keyframe set (Position)')
       return
     }
+  }
+
+  const grouped = groupedTimelineVec3(editor.keyableFocus)
+  if (grouped && !editor.timelineGraph) {
+    insertVec3GroupAt(grouped)
+    selectRigKeyAtTime(VEC3_AXIS_CHANNELS[grouped][0], rig.t)
+    useSceneStore.getState().showNotice(`Keyframe set (${VEC3_GROUP_LABELS[grouped]})`)
+    return
   }
 
   const animated = KEY_CHANNELS.filter((channel): channel is KeyChannel => {

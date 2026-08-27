@@ -1,5 +1,5 @@
 import { useRef, type DragEvent } from 'react'
-import { importDroppedModels } from '../lib/sceneIO'
+import { importDroppedSceneFiles } from '../lib/sceneIO'
 import { useEditorStore } from '../state/useEditorStore'
 import { CubeIcon } from './icons'
 
@@ -11,7 +11,7 @@ export function ImportAssetsModal() {
   const close = () => useEditorStore.getState().setShowImportModal(false)
 
   const takeFiles = async (files: File[]) => {
-    await importDroppedModels(files)
+    await importDroppedSceneFiles(files)
     close()
   }
 
@@ -41,12 +41,12 @@ export function ImportAssetsModal() {
         >
           <CubeIcon size={28} />
           <span className="text-[12px] text-ink">Drag & Drop models or browse.</span>
-          <span className="text-[10px] text-ink-dim">.glb, .gltf</span>
+          <span className="text-[10px] text-ink-dim">.glb, .gltf, .ply, .splat</span>
         </button>
         <input
           ref={inputRef}
           type="file"
-          accept=".glb,.gltf"
+          accept=".glb,.gltf,.ply,.splat"
           multiple
           className="hidden"
           onChange={(e) => {

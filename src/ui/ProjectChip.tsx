@@ -3,6 +3,7 @@ import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { ListIcon } from './icons'
 import { ProjectMenu } from './LeftPanel'
+import { SceneSwitcher } from './SceneSwitcher'
 import { GUTTER, LEFT_PANEL_MAX } from './viewportInsets'
 
 const SAVE_CHIP: Record<'saved' | 'saving' | 'dirty', { label: string; className: string }> = {
@@ -57,9 +58,11 @@ export function ProjectChip() {
       <input
         value={name}
         onChange={(e) => useProjectStore.getState().setName(e.target.value)}
-        className="min-w-0 flex-1 truncate bg-transparent text-[11px] font-medium text-ink outline-none"
+        className="min-w-[36px] flex-1 truncate bg-transparent text-[11px] font-medium text-ink outline-none"
         title="Project name"
       />
+      <span className="h-3 w-px bg-line/70" />
+      <SceneSwitcher />
       <span
         data-save-status={saveStatus}
         className={`shrink-0 text-[10px] ${chip.className}`}

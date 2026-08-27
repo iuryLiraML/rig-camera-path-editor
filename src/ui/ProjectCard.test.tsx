@@ -15,8 +15,8 @@ const project = {
   shotCount: 2,
   updatedAt: Date.now(),
   scenes: [
-    { id: 'shot-1', name: 'Shot 1' },
-    { id: 'shot-2', name: 'Shot 2' },
+    { id: 'scene-1', name: 'Scene 1' },
+    { id: 'scene-2', name: 'Scene 2' },
   ],
 }
 

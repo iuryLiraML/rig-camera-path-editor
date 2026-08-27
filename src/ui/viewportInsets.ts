@@ -36,8 +36,8 @@ export const TIMELINE_HEIGHT_DEFAULT = 312
 export const TIMELINE_HEIGHT_MAX = 480
 export const TIMELINE_MIN = 108
 export const SEQUENCE_HEIGHT = 148
-/** Review bar in Visualize — shots / cameras / depth / export */
-export const VISUALIZE_DOCK_HEIGHT = 148
+/** Review bar in Visualize — shots / cameras / depth / export + scrubber */
+export const VISUALIZE_DOCK_HEIGHT = 172
 /** Persistent Add-an-Object tray in Build */
 export const ADD_DRAWER_HEIGHT = 280
 export const MIN_FREE_WIDTH = 260

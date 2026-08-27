@@ -2,7 +2,7 @@
   "name": "rig-camera-path-editor",
   "description": "Spline-inspired web 3D camera-path editor: draw camera paths, keyframe the lens with professional animation curves, attach objects to motion paths, split the viewport Blender-style, and export MP4 reference animations for generative AI.",
   "private": true,
-  "version": "0.7.2",
+  "version": "0.7.3",
   "type": "module",
   "engines": {
     "node": ">=22.12.0"
@@ -17,6 +17,7 @@
   "dependencies": {
     "@fal-ai/client": "^1.10.1",
     "@fontsource-variable/inter": "^5.2.5",
+    "@mkkellogg/gaussian-splats-3d": "^0.4.7",
     "@react-three/drei": "^10.4.0",
     "@react-three/fiber": "^9.2.0",
     "mammoth": "^1.12.0",

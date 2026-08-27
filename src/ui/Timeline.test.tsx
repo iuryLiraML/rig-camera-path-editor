@@ -148,55 +148,65 @@ describe('Timeline', () => {
     expect(container.querySelector('svg[viewBox="25 0 50 100"] polyline')).not.toBeNull()
   })
 
-  it('always lists FOV and Roll tracks before the first key', () => {
+  it('always lists Position and Look-At tracks, not FOV or Roll', () => {
     setAnchors(3)
     const { container } = render(<Timeline />)
-    expect(container.querySelector('[data-track="fov"]')).not.toBeNull()
-    expect(container.querySelector('[data-track="roll"]')).not.toBeNull()
-    expect(container.textContent).toContain('FOV')
-    expect(container.textContent).toContain('Roll')
+    expect(container.querySelector('[data-track="progress"]')).not.toBeNull()
+    expect(container.querySelector('[data-track="target"]')).not.toBeNull()
+    expect(container.textContent).toContain('Position')
+    expect(container.textContent).toContain('Look-At')
+    expect(container.querySelector('[data-track="fov"]')).toBeNull()
+    expect(container.querySelector('[data-track="roll"]')).toBeNull()
+    expect(container.textContent).not.toMatch(/\bFOV\b/)
+    expect(container.textContent).not.toMatch(/\bRoll\b/)
   })
 
-  it('adds an FOV key on double-click in the empty lane', () => {
+  it('adds a Look-At key on double-click in the empty lane', () => {
     setAnchors(3)
     const { container } = render(<Timeline />)
-    const lane = container.querySelector('[data-track="fov"] [data-lane]')
+    const lane = container.querySelector('[data-track="target"] [data-lane]')
     expect(lane).not.toBeNull()
     fireEvent.doubleClick(lane!)
-    expect(useRigStore.getState().fovKeys.length).toBe(1)
+    expect(useRigStore.getState().targetXKeys.length).toBe(1)
+    expect(useRigStore.getState().targetYKeys.length).toBe(1)
+    expect(useRigStore.getState().targetZKeys.length).toBe(1)
   })
 
   it('adds a key from Add key at the playhead', () => {
     setAnchors(3)
-    useRigStore.setState({ t: 0.3, fov: 50 })
+    useRigStore.setState({ t: 0.3, target: [1, 2, 3] })
     const { container } = render(<Timeline />)
-    const add = container.querySelector('[data-track="fov"] [data-add-key]')
+    const add = container.querySelector('[data-track="target"] [data-add-key]')
     expect(add).not.toBeNull()
     expect(add?.textContent).toBe('Add key')
     fireEvent.click(add!)
-    const keys = useRigStore.getState().fovKeys
+    const keys = useRigStore.getState().targetXKeys
     expect(keys).toHaveLength(1)
     expect(keys[0].time).toBeCloseTo(0.3, 5)
-    expect(keys[0].value).toBeCloseTo(50, 5)
+    expect(keys[0].value).toBeCloseTo(1, 5)
   })
 
   it('shows Remove disabled until a key on that track is selected', () => {
     setAnchors(3)
     useRigStore.setState({
-      fovKeys: [{ id: 'fov-a', time: 0.2, value: 40 }],
+      targetXKeys: [{ id: 'look-a', time: 0.2, value: 1 }],
+      targetYKeys: [{ id: 'look-b', time: 0.2, value: 2 }],
+      targetZKeys: [{ id: 'look-c', time: 0.2, value: 3 }],
     })
     const { container, rerender } = render(<Timeline />)
     const remove = () =>
-      container.querySelector('[data-track="fov"] [data-delete-key]') as HTMLButtonElement
+      container.querySelector('[data-track="target"] [data-delete-key]') as HTMLButtonElement
     expect(remove()).not.toBeNull()
     expect(remove().disabled).toBe(true)
     useEditorStore.setState({
-      selectedKeyframe: { kind: 'rig', channel: 'fov', id: 'fov-a' },
+      selectedKeyframe: { kind: 'rig', channel: 'targetX', id: 'look-a' },
     })
     rerender(<Timeline />)
     expect(remove().disabled).toBe(false)
     fireEvent.click(remove())
-    expect(useRigStore.getState().fovKeys).toHaveLength(0)
+    expect(useRigStore.getState().targetXKeys).toHaveLength(0)
+    expect(useRigStore.getState().targetYKeys).toHaveLength(0)
+    expect(useRigStore.getState().targetZKeys).toHaveLength(0)
   })
 
   it('zooms time on wheel over the dock and shows the frame count', () => {
@@ -223,13 +233,13 @@ describe('Timeline', () => {
     setAnchors(3)
     const { container } = render(<Timeline />)
     expect(container.querySelector('[data-graph-editor]')).toBeNull()
-    expect(container.querySelector('[data-track="fov"]')).not.toBeNull()
+    expect(container.querySelector('[data-track="target"]')).not.toBeNull()
     const toggle = container.querySelector('[data-graph-toggle]')
     expect(toggle).not.toBeNull()
     expect(toggle?.textContent).toBe('Graph')
     fireEvent.click(toggle!)
     expect(container.querySelector('[data-graph-editor]')).not.toBeNull()
-    expect(container.querySelector('[data-track="fov"]')).toBeNull()
+    expect(container.querySelector('[data-track="target"]')).toBeNull()
     expect(container.querySelector('[data-graph-value-axis]')?.textContent).toMatch(/%/)
     expect(useEditorStore.getState().timelineGraph).toBe(true)
     expect(useEditorStore.getState().timelineHeight).toBeGreaterThanOrEqual(300)
@@ -239,26 +249,26 @@ describe('Timeline', () => {
     setAnchors(3)
     useEditorStore.setState({ timelineGraph: true, timelineHeight: 300 })
     const { container } = render(<Timeline />)
-    expect(container.querySelector('[data-graph-channel="fov"]')).not.toBeNull()
-    expect(container.querySelector('[data-graph-channel="roll"]')).not.toBeNull()
-    fireEvent.click(container.querySelector('[data-graph-channel="fov"]')!)
-    expect(useEditorStore.getState().graphChannel).toBe('fov')
-    expect(container.querySelector('[data-graph-value-axis]')?.textContent).toMatch(/°/)
+    expect(container.querySelector('[data-graph-channel="targetX"]')).not.toBeNull()
+    expect(container.querySelector('[data-graph-channel="fov"]')).toBeNull()
+    fireEvent.click(container.querySelector('[data-graph-channel="targetX"]')!)
+    expect(useEditorStore.getState().graphChannel).toBe('targetX')
+    expect(container.querySelector('[data-graph-value-axis]')?.textContent).not.toMatch(/%/)
   })
 
   it('draws a cubic spline and shows tangent handles on the selected key', () => {
     setAnchors(3)
     useRigStore.setState({
-      fovKeys: [
-        { id: 'a', time: 0, value: 30 },
-        { id: 'b', time: 1, value: 80 },
+      targetXKeys: [
+        { id: 'a', time: 0, value: -1 },
+        { id: 'b', time: 1, value: 2 },
       ],
     })
     useEditorStore.setState({
       timelineGraph: true,
       timelineHeight: 300,
-      graphChannel: 'fov',
-      selectedKeyframe: { kind: 'rig', channel: 'fov', id: 'a' },
+      graphChannel: 'targetX',
+      selectedKeyframe: { kind: 'rig', channel: 'targetX', id: 'a' },
     })
     const { container } = render(<Timeline />)
     expect(container.querySelector('[data-graph-spline]')).not.toBeNull()
@@ -303,7 +313,7 @@ describe('Timeline', () => {
     expect(container.textContent).toContain('Property')
     expect(container.textContent).not.toContain('Save the current pose at the playhead')
     fireEvent.click(getByText('+ Property'))
-    expect(container.textContent).not.toContain('Position')
+    expect(container.querySelector('[data-animate-menu]')).toHaveProperty('disabled', true)
   })
 
   it('lists Position / Rotation / Scale after selecting an object', () => {

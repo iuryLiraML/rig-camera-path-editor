@@ -24,8 +24,12 @@ import { prepareImportedRoot } from './prepareImport'
 import { VIEWPORT_BG_DEFAULT_TOP } from '../viewport/viewportBackground'
 import { configureFal, falUsable } from './fal/client'
 import { readFalSettings } from './fal/settings'
+import { isGltfMeshBuffer } from './assetSniff'
 import { countGltfTriangles } from './glbTriangleCount'
 import { persistModelBuffer, readModelBytes } from './readModelFile'
+import { makeDummyObject } from './dummyCharacter'
+import { partitionDroppedSceneFiles } from './environment'
+import { importEnvironmentFile } from './environmentJobs'
 
 /** legacy (pre-projects) localStorage key — still read for migration */
 export const LEGACY_META_KEY = 'rig-scene-objects'
@@ -276,6 +280,10 @@ export async function importModelBuffer(
   const scene = useSceneStore.getState()
   scene.setImporting(1)
   try {
+    if (!isGltfMeshBuffer(buffer)) {
+      scene.showNotice(`"${name}" is not a GLB mesh.`)
+      return null
+    }
     const quickCount = opts.triangles !== undefined ? opts.triangles : countGltfTriangles(buffer)
 
     if (autoRemesh && quickCount != null && quickCount > RETOPO_TRIANGLES) {
@@ -450,6 +458,21 @@ export async function importDroppedModels(files: File[]): Promise<void> {
   }
 }
 
+/** Viewport / Import drop: GLB as clay, PLY/SPLAT as the scene palco (E19). */
+export async function importDroppedSceneFiles(files: File[]): Promise<void> {
+  const { models, environments } = partitionDroppedSceneFiles(files)
+  if (models.length === 0 && environments.length === 0) {
+    useSceneStore.getState().showNotice('Unsupported file — drop a .glb, .gltf, .ply or .splat')
+    return
+  }
+  if (models.length > 0) await importDroppedModels(models)
+  if (environments.length === 0) return
+  if (environments.length > 1) {
+    useSceneStore.getState().showNotice('One environment at a time — using the first file')
+  }
+  await importEnvironmentFile(environments[0])
+}
+
 // ---------------------------------------------------------------------------
 // Scene <-> serializable metadata
 // ---------------------------------------------------------------------------
@@ -463,8 +486,10 @@ export interface ObjectMeta {
   transform: Transform
   keys: ModelKey[]
   playClips: boolean
+  activeClip?: string
   follow?: FollowConfig
   triangleCount?: number
+  rigKind?: import('./environment').RigKind
 }
 
 export function toMeta(o: SceneObject): ObjectMeta {
@@ -477,8 +502,10 @@ export function toMeta(o: SceneObject): ObjectMeta {
     transform: o.transform,
     keys: o.keys,
     playClips: o.playClips,
+    activeClip: o.activeClip,
     follow: o.follow,
     triangleCount: o.triangleCount,
+    rigKind: o.rigKind,
   }
 }
 
@@ -531,6 +558,16 @@ export async function loadSceneFromMetas(metas: ObjectMeta[], seedIfEmpty = true
       if (meta.primitive) {
         object = makePrimitive(meta.primitive.kind, { ...meta, params: meta.primitive.params })
         object.name = meta.name
+      } else if (meta.rigKind === 'dummy') {
+        object = makeDummyObject({
+          id: meta.id,
+          name: meta.name,
+          shade: meta.shade,
+          transform: meta.transform,
+          keys: meta.keys,
+          playClips: meta.playClips,
+          activeClip: meta.activeClip,
+        })
       } else if (meta.bufferKey === null) {
         object = makeDefaultKnotObject(meta)
         object.name = meta.name

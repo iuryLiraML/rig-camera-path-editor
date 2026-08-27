@@ -12,6 +12,7 @@ const VIEWS: { value: QuickView; label: string }[] = [
 ]
 
 const MODES: { value: ViewMode; label: string }[] = [
+  { value: 'look', label: 'Look' },
   { value: 'clay', label: 'Clay' },
   { value: 'depth', label: 'Depth' },
   { value: 'outline', label: 'Outline' },

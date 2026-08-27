@@ -7,17 +7,19 @@ import { openImportDialog, resetScene } from '../lib/sceneIO'
 import { cancelMeshJob } from '../lib/meshJobs'
 import { RemeshProgressBar } from './RemeshProgressBar'
 import { createProject, deleteProject, switchProject } from '../lib/projects'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { useRigStore } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { generateRacingDroneCameras } from '../lib/cameraBatch/generateRacingDroneCameras'
-import { AddSceneMenu, addDrawnPath } from './AddSceneMenu'
+import { AddObjectMenu, addDrawnPath } from './AddObjectMenu'
 import {
   CameraIcon,
   CubeIcon,
   EyeIcon,
   EyeOffIcon,
+  GlobeIcon,
   ImportIcon,
   DotsIcon,
   PenIcon,
@@ -573,6 +575,7 @@ export function ProjectMenu() {
 export function LeftPanel() {
   const objects = useSceneStore((s) => s.objects)
   const pendingLifts = useSceneStore((s) => s.pendingLifts)
+  const environmentId = useEnvironmentStore((s) => s.environmentId)
   const hasPath = useCameraAnchorCount() > 0
   const paths = usePathStore((s) => s.paths)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
@@ -622,9 +625,21 @@ export function LeftPanel() {
           <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">
             Scene
           </span>
-          <AddSceneMenu compact title="Add a shape or import a model" />
+          <AddObjectMenu compact title="Add a shape or import a model" />
         </div>
         <div className="flex flex-col gap-0.5">
+          {environmentId && (
+            <TreeItem id="env" icon={<GlobeIcon />} name="Environment" />
+          )}
+          {!environmentId && (
+            <button
+              type="button"
+              onClick={() => useEditorStore.getState().openAddDrawerChip('environment')}
+              className="rounded-md px-2 py-1.5 text-left text-[11px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+            >
+              Set environment…
+            </button>
+          )}
           {pendingLifts
             .filter((lift) => !lift.objectId)
             .map((lift) => (

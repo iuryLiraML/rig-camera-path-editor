@@ -31,16 +31,11 @@ describe('animateMenuItems', () => {
     ])
   })
 
-  it('lists Position / Rotation axes / FOV / Roll for a Free camera', () => {
+  it('lists Rotation axes for a Free camera (Position and Look-At are already on the timeline)', () => {
     expect(animateMenuItems('cinema-camera', 'static').map((item) => item.label)).toEqual([
-      'Position X',
-      'Position Y',
-      'Position Z',
       'Rotation X',
       'Rotation Y',
       'Rotation Z',
-      'FOV',
-      'Roll',
     ])
   })
 

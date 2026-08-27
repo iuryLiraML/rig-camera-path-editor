@@ -104,6 +104,16 @@ describe('workspaceMode', () => {
     expect(useEditorStore.getState().gizmoMode).toBe('rotate')
   })
 
+  it('opens Transform when W/E/R is used on the environment palco', () => {
+    useEditorStore.setState({
+      selection: 'env',
+      objectBarPanel: 'none',
+      gizmoMode: 'translate',
+    })
+    useEditorStore.getState().setGizmoMode('translate')
+    expect(useEditorStore.getState().objectBarPanel).toBe('transform')
+  })
+
   it('opens the camera inspector when a cinema camera is picked in Compose', () => {
     useEditorStore.setState({ workspaceMode: 'compose', cameraPanel: 'closed' })
     useEditorStore.getState().select('cinema-camera')

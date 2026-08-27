@@ -5,7 +5,7 @@ import { applyDepthUniforms, fitDepthRange, resolveDepthRange } from '../lib/dep
 import { useEditorStore, type ViewMode } from '../state/useEditorStore'
 import { invalidateSceneBoundsCache, sceneBoundsThrottled } from './SceneObjects'
 
-export const isTechMode = (mode: ViewMode) => mode !== 'clay'
+export const isTechMode = (mode: ViewMode) => mode !== 'clay' && mode !== 'look'
 
 // ---------------------------------------------------------------------------
 // Depth window: near/far follow the active camera around the scene so the
@@ -259,7 +259,7 @@ export function ViewModeController() {
 
   useFrame(({ camera }) => {
     const editor = useEditorStore.getState()
-    if (editor.viewMode === 'clay') return
+    if (!isTechMode(editor.viewMode)) return
     frameRef.current += 1
 
     let fitted: { near: number; far: number } | null = null

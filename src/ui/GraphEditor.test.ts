@@ -43,14 +43,17 @@ describe('buildGraphChannels', () => {
     )
   })
 
-  it('omits Free-camera pose channels when they have no keys', () => {
+  it('always lists Position axes and Look-At, not empty Rotation', () => {
     const channels = buildGraphChannels({
       ...base,
       cameraKind: 'static',
       axisKeys: {},
       axisPlots: {},
     })
-    expect(channels.map((channel) => channel.id)).not.toContain('staticPosX')
-    expect(channels.map((channel) => channel.id)).not.toContain('staticRotY')
+    const ids = channels.map((channel) => channel.id)
+    expect(ids).toContain('staticPosX')
+    expect(ids).toContain('targetX')
+    expect(ids).not.toContain('staticRotY')
+    expect(ids).not.toContain('fov')
   })
 })

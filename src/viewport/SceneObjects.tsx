@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { useCursor } from '@react-three/drei'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
+import { clipPlayheadSeconds } from '../lib/clipClock'
 import { aimObject } from '../lib/cameraOrientation'
 import { buildCurve, clamp01 } from '../lib/curve'
 import { evalModelTransform, type ObjectChannel } from '../lib/keyframes'
@@ -148,11 +149,18 @@ function ObjectNode({ object }: { object: SceneObject }) {
   }, [object.id])
 
   useEffect(() => {
-    object.clips.forEach((clip) => mixer.clipAction(clip).play())
+    object.clips.forEach((clip) => mixer.clipAction(clip).stop())
+    const active =
+      object.activeClip && object.clips.some((clip) => clip.name === object.activeClip)
+        ? object.clips.filter((clip) => clip.name === object.activeClip)
+        : object.rigKind === 'dummy'
+          ? object.clips.filter((clip) => clip.name === 'Idle')
+          : object.clips
+    active.forEach((clip) => mixer.clipAction(clip).play())
     return () => {
       mixer.stopAllAction()
     }
-  }, [mixer, object.clips])
+  }, [mixer, object.clips, object.activeClip, object.rigKind])
 
   // store -> group for rest-pose objects; keyed objects are driven in useFrame
   useEffect(() => {
@@ -167,11 +175,9 @@ function ObjectNode({ object }: { object: SceneObject }) {
 
   useFrame(() => {
     const rig = useRigStore.getState()
-    const seconds = rig.t * rig.duration
 
     if (object.playClips && object.clips.length > 0) {
-      const clipDuration = Math.max(...object.clips.map((c) => c.duration), 0.001)
-      mixer.setTime(seconds % clipDuration)
+      mixer.setTime(clipPlayheadSeconds(rig.t, rig.duration, object.clips, object.activeClip))
     }
 
     // follow-path drives the transform and takes priority over pose keyframes

@@ -5,11 +5,11 @@ import {
   bootProjects,
   createProject,
   deleteProject,
-  loadShot,
   moveProjectToFolder,
   removeFolder,
   renameProject,
   switchProject,
+  switchScene,
 } from '../lib/projects'
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { useEditorStore } from '../state/useEditorStore'
@@ -57,9 +57,8 @@ export function ProjectsWorkspace() {
     setError(null)
     try {
       await switchProject(projectId)
-      const shot = useProjectStore.getState().shots.find((item) => item.id === sceneId)
-      if (shot) loadShot(shot)
-      else useEditorStore.getState().setAppView('editor')
+      await switchScene(sceneId)
+      useEditorStore.getState().setAppView('editor')
     } catch {
       setError('The scene could not be opened. Your current project remains unchanged.')
     }

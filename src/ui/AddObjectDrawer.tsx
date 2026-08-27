@@ -1,14 +1,25 @@
 import { useMemo, useRef, useState } from 'react'
 import { PRIMITIVE_DEFS, PRIMITIVE_KINDS, type PrimitiveKind } from '../lib/primitiveGeometry'
 import { generateObjectFromImage, generateObjectFromText } from '../lib/meshJobs'
+import { addDummyToScene } from '../lib/dummyCharacter'
+import {
+  assignStoredEnvironment,
+  clearActiveEnvironment,
+  deleteStoredEnvironment,
+  generateEnvironmentFromPhoto,
+  importEnvironmentFile,
+  instantiateUnplaced,
+} from '../lib/environmentJobs'
+import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { CubeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
+import { CubeIcon, GlobeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
 import { PrimitivePreview } from './PrimitivePreview'
 import { ADD_DRAWER_HEIGHT, GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
+import { approveFindRows, detectObjectRows, detectPeopleRows, makeFindRow, type FindRow } from '../lib/findObjects'
+import { clearSceneBlockSession, commitSceneBlock, getSceneBlockSession } from '../lib/sceneBlock'
 
-type Chip = 'primitives' | 'assets' | 'generate'
 type GenerateMode = 'pick' | 'text' | 'image'
 
 function isStillImage(file: File) {
@@ -18,11 +29,15 @@ function isStillImage(file: File) {
 
 export function AddObjectDrawer() {
   const objects = useSceneStore((s) => s.objects)
+  const unplaced = useEnvironmentStore((s) => s.unplacedAssets)
+  const environments = useEnvironmentStore((s) => s.environments)
+  const environmentId = useEnvironmentStore((s) => s.environmentId)
+  const findOpen = useEnvironmentStore((s) => s.findOpen)
   const falKey = useAgentStore((s) => s.falKey)
   const serverFal = useAgentStore((s) => s.serverKeys.fal)
   const canFal = Boolean(falKey.trim()) || serverFal
   const [query, setQuery] = useState('')
-  const [chip, setChip] = useState<Chip>('primitives')
+  const chip = useEditorStore((s) => s.addDrawerChip)
   const [generateMode, setGenerateMode] = useState<GenerateMode>('pick')
   const [prompt, setPrompt] = useState('')
   const [image, setImage] = useState<File | null>(null)
@@ -38,6 +53,7 @@ export function AddObjectDrawer() {
   const assets = objects.filter((object) => object.name.toLowerCase().includes(q) && object.bufferKey)
 
   return (
+    <>
     <div
       className="panel absolute z-30 flex flex-col overflow-hidden"
       style={{
@@ -74,6 +90,7 @@ export function AddObjectDrawer() {
             { id: 'primitives', label: 'Primitives' },
             { id: 'assets', label: 'My assets' },
             { id: 'generate', label: 'Generate' },
+            { id: 'environment', label: 'Environment' },
           ] as const
         ).map((item) => (
           <button
@@ -81,7 +98,7 @@ export function AddObjectDrawer() {
             type="button"
             onClick={() => {
               if (item.id !== chip) setGenerateMode('pick')
-              setChip(item.id)
+              useEditorStore.getState().setAddDrawerChip(item.id)
             }}
             className={`rounded-full px-2.5 py-1 text-[11px] ${
               chip === item.id ? 'bg-accent text-white' : 'bg-panel-2 text-ink-dim hover:text-ink'
@@ -94,36 +111,18 @@ export function AddObjectDrawer() {
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-3 py-3">
         {chip === 'primitives' ? (
           <div className="flex h-full gap-2">
+            {(!q || 'dummy'.includes(q)) && <DummyTile />}
             {primitives.map((kind) => (
               <PrimitiveTile key={kind} kind={kind} />
             ))}
-            {primitives.length === 0 && (
+            {primitives.length === 0 && q && !'dummy'.includes(q) && (
               <p className="self-center text-[12px] text-ink-dim">No primitives match that search.</p>
             )}
           </div>
         ) : chip === 'assets' ? (
-          <div className="flex h-full gap-2">
-            {assets.map((object) => (
-              <button
-                key={object.id}
-                type="button"
-                onClick={() => {
-                  useEditorStore.getState().select(`obj:${object.id}`)
-                }}
-                className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
-              >
-                <div className="flex flex-1 items-center justify-center text-ink-dim">
-                  <CubeIcon size={28} />
-                </div>
-                <span className="truncate text-[11px] text-ink">{object.name}</span>
-              </button>
-            ))}
-            {assets.length === 0 && (
-              <p className="self-center text-[12px] text-ink-dim">
-                Imported .glb files land here. Use Import, or drop a file on the canvas.
-              </p>
-            )}
-          </div>
+          <AssetsPane query={q} unplaced={unplaced} placed={assets} />
+        ) : chip === 'environment' ? (
+          <EnvironmentPane canFal={canFal} environments={environments} environmentId={environmentId} />
         ) : (
           <GeneratePane
             canFal={canFal}
@@ -137,6 +136,8 @@ export function AddObjectDrawer() {
         )}
       </div>
     </div>
+    {findOpen && <FindObjectsPanel />}
+    </>
   )
 }
 
@@ -272,7 +273,7 @@ function GeneratePane({
             <span className="text-[11px]">From text</span>
           </div>
           <span className="truncate text-[11px] text-ink">Tripo H3.1</span>
-          <span className="truncate text-[10px] text-ink-dim">Describe a clay object</span>
+          <span className="truncate text-[10px] text-ink-dim">Lands in Unplaced</span>
         </button>
         <button
           type="button"
@@ -285,9 +286,191 @@ function GeneratePane({
             <span className="text-[11px]">From image</span>
           </div>
           <span className="truncate text-[11px] text-ink">Meshy v7</span>
-          <span className="truncate text-[10px] text-ink-dim">Photo of the object alone</span>
+          <span className="truncate text-[10px] text-ink-dim">Photo → Unplaced</span>
         </button>
       </div>
+    </div>
+  )
+}
+
+function DummyTile() {
+  return (
+    <button
+      type="button"
+      data-primitive="dummy"
+      onClick={() => addDummyToScene()}
+      className="group flex h-full w-28 shrink-0 flex-col items-center rounded-xl bg-panel-2 px-2 pb-2 pt-3 text-left hover:bg-panel-3"
+    >
+      <div className="flex h-[4.75rem] w-[4.75rem] items-center justify-center overflow-hidden rounded-lg bg-black/25 text-[11px] text-ink-dim">
+        Dummy
+      </div>
+      <span className="mt-auto truncate text-[11px] text-ink">Dummy</span>
+    </button>
+  )
+}
+
+function AssetsPane({
+  query,
+  unplaced,
+  placed,
+}: {
+  query: string
+  unplaced: { id: string; name: string }[]
+  placed: { id: string; name: string }[]
+}) {
+  const shelf = unplaced.filter((asset) => asset.name.toLowerCase().includes(query))
+  return (
+    <div className="flex h-full gap-4">
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim">Unplaced</span>
+        <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto">
+          {shelf.map((asset) => (
+            <button
+              key={asset.id}
+              type="button"
+              onClick={() => void instantiateUnplaced(asset.id)}
+              className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
+            >
+              <div className="flex flex-1 items-center justify-center text-ink-dim">
+                <CubeIcon size={28} />
+              </div>
+              <span className="truncate text-[11px] text-ink">{asset.name}</span>
+            </button>
+          ))}
+          {shelf.length === 0 && (
+            <p className="self-center text-[12px] text-ink-dim">Generated people and props land here first.</p>
+          )}
+        </div>
+      </div>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <span className="mb-1 text-[10px] font-medium uppercase tracking-wide text-ink-dim">In this scene</span>
+        <div className="flex min-h-0 flex-1 gap-2 overflow-x-auto">
+          {placed.map((object) => (
+            <button
+              key={object.id}
+              type="button"
+              onClick={() => useEditorStore.getState().select(`obj:${object.id}`)}
+              className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
+            >
+              <div className="flex flex-1 items-center justify-center text-ink-dim">
+                <CubeIcon size={28} />
+              </div>
+              <span className="truncate text-[11px] text-ink">{object.name}</span>
+            </button>
+          ))}
+          {placed.length === 0 && (
+            <p className="self-center text-[12px] text-ink-dim">Nothing placed yet.</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EnvironmentPane({
+  canFal,
+  environments,
+  environmentId,
+}: {
+  canFal: boolean
+  environments: { id: string; name: string }[]
+  environmentId: string | null
+}) {
+  const photoRef = useRef<HTMLInputElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const sourceImage = useEnvironmentStore((s) => s.sourceImage)
+
+  return (
+    <div className="flex h-full gap-2">
+      <button
+        type="button"
+        disabled={!canFal}
+        onClick={() => photoRef.current?.click()}
+        className="flex h-full w-36 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3 disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 text-ink-dim">
+          <GlobeIcon size={22} />
+          <span className="text-[11px]">From photo</span>
+        </div>
+        <span className="truncate text-[11px] text-ink">TripoSplat</span>
+        <span className="truncate text-[10px] text-ink-dim">Set the scene palco</span>
+      </button>
+      <input
+        ref={photoRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (file) void generateEnvironmentFromPhoto(file)
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        className="flex h-full w-36 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
+      >
+        <div className="flex flex-1 flex-col items-center justify-center gap-1 text-ink-dim">
+          <ImportIcon size={22} />
+          <span className="text-[11px]">Import</span>
+        </div>
+        <span className="truncate text-[11px] text-ink">.ply / .splat</span>
+        <span className="truncate text-[10px] text-ink-dim">Library of this project</span>
+      </button>
+      <input
+        ref={fileRef}
+        type="file"
+        accept=".ply,.splat,application/octet-stream"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          e.target.value = ''
+          if (file) void importEnvironmentFile(file)
+        }}
+      />
+      {environments.map((environment) => (
+        <div key={environment.id} className="flex h-full w-36 shrink-0 flex-col rounded-xl bg-panel-2 p-2">
+          <button
+            type="button"
+            onClick={() => assignStoredEnvironment(environment.id)}
+            className={`min-h-0 flex-1 truncate rounded-md px-1 text-left text-[11px] hover:bg-panel-3 ${
+              environment.id === environmentId ? 'text-accent' : 'text-ink'
+            }`}
+          >
+            {environment.name}
+          </button>
+          <button
+            type="button"
+            className="text-[10px] text-ink-dim hover:text-ink"
+            onClick={() => deleteStoredEnvironment(environment.id)}
+          >
+            Delete
+          </button>
+        </div>
+      ))}
+      {environmentId && (
+        <button
+          type="button"
+          onClick={() => clearActiveEnvironment()}
+          className="self-center rounded-md px-2 py-1 text-[11px] text-ink-dim hover:bg-panel-3 hover:text-ink"
+        >
+          Clear environment
+        </button>
+      )}
+      {sourceImage && environmentId && (
+        <button
+          type="button"
+          onClick={() => {
+            const env = useEnvironmentStore.getState()
+            env.setFindPlaceMode('unplaced')
+            env.setFindOpen(true)
+          }}
+          className="self-center rounded-md bg-accent px-2 py-1 text-[11px] text-white hover:bg-accent/85"
+        >
+          Find objects…
+        </button>
+      )}
     </div>
   )
 }
@@ -307,5 +490,125 @@ function PrimitiveTile({ kind }: { kind: PrimitiveKind }) {
       </div>
       <span className="mt-auto truncate text-[11px] text-ink">{PRIMITIVE_DEFS[kind].label}</span>
     </button>
+  )
+}
+
+function FindObjectsPanel() {
+  const sourceImage = useEnvironmentStore((s) => s.sourceImage)
+  const findPlaceMode = useEnvironmentStore((s) => s.findPlaceMode)
+  const blocking = findPlaceMode === 'scene'
+  const [rows, setRows] = useState<FindRow[]>(() => (blocking ? (getSceneBlockSession()?.rows ?? []) : []))
+  const [busy, setBusy] = useState(false)
+
+  return (
+    <div className="panel absolute z-40 flex max-h-64 flex-col gap-2 p-3" style={{ right: 24, bottom: 220, width: 280 }}>
+      <div className="flex items-center justify-between">
+        <span className="text-[12px] font-semibold text-ink">{blocking ? 'Block this scene' : 'Find objects'}</span>
+        <button
+          type="button"
+          className="text-ink-dim hover:text-ink"
+          onClick={() => {
+            if (blocking) clearSceneBlockSession()
+            useEnvironmentStore.getState().setFindOpen(false)
+          }}
+        >
+          ×
+        </button>
+      </div>
+      <p className="text-[10px] text-ink-dim">
+        {blocking
+          ? 'Confirm uses these masks. Floor and walls stay in the splat.'
+          : 'People and props only. Floor and walls stay in the splat.'}
+      </p>
+      <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
+        {rows.map((row) => (
+          <div key={row.id} className="flex items-center gap-1">
+            <span className="w-14 shrink-0 text-[10px] uppercase text-ink-dim">{row.kind}</span>
+            <input
+              value={row.name}
+              onChange={(e) =>
+                setRows((current) => current.map((item) => (item.id === row.id ? { ...item, name: e.target.value } : item)))
+              }
+              className="min-w-0 flex-1 rounded bg-panel-2 px-1 py-0.5 text-[11px] text-ink outline-none"
+            />
+            <button type="button" className="text-[10px] text-ink-dim" onClick={() => setRows((current) => current.filter((item) => item.id !== row.id))}>
+              ×
+            </button>
+          </div>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {!blocking && (
+          <>
+            <button
+              type="button"
+              className="rounded bg-panel-2 px-2 py-1 text-[10px] text-ink hover:bg-panel-3"
+              onClick={() => setRows((current) => [...current, makeFindRow('person', 'Person')])}
+            >
+              + Person
+            </button>
+            <button
+              type="button"
+              className="rounded bg-panel-2 px-2 py-1 text-[10px] text-ink hover:bg-panel-3"
+              onClick={() => setRows((current) => [...current, makeFindRow('object', 'Object')])}
+            >
+              + Object
+            </button>
+            <button
+              type="button"
+              disabled={!sourceImage || busy}
+              className="rounded bg-panel-2 px-2 py-1 text-[10px] text-ink hover:bg-panel-3 disabled:opacity-40"
+              onClick={() => {
+                if (!sourceImage) return
+                setBusy(true)
+                void detectPeopleRows(sourceImage)
+                  .then((people) => setRows((current) => [...current, ...people]))
+                  .finally(() => setBusy(false))
+              }}
+            >
+              Detect people
+            </button>
+            <button
+              type="button"
+              disabled={!sourceImage || busy}
+              className="rounded bg-panel-2 px-2 py-1 text-[10px] text-ink hover:bg-panel-3 disabled:opacity-40"
+              onClick={() => {
+                if (!sourceImage) return
+                setBusy(true)
+                void detectObjectRows(sourceImage)
+                  .then((objects) => setRows((current) => [...current, ...objects]))
+                  .finally(() => setBusy(false))
+              }}
+            >
+              Detect objects
+            </button>
+            <button
+              type="button"
+              disabled={busy || rows.length === 0}
+              className="rounded bg-accent px-2 py-1 text-[10px] text-white disabled:opacity-40"
+              onClick={() => {
+                setBusy(true)
+                void approveFindRows(rows, sourceImage).finally(() => setBusy(false))
+              }}
+            >
+              Queue to Unplaced
+            </button>
+          </>
+        )}
+        {blocking && (
+          <button
+            type="button"
+            disabled={busy || rows.length === 0}
+            className="rounded bg-accent px-2 py-1 text-[10px] text-white disabled:opacity-40"
+            onClick={() => {
+              setBusy(true)
+              void commitSceneBlock(rows).finally(() => setBusy(false))
+            }}
+          >
+            Place in scene
+          </button>
+        )}
+      </div>
+    </div>
   )
 }

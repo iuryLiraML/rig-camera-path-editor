@@ -122,6 +122,21 @@ describe('viewportPick', () => {
     expect(preferTaggedHits(tagHits(stacked))[0]?.id).toBe('obj:a')
   })
 
+  it('lets clay objects win over the palco even when the env box is closer', () => {
+    const tagged = tagHits([
+      hit('env', 'env', 0.5),
+      hit('object', 'obj:box', 2),
+    ])
+    const ordered = preferTaggedHits(tagged)
+    expect(ordered[0]?.id).toBe('obj:box')
+    expect(ordered.some((item) => item.kind === 'env')).toBe(false)
+  })
+
+  it('selects the palco when nothing else interactive is on the ray', () => {
+    const tagged = tagHits([hit('env', 'env', 1), hit('path-line', 'path:a', 1.02)])
+    expect(preferTaggedHits(tagged)[0]?.kind).toBe('env')
+  })
+
   it('does not treat a lone spline hit as an orbit lock', () => {
     expect(hasInteractivePick([hit('path-line', 'path:a', 1)])).toBe(false)
     expect(hasInteractivePick([hit('object', 'obj:a', 1)])).toBe(true)

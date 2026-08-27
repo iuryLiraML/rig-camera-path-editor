@@ -90,10 +90,11 @@ export async function subscribe<T>(
 
 export const DATA_URI_LIMIT = 4_000_000
 
-/** GLBs must not take the data-URI path — base64 of a mesh freezes the editor. */
+/** GLBs / splats must not take the data-URI path — base64 of a mesh freezes the editor. */
 export function uploadUsesDataUri(file: File): boolean {
   if (file.size > DATA_URI_LIMIT) return false
   if (file.type === 'model/gltf-binary' || /\.glb$/i.test(file.name)) return false
+  if (/\.(ply|splat)$/i.test(file.name)) return false
   return true
 }
 
@@ -117,18 +118,26 @@ export async function fileToDataUri(file: File): Promise<string> {
   return `data:${type};base64,${btoa(chunks.join(''))}`
 }
 
-export async function uploadImage(file: File, signal?: AbortSignal): Promise<string> {
-  return uploadFile(file, signal)
+export async function uploadImage(
+  file: File,
+  signal?: AbortSignal,
+  opts?: { storage?: boolean },
+): Promise<string> {
+  return uploadFile(file, signal, opts)
 }
 
 /** GLB remesh uploads always go through Fal storage, never base64. */
-export async function uploadFile(file: File, signal?: AbortSignal): Promise<string> {
+export async function uploadFile(
+  file: File,
+  signal?: AbortSignal,
+  opts?: { storage?: boolean },
+): Promise<string> {
   if (!falUsable()) {
     throw new Error('Add your Fal API key in Settings first.')
   }
   throwIfAborted(signal)
   if (uploadImpl) return uploadImpl(file, signal)
-  if (uploadUsesDataUri(file)) return fileToDataUri(file)
+  if (!opts?.storage && uploadUsesDataUri(file)) return fileToDataUri(file)
   throwIfAborted(signal)
   return liveClient().storage.upload(file)
 }

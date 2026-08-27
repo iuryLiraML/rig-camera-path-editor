@@ -3,8 +3,8 @@ import type { Vec3AxisChannel } from '../lib/vec3Axes'
 import { VEC3_AXIS_LABELS } from '../lib/vec3Axes'
 
 /**
- * Lens channels shared by the timeline tracks and the graph editor. Path
- * position lives on the Camera track; pose / look-at axes are listed in
+ * Lens channels for the graph editor (and leftover timeline rows once keyed).
+ * Path position lives on the Position track; pose / look-at axes are listed in
  * CAMERA_AXIS_TRACKS so each dimension can be keyed on its own.
  */
 export interface CameraChannel {

@@ -100,7 +100,7 @@ export async function liftAttachedStill(opts: {
   const liftLabel = opts.kind === 'person' ? 'People — Lifting…' : `${fileStem} — Lifting…`
   const liftId = opts.beginLift(liftLabel, opts.kind)
   try {
-    const imageUrl = await uploadImage(file)
+    const imageUrl = await uploadImage(file, signal, { storage: true })
     const { glbUrls, boxes } = await runMaskThenLift({
       kind: opts.kind,
       prompt,
@@ -113,7 +113,7 @@ export async function liftAttachedStill(opts: {
     for (let i = 0; i < glbUrls.length; i++) {
       const glbUrl = glbUrls[i]
       if (!glbUrl) continue
-      const buffer = await downloadGlb(glbUrl)
+      const buffer = await downloadGlb(glbUrl, signal)
       const objectName =
         opts.kind === 'person' ? personObjectName(i, glbUrls.length) : fileStem
       const next = await opts.importBuffer(buffer, objectName)
@@ -141,7 +141,7 @@ export async function liftAttachedStill(opts: {
       opts.kind === 'person' && imported.length > 1
         ? `${imported.length} people as separate objects: ${ids}`
         : ids
-    return `Placed ${group} on the floor. Each figure is its own object — pose_object each id separately. Body pose comes from the photo. The chat photo stays attached — call this tool again if scale/pose is wrong. Do not invent XYZ. Do not pose other scene objects.`
+    return `Added to Unplaced: ${group}. Open My assets and instance each item — they stay on the shelf. Do not pose_object until they are in the scene. The chat photo stays attached — call this tool again to re-lift. Do not invent XYZ.`
   } catch (error) {
     opts.endLift(liftId)
     return `Error: ${error instanceof Error ? error.message : String(error)}`

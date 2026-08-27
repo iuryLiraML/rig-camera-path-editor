@@ -6,6 +6,7 @@ import { flushActiveProject } from './projects'
 import { isObjectKeyFocus } from './keyAtPlayhead'
 import { deletePoseKeyframeAtPlayhead } from './poseKeyframe'
 import { deleteKeyframeAtPlayhead, deleteSelectedTimelineKey } from './timelineKey'
+import { clearActiveEnvironment } from './environmentJobs'
 
 export function isTextEditing(): boolean {
   if (typeof document === 'undefined') return false
@@ -73,6 +74,14 @@ export function applyDeleteShortcut(
     } else {
       useSceneStore.getState().showNotice('The last camera cannot be deleted')
     }
+    return true
+  }
+
+  if (editor.selection === 'env' && !editor.playMode) {
+    clearActiveEnvironment()
+    editor.select(null)
+    editor.setObjectBarPanel('none')
+    useSceneStore.getState().showNotice('Environment cleared')
     return true
   }
 

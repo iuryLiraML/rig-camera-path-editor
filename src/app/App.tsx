@@ -37,7 +37,7 @@ import {
 } from '../lib/editorShortcuts'
 import { resetOrbitLock } from '../lib/orbitLock'
 import { applyTogglePlayback } from '../lib/playback'
-import { importDroppedModels, undoLastMeshRevision } from '../lib/sceneIO'
+import { importDroppedSceneFiles, undoLastMeshRevision } from '../lib/sceneIO'
 import { useProjectStore } from '../state/useProjectStore'
 import { resolveWorkspace } from './resolveWorkspace'
 import { ModeSwitcher } from '../ui/ModeSwitcher'
@@ -229,7 +229,6 @@ function KeepMounted({ show, children }: { show: boolean; children: ReactNode })
 function EditorWorkspace() {
   const notice = useSceneStore((s) => s.notice)
   const importing = useSceneStore((s) => s.importing)
-  const showNotice = useSceneStore((s) => s.showNotice)
   const playMode = useEditorStore((s) => s.playMode)
   const recording = useEditorStore((s) => s.recording)
   const recordingKind = useEditorStore((s) => s.recordingKind)
@@ -261,12 +260,7 @@ function EditorWorkspace() {
     setDragging(false)
     const files = [...e.dataTransfer.files]
     if (files.length === 0) return
-    const models = files.filter((f) => /\.(glb|gltf)$/i.test(f.name))
-    if (models.length === 0) {
-      showNotice('Unsupported file — drop a .glb or .gltf')
-      return
-    }
-    void importDroppedModels(models)
+    void importDroppedSceneFiles(files)
   }
 
   return (

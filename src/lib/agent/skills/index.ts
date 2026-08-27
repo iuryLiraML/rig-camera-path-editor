@@ -177,25 +177,45 @@ const dollyPush: AgentSkill = {
 const photoLift: AgentSkill = {
   name: 'photo-lift',
   description:
-    'Turn an attached still into clay people or a single prop. Import sits on the floor — do not invent placement.',
+    'Turn an attached still into clay people, a single prop, or the scene Location. Import sits on Unplaced — do not invent placement.',
   body: `# Photo lift
 
-The user attached a still in chat. Two tools, never one shared endpoint:
+The user attached a still in chat. Three tools, never one shared endpoint:
 
-- **People** → \`block_people_from_image\`. No extra arguments. Internal SAM 3.1 mask uses "person" and returns every instance; each instance is lifted with SAM 3D Body as **its own scene object** (Person 1, Person 2, …). One tool call — do not call it once per person.
-- The still stays attached. If the user says pose/retry/again, call \`block_people_from_image\` **again** (re-runs SAM 3.1). The new imports replace the last people lift.
+- **People** → \`block_people_from_image\`. No extra arguments. Internal SAM 3.1 mask uses "person" and returns every instance; each instance is lifted with SAM 3D Body onto **Unplaced** (Person 1, Person 2, …). One tool call — do not call it once per person.
+- The still stays attached. If the user says pose/retry/again, call \`block_people_from_image\` **again** (re-runs SAM 3.1).
 - **Prop** → \`generate_prop\` with a noun prompt (helmet, bottle, chair). Required.
+- **Location / palco / environment / room photo** → \`set_scene_environment\`. Same write as the Environment chip. Do not call generate_prop or Meshy on a whole room.
+- **Block the whole scene** from the photo → that is \`block_scene_from_image\` / skill scene-block, not this skill.
 
-After the tool returns object ids:
-- Each figure is already normalized (~2 units, y=0) and spaced on X. Do **not** invent XYZ unless the user asks to arrange them.
-- Call pose_object on **each returned id separately** if the user asks to move, rotate, or pose someone. Never pose leftover primitives.
-- pose_object position is feet on the floor. Do not copy bounds.center Y.
-- Body articulation is from the photo; pose_object cannot sit/stand/gesture a figure.
+After people or prop lifts:
+- Ids land on Unplaced. Do **not** pose_object those ids until the user instances them.
 - The 3D viewport / torus knot is the stage, not the still. Never refuse a lift because the stage already has a primitive.
 - Then build the camera move as usual (preset or path) and play_preview.
 
 Fail closed: if the tool says to add a Fal key or attach a photo, tell the user that
 in one sentence. Never claim a Generate tab or a visible segment tool exists.`,
+}
+
+const sceneBlock: AgentSkill = {
+  name: 'scene-block',
+  description:
+    'Block the attached still as palco + posed clay people/props. Propose a mask list; the user confirms Place in scene.',
+  body: `# Scene block
+
+The user attached a still and wants to **block this scene** (also: "block this shot", "quero blocar essa cena").
+
+Call \`block_scene_from_image\` **once**. No extra arguments. That tool:
+- Segments people and props (SAM 3.1) and opens the review list.
+- Does **not** lift, pose, or generate the palco yet.
+
+Then **stop**. The user edits the list and clicks **Place in scene**. Do not call:
+- \`generate_prop\`, \`block_people_from_image\`, \`set_scene_environment\`, or \`pose_object\`
+- especially not on the torus knot / primitives already in the scene
+
+One person or one named prop (helmet, chair) is **photo-lift**, not this skill.
+
+Fail closed: if the tool asks for a Fal key or a photo, say that in one sentence.`,
 }
 
 const setBlocking: AgentSkill = {
@@ -224,6 +244,7 @@ export const AGENT_SKILLS: AgentSkill[] = [
   orbitReveal,
   dollyPush,
   photoLift,
+  sceneBlock,
   setBlocking,
 ]
 
@@ -256,7 +277,7 @@ export function skillNameForPlan(plan: ShotPlan): string | null {
 export function skillBodiesForPlan(plan: ShotPlan, phase: 'object' | 'camera'): string {
   const names: string[] = []
   if (phase === 'object') {
-    names.push('photo-lift', 'set-blocking')
+    names.push('photo-lift', 'scene-block', 'set-blocking')
   } else {
     names.push('shot-grammar')
     const match = skillNameForPlan(plan)

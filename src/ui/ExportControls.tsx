@@ -7,6 +7,7 @@ import { Segmented } from './primitives'
 import { CameraIcon, ExportIcon } from './icons'
 
 export const EXPORT_PASSES: { value: ViewMode; label: string }[] = [
+  { value: 'look', label: 'Look' },
   { value: 'clay', label: 'Clay' },
   { value: 'depth', label: 'Depth' },
   { value: 'outline', label: 'Outline' },

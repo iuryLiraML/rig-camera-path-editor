@@ -11,6 +11,7 @@ beforeEach(() => {
     selection: 'cinema-camera',
     selectedKeyframe: null,
     objectBarPanel: 'none',
+    timelineGraph: false,
   })
   useSceneStore.setState({ objects: [], pendingLifts: [] })
   useRigStore.setState({
@@ -65,17 +66,18 @@ describe('insertKeyframeAtPlayhead', () => {
     expect(keys[0].value).toBeCloseTo(0.8, 5)
   })
 
-  it('writes a lookOffset Y key when that channel is focused', () => {
+  it('writes all Look Offset axes when that row is focused', () => {
     useRigStore.setState({
       lookOffset: [0, 1.2, 0],
       ...emptyVec3AxisKeyState(),
     })
-    useEditorStore.setState({ keyableFocus: 'lookOffsetY' })
+    useEditorStore.setState({ keyableFocus: 'lookOffsetY', timelineGraph: false })
     insertKeyframeAtPlayhead()
-    const keys = useRigStore.getState().lookOffsetYKeys
-    expect(keys).toHaveLength(1)
-    expect(keys[0].time).toBeCloseTo(0.4, 5)
-    expect(keys[0].value).toBeCloseTo(1.2, 5)
+    expect(useRigStore.getState().lookOffsetXKeys).toHaveLength(1)
+    expect(useRigStore.getState().lookOffsetYKeys).toHaveLength(1)
+    expect(useRigStore.getState().lookOffsetZKeys).toHaveLength(1)
+    expect(useRigStore.getState().lookOffsetYKeys[0].time).toBeCloseTo(0.4, 5)
+    expect(useRigStore.getState().lookOffsetYKeys[0].value).toBeCloseTo(1.2, 5)
   })
 
   it('writes all transform channels when an object is selected', () => {

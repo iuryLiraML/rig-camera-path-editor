@@ -251,3 +251,12 @@ export const EyeOffIcon = (p: IconProps) => (
     <path d="M3.2 3.2l9.6 9.6" />
   </svg>
 )
+
+export const GlobeIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="8" r="5.2" />
+    <path d="M8 2.8v10.4M2.8 8h10.4" />
+    <path d="M4.2 4.8c1.2 1.2 2.4 1.6 3.8 1.6s2.6-.4 3.8-1.6" />
+    <path d="M4.2 11.2c1.2-1.2 2.4-1.6 3.8-1.6s2.6.4 3.8 1.6" />
+  </svg>
+)
