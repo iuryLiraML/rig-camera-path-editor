@@ -28,7 +28,7 @@ import { usePathStore } from '../state/usePathStore'
 import { pickKindOf } from '../lib/viewportPick'
 import { isSceneEditing } from '../lib/workspaceChrome'
 import { writeObjectTransform } from '../lib/autoKey'
-import { useEditorStore } from '../state/useEditorStore'
+import { isObjectGizmoActive, useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneStore'
 import { GizmoControls } from './GizmoControls'
@@ -112,7 +112,7 @@ function ObjectGizmo({
 }
 
 function ObjectNode({ object }: { object: SceneObject }) {
-  const selected = useEditorStore((s) => s.selection === `obj:${object.id}`)
+  const objectContextActive = useEditorStore((s) => isObjectGizmoActive(s.selection, object.id))
   const selectedMember = useEditorStore((s) => s.selectionIds.includes(`obj:${object.id}`))
   const dummyBone = useEditorStore((s) => (s.selection === `obj:${object.id}` ? s.dummyBone : null))
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
@@ -389,7 +389,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
       >
         <primitive key={object.root.uuid} object={object.root} />
       </group>
-      {selected &&
+      {objectContextActive &&
         object.rigKind === 'dummy' &&
         editing &&
         !tech &&
@@ -405,7 +405,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
           }}
         />
       )}
-      {selected &&
+      {objectContextActive &&
         tool === 'select' &&
         object.rigKind === 'dummy' &&
         dummyBone &&
@@ -428,7 +428,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
             }}
           />
         )}
-      {selected && tool === 'select' && editing && !tech && !follow && !locked && !dummyBone && (
+      {objectContextActive && tool === 'select' && editing && !tech && !follow && !locked && !dummyBone && (
         <ObjectGizmo
           targetRef={groupRef}
           mode={gizmoMode}

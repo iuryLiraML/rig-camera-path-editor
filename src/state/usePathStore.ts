@@ -2,11 +2,11 @@ import { create } from 'zustand'
 import type { Vec3 } from './useSceneStore'
 import { computeAutoHandles, type TangentMode } from '../lib/curve'
 import {
-  clickAnchorSelection,
-  primaryAnchorId,
   transformAnchorsAroundPivot,
+  transformWorldAnchorSnapshots,
   translateAnchors,
   type AnchorPoseSnapshot,
+  type WorldAnchorPoseSnapshot,
 } from '../lib/anchorSelection'
 
 export interface PathAnchor {
@@ -27,6 +27,11 @@ export interface MotionPath {
   anchors: PathAnchor[]
   closed: boolean
   rounding: number
+}
+
+export interface AnchorRef {
+  pathId: string
+  anchorId: string
 }
 
 /** the camera's path always uses this fixed id within a project */
@@ -52,6 +57,9 @@ function makeCameraPath(): MotionPath {
 export interface PathState {
   paths: MotionPath[]
   activePathId: string
+  /** Ordered, path-qualified point selection; the final member is primary. */
+  selectedAnchorRefs: AnchorRef[]
+  primaryAnchorRef: AnchorRef | null
   selectedAnchorId: string | null
   /** Shift+click accumulates; last id is the primary (inspector / handles). */
   selectedAnchorIds: string[]
@@ -83,6 +91,14 @@ export interface PathState {
     quat: readonly [number, number, number, number]
     scale: Vec3
   }) => void
+  /** Apply one visual-space group pose and write results to every owning path. */
+  applyWorldAnchorGroupTransform: (args: {
+    snapshot: WorldAnchorPoseSnapshot[]
+    startPivot: Vec3
+    currentPivot: Vec3
+    quat: readonly [number, number, number, number]
+    scale: Vec3
+  }) => void
   setHandleOut: (id: string, handleOut: Vec3, mirror: boolean) => void
   setHandle: (id: string, which: 'in' | 'out', value: Vec3, breakMirror: boolean) => void
   setAnchorTangent: (id: string, mode: TangentMode) => void
@@ -96,6 +112,8 @@ export interface PathState {
   setAnchorHeight: (id: string, y: number) => void
   setAnchorsHeight: (ids: string[], y: number) => void
   autoSmoothAll: () => void
+  setSelectedAnchorRefs: (refs: readonly AnchorRef[]) => void
+  pruneSelectedAnchorRefs: (hiddenPathIds?: readonly string[]) => void
   selectAnchor: (id: string | null, additive?: boolean) => void
   selectHandle: (which: 'none' | 'in' | 'out') => void
   setDrawPlaneY: (y: number) => void
@@ -105,6 +123,35 @@ export interface PathState {
 export const selectCameraAnchorCount = (s: PathState) =>
   s.paths.find((p) => p.id === CAMERA_PATH_ID)?.anchors.length ?? 0
 
+function uniqueAnchorRefs(refs: readonly AnchorRef[]): AnchorRef[] {
+  const seen = new Set<string>()
+  return refs.filter((ref) => {
+    const key = `${ref.pathId}\u0000${ref.anchorId}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  }).map((ref) => ({ ...ref }))
+}
+
+function pointSelectionState(refs: readonly AnchorRef[]) {
+  const selectedAnchorRefs = uniqueAnchorRefs(refs)
+  const primaryAnchorRef = selectedAnchorRefs.at(-1) ?? null
+  const activePathId = primaryAnchorRef?.pathId
+  const selectedAnchorIds = activePathId
+    ? selectedAnchorRefs
+        .filter((ref) => ref.pathId === activePathId)
+        .map((ref) => ref.anchorId)
+    : []
+  return {
+    selectedAnchorRefs,
+    primaryAnchorRef,
+    selectedAnchorId: primaryAnchorRef?.anchorId ?? null,
+    selectedAnchorIds,
+    selectedHandle: 'none' as const,
+    ...(activePathId ? { activePathId } : {}),
+  }
+}
+
 export const usePathStore = create<PathState>((set, get) => {
   /** apply a mutation to the active path's anchors */
   const editActive = (fn: (p: MotionPath) => Partial<MotionPath>) =>
@@ -113,20 +160,21 @@ export const usePathStore = create<PathState>((set, get) => {
     }))
 
   const clearSelection = {
+    selectedAnchorRefs: [] as AnchorRef[],
+    primaryAnchorRef: null as AnchorRef | null,
     selectedAnchorId: null as string | null,
     selectedAnchorIds: [] as string[],
     selectedHandle: 'none' as const,
   }
 
-  const soleSelection = (id: string) => ({
-    selectedAnchorId: id,
-    selectedAnchorIds: [id],
-    selectedHandle: 'none' as const,
-  })
+  const soleSelection = (pathId: string, anchorId: string) =>
+    pointSelectionState([{ pathId, anchorId }])
 
   return {
     paths: [makeCameraPath()],
     activePathId: CAMERA_PATH_ID,
+    selectedAnchorRefs: [],
+    primaryAnchorRef: null,
     selectedAnchorId: null,
     selectedAnchorIds: [],
     selectedHandle: 'none',
@@ -149,10 +197,15 @@ export const usePathStore = create<PathState>((set, get) => {
       set((s) => {
         if (id === CAMERA_PATH_ID) return s // camera path is permanent
         const paths = s.paths.filter((p) => p.id !== id)
+        const nextSelection = pointSelectionState(
+          s.selectedAnchorRefs.filter((ref) => ref.pathId !== id),
+        )
         return {
           paths,
-          activePathId: s.activePathId === id ? CAMERA_PATH_ID : s.activePathId,
-          ...clearSelection,
+          activePathId:
+            nextSelection.primaryAnchorRef?.pathId ??
+            (s.activePathId === id ? CAMERA_PATH_ID : s.activePathId),
+          ...nextSelection,
         }
       }),
 
@@ -193,7 +246,7 @@ export const usePathStore = create<PathState>((set, get) => {
     addAnchor: (position) => {
       const anchor = makeAnchor(position)
       editActive((p) => ({ anchors: [...p.anchors, anchor] }))
-      set(soleSelection(anchor.id))
+      set(soleSelection(get().activePathId, anchor.id))
       return anchor.id
     },
 
@@ -204,7 +257,7 @@ export const usePathStore = create<PathState>((set, get) => {
         anchors.splice(Math.min(anchors.length, Math.max(0, index)), 0, anchor)
         return { anchors }
       })
-      set(soleSelection(anchor.id))
+      set(soleSelection(get().activePathId, anchor.id))
     },
 
     setPath: (positions, closed) => {
@@ -224,6 +277,31 @@ export const usePathStore = create<PathState>((set, get) => {
       editActive((p) => ({
         anchors: transformAnchorsAroundPivot(p.anchors, snapshot, startPivot, currentPivot, quat, scale),
       })),
+
+    applyWorldAnchorGroupTransform: ({ snapshot, startPivot, currentPivot, quat, scale }) =>
+      set((s) => {
+        const grouped = transformWorldAnchorSnapshots(
+          snapshot,
+          startPivot,
+          currentPivot,
+          quat,
+          scale,
+        )
+        return {
+          paths: s.paths.map((path) => {
+            const transformed = grouped.get(path.id)
+            if (!transformed) return path
+            const byId = new Map(transformed.map((anchor) => [anchor.id, anchor]))
+            return {
+              ...path,
+              anchors: path.anchors.map((anchor) => {
+                const next = byId.get(anchor.id)
+                return next ? { ...anchor, ...next } : anchor
+              }),
+            }
+          }),
+        }
+      }),
 
     setHandleOut: (id, handleOut, mirror) =>
       editActive((p) => ({
@@ -291,13 +369,16 @@ export const usePathStore = create<PathState>((set, get) => {
 
     removeAnchors: (ids) => {
       const drop = new Set(ids)
+      const activePathId = get().activePathId
       editActive((p) => ({ anchors: p.anchors.filter((a) => !drop.has(a.id)) }))
       set((s) => {
-        const selectedAnchorIds = s.selectedAnchorIds.filter((id) => !drop.has(id))
+        const selectedAnchorRefs = s.selectedAnchorRefs.filter(
+          (ref) => ref.pathId !== activePathId || !drop.has(ref.anchorId),
+        )
+        const next = pointSelectionState(selectedAnchorRefs)
         return {
-          selectedAnchorIds,
-          selectedAnchorId: primaryAnchorId(selectedAnchorIds),
-          selectedHandle: selectedAnchorIds.length === 0 ? 'none' : s.selectedHandle,
+          ...next,
+          selectedHandle: next.selectedAnchorRefs.length === 0 ? 'none' : s.selectedHandle,
         }
       })
     },
@@ -330,17 +411,41 @@ export const usePathStore = create<PathState>((set, get) => {
 
     autoSmoothAll: () => editActive((p) => ({ anchors: p.anchors.map((a) => ({ ...a, manual: false })) })),
 
+    setSelectedAnchorRefs: (refs) => set(pointSelectionState(refs)),
+
+    pruneSelectedAnchorRefs: (hiddenPathIds = []) =>
+      set((s) => {
+        const hidden = new Set(hiddenPathIds)
+        const available = new Map(
+          s.paths
+            .filter((path) => !hidden.has(path.id))
+            .map((path) => [path.id, new Set(path.anchors.map((anchor) => anchor.id))]),
+        )
+        return pointSelectionState(
+          s.selectedAnchorRefs.filter((ref) => available.get(ref.pathId)?.has(ref.anchorId)),
+        )
+      }),
+
     selectAnchor: (id, additive = false) => {
       if (id === null) {
         set(clearSelection)
         return
       }
-      const selectedAnchorIds = clickAnchorSelection(get().selectedAnchorIds, id, additive)
-      set({
-        selectedAnchorIds,
-        selectedAnchorId: primaryAnchorId(selectedAnchorIds),
-        selectedHandle: 'none',
-      })
+      const state = get()
+      const ref = { pathId: state.activePathId, anchorId: id }
+      const selected = state.selectedAnchorRefs.some(
+        (item) => item.pathId === ref.pathId && item.anchorId === ref.anchorId,
+      )
+      const refs = additive
+        ? selected
+          ? state.selectedAnchorRefs.filter(
+              (item) => item.pathId !== ref.pathId || item.anchorId !== ref.anchorId,
+            )
+          : [...state.selectedAnchorRefs, ref]
+        : selected && state.selectedAnchorRefs.length > 1
+          ? state.selectedAnchorRefs
+          : [ref]
+      set(pointSelectionState(refs))
     },
     selectHandle: (selectedHandle) => set({ selectedHandle }),
     setDrawPlaneY: (drawPlaneY) => set({ drawPlaneY }),

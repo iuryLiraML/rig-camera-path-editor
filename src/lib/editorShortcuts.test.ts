@@ -194,6 +194,9 @@ describe('shortcut handlers', () => {
       'Ctrl/Cmd+S',
       'Ctrl/Cmd+Z / Y',
     ])
+    expect(SHORTCUT_ROWS.find((row) => row.keys === 'Shift+drag')?.action).toBe(
+      'Lasso objects, curves, and enclosed curve anchor points; one point gizmo moves selected anchors together without selecting handles',
+    )
   })
 
   it('opens Compose Timeline on T', () => {

@@ -3,7 +3,13 @@ import * as THREE from 'three'
 import { Line } from '@react-three/drei'
 import { GizmoControls } from '../GizmoControls'
 import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
-import { centroidOf, snapshotAnchors } from '../../lib/anchorSelection'
+import {
+  centroidOf,
+  snapshotAnchors,
+  snapshotWorldAnchors,
+  worldAnchorPivot,
+  type WorldAnchorPoseSnapshot,
+} from '../../lib/anchorSelection'
 import { buildCurve, computeAutoHandles } from '../../lib/curve'
 import { useEditorOnly } from '../../lib/editorOnly'
 import { lockOrbit, unlockOrbit } from '../../lib/orbitLock'
@@ -16,8 +22,12 @@ import {
 import { useScreenScale } from '../../lib/screenScale'
 import { useShiftHeld } from '../../lib/useShiftHeld'
 import { isPathEditing, isPathStrokeTool, pathGuidesVisible } from '../../lib/workspaceChrome'
-import { useEditorStore, type GizmoMode } from '../../state/useEditorStore'
-import { usePathStore, type PathAnchor } from '../../state/usePathStore'
+import {
+  isPointGizmoActive,
+  useEditorStore,
+  type GizmoMode,
+} from '../../state/useEditorStore'
+import { usePathStore, type AnchorRef, type PathAnchor } from '../../state/usePathStore'
 import { useRigStore } from '../../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
 import { isTechMode } from '../RenderPasses'
@@ -133,6 +143,17 @@ function AnchorGizmo({ anchor, isFirst }: { anchor: PathAnchor; isFirst: boolean
   )
 }
 
+function SelectedAnchorMarker({ anchor }: { anchor: PathAnchor }) {
+  const ref = useRef<THREE.Mesh>(null)
+  useScreenScale(ref, 0.07)
+  return (
+    <mesh ref={ref} position={anchor.position} frustumCulled={false} raycast={ignoreRaycast}>
+      <boxGeometry args={[0.85, 0.85, 0.85]} />
+      <meshBasicMaterial color="#ffffff" depthTest={false} />
+    </mesh>
+  )
+}
+
 function HandleGizmo({ anchor, which }: { anchor: PathAnchor; which: 'in' | 'out' }) {
   const selected = usePathStore((s) => s.selectedHandle === which)
   const drag = useHorizontalDrag()
@@ -216,25 +237,43 @@ function activeAnchors() {
   return path.paths.find((item) => item.id === path.activePathId)?.anchors ?? []
 }
 
+function worldSelectionSnapshot(
+  refs: readonly AnchorRef[],
+): WorldAnchorPoseSnapshot[] {
+  const scene = pathScene()
+  return snapshotWorldAnchors(
+    scene.paths.map((path) => ({
+      pathId: path.id,
+      anchors: path.anchors,
+      parent: currentPathParentTransform(path.id, scene),
+    })),
+    refs,
+  )
+}
+
 /**
  * Same W/E/R TransformControls as scene objects. Sits on the selection
  * centroid (or a handle tip) and writes a snapshot-based group transform
  * so React's re-render cannot fight the gizmo mid-drag.
  */
-function PathTransformGizmo() {
+function PathTransformGizmo({ worldSpace }: { worldSpace: boolean }) {
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const selectedHandle = usePathStore((s) => s.selectedHandle)
   const selectedAnchorIds = usePathStore((s) => s.selectedAnchorIds)
   const selectedAnchorId = usePathStore((s) => s.selectedAnchorId)
+  const selectedAnchorRefs = usePathStore((s) => s.selectedAnchorRefs)
   const anchors = usePathStore((s) => s.paths.find((p) => p.id === s.activePathId)?.anchors ?? [])
+  useRigStore((s) => s.t)
   const shiftHeld = useShiftHeld()
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const gridSize = useEditorStore((s) => s.gridSize)
   const proxyRef = useRef<THREE.Group>(null)
   const dragging = useRef(false)
-  const groupDrag = useRef<{ snapshot: ReturnType<typeof snapshotAnchors>; startPivot: Vec3 } | null>(
-    null,
-  )
+  const groupDrag = useRef<
+    | { mode: 'local'; snapshot: ReturnType<typeof snapshotAnchors>; startPivot: Vec3 }
+    | { mode: 'world'; snapshot: WorldAnchorPoseSnapshot[]; startPivot: Vec3 }
+    | null
+  >(null)
   const selected = useMemo(() => {
     const wanted = new Set(selectedAnchorIds)
     return anchors.filter((anchor) => wanted.has(anchor.id))
@@ -257,6 +296,7 @@ function PathTransformGizmo() {
         primary.position[2] + primary.handleOut[2],
       ]
     }
+    if (worldSpace) return worldAnchorPivot(worldSelectionSnapshot(selectedAnchorRefs))
     return centroidOf(selected.map((anchor) => anchor.position))
   })()
 
@@ -271,27 +311,44 @@ function PathTransformGizmo() {
     proxy.position.set(target[0], target[1], target[2])
     proxy.quaternion.identity()
     proxy.scale.set(1, 1, 1)
-  }, [target[0], target[1], target[2], selectedHandle, selectedAnchorIds.join('|')])
+  }, [target[0], target[1], target[2], selectedHandle, selectedAnchorIds.join('|'), selectedAnchorRefs, worldSpace])
 
   const beginGroupDrag = () => {
     if (groupDrag.current) return
     const path = usePathStore.getState()
     if (path.selectedHandle !== 'none') return
+    if (worldSpace) {
+      const snapshot = worldSelectionSnapshot(path.selectedAnchorRefs)
+      if (snapshot.length === 0) return
+      groupDrag.current = {
+        mode: 'world',
+        snapshot,
+        startPivot: worldAnchorPivot(snapshot),
+      }
+      return
+    }
     const snapshot = snapshotAnchors(activeAnchors(), path.selectedAnchorIds)
     if (snapshot.length === 0) return
-    groupDrag.current = { snapshot, startPivot: centroidOf(snapshot.map((item) => item.position)) }
+    groupDrag.current = {
+      mode: 'local',
+      snapshot,
+      startPivot: centroidOf(snapshot.map((item) => item.position)),
+    }
   }
 
   const resetProxyIdle = () => {
     const proxy = proxyRef.current
     if (!proxy) return
     const path = usePathStore.getState()
-    const wanted = new Set(path.selectedAnchorIds)
-    const points = activeAnchors()
-      .filter((anchor) => wanted.has(anchor.id))
-      .map((anchor) => anchor.position)
-    const centroid = centroidOf(points)
-    proxy.position.set(centroid[0], centroid[1], centroid[2])
+    const selectedIds = new Set(path.selectedAnchorIds)
+    const pivot = worldSpace
+      ? worldAnchorPivot(worldSelectionSnapshot(path.selectedAnchorRefs))
+      : centroidOf(
+          activeAnchors()
+            .filter((anchor) => selectedIds.has(anchor.id))
+            .map((anchor) => anchor.position),
+        )
+    proxy.position.set(pivot[0], pivot[1], pivot[2])
     proxy.quaternion.identity()
     proxy.scale.set(1, 1, 1)
   }
@@ -339,13 +396,17 @@ function PathTransformGizmo() {
             beginGroupDrag()
             const drag = groupDrag.current
             if (!drag) return
-            path.applyAnchorGroupTransform({
-              snapshot: drag.snapshot,
+            const transform = {
               startPivot: drag.startPivot,
-              currentPivot: [proxy.position.x, proxy.position.y, proxy.position.z],
-              quat: [proxy.quaternion.x, proxy.quaternion.y, proxy.quaternion.z, proxy.quaternion.w],
-              scale: [proxy.scale.x, proxy.scale.y, proxy.scale.z],
-            })
+              currentPivot: [proxy.position.x, proxy.position.y, proxy.position.z] as Vec3,
+              quat: [proxy.quaternion.x, proxy.quaternion.y, proxy.quaternion.z, proxy.quaternion.w] as const,
+              scale: [proxy.scale.x, proxy.scale.y, proxy.scale.z] as Vec3,
+            }
+            if (drag.mode === 'world') {
+              path.applyWorldAnchorGroupTransform({ snapshot: drag.snapshot, ...transform })
+            } else {
+              path.applyAnchorGroupTransform({ snapshot: drag.snapshot, ...transform })
+            }
           }}
         />
       )}
@@ -362,37 +423,51 @@ export function InactivePaths() {
   const cameraKind = useRigStore((s) => s.cameraKind)
   const hiddenIds = useEditorStore((s) => s.hiddenIds)
   const selectionIds = useEditorStore((s) => s.selectionIds)
+  const selectedAnchorRefs = usePathStore((s) => s.selectedAnchorRefs)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const rootRef = useRef<THREE.Group>(null)
   useEditorOnly(rootRef)
 
-  const lines = useMemo(
+  const pathItems = useMemo(
     () =>
       paths
-        .filter((p) => p.id !== activePathId && p.anchors.length >= 2 && !hiddenIds.includes(`path:${p.id}`))
+        .filter((p) => p.id !== activePathId && !hiddenIds.includes(`path:${p.id}`))
         .map((p) => {
-          const curve = buildCurve(p.anchors, p.closed, p.rounding)
-          return curve ? { id: p.id, points: curve.getPoints(Math.max(64, p.anchors.length * 24)) } : null
-        })
-        .filter((x): x is { id: string; points: THREE.Vector3[] } => x !== null),
-    [paths, activePathId, hiddenIds],
+          const curve = p.anchors.length >= 2 ? buildCurve(p.anchors, p.closed, p.rounding) : null
+          const selectedIds = new Set(
+            selectedAnchorRefs
+              .filter((ref) => ref.pathId === p.id)
+              .map((ref) => ref.anchorId),
+          )
+          return {
+            id: p.id,
+            points: curve ? curve.getPoints(Math.max(64, p.anchors.length * 24)) : null,
+            selectedAnchors: p.anchors.filter((anchor) => selectedIds.has(anchor.id)),
+          }
+        }),
+    [paths, activePathId, hiddenIds, selectedAnchorRefs],
   )
 
-  if (!pathGuidesVisible(playMode, workspaceMode, cameraKind) || tech || lines.length === 0) return null
+  if (!pathGuidesVisible(playMode, workspaceMode, cameraKind) || tech || pathItems.length === 0) return null
 
   return (
     <group ref={rootRef} renderOrder={9}>
-      {lines.map((l) => (
-        <ParentSpaceGroup key={l.id} pathId={l.id}>
-          <Line
-            points={l.points}
-            color={selectionIds.includes(`path:${l.id}`) ? '#ffffff' : ACCENT}
-            lineWidth={selectionIds.includes(`path:${l.id}`) ? 2.5 : 1.5}
-            transparent
-            opacity={selectionIds.includes(`path:${l.id}`) ? 0.9 : 0.35}
-            depthTest={false}
-            raycast={ignoreRaycast}
-          />
+      {pathItems.map((item) => (
+        <ParentSpaceGroup key={item.id} pathId={item.id}>
+          {item.points && (
+            <Line
+              points={item.points}
+              color={selectionIds.includes(`path:${item.id}`) ? '#ffffff' : ACCENT}
+              lineWidth={selectionIds.includes(`path:${item.id}`) ? 2.5 : 1.5}
+              transparent
+              opacity={selectionIds.includes(`path:${item.id}`) ? 0.9 : 0.35}
+              depthTest={false}
+              raycast={ignoreRaycast}
+            />
+          )}
+          {item.selectedAnchors.map((anchor) => (
+            <SelectedAnchorMarker key={anchor.id} anchor={anchor} />
+          ))}
         </ParentSpaceGroup>
       ))}
     </group>
@@ -405,7 +480,12 @@ export function PathEditor() {
   const closed = active?.closed ?? false
   const rounding = active?.rounding ?? 0.8
   const selectedAnchorId = usePathStore((s) => s.selectedAnchorId)
+  const selectedAnchorRefs = usePathStore((s) => s.selectedAnchorRefs)
+  const primaryAnchorRef = usePathStore((s) => s.primaryAnchorRef)
   const tool = useEditorStore((s) => s.tool)
+  const pointContextActive = useEditorStore((s) =>
+    isPointGizmoActive(s.selection, primaryAnchorRef),
+  )
   const pathSelected = useEditorStore((s) =>
     active ? s.selectionIds.includes(`path:${active.id}`) : false,
   )
@@ -438,6 +518,8 @@ export function PathEditor() {
     return null
 
   const selected = resolved.find((a) => a.id === selectedAnchorId)
+  const selectedPathIds = new Set(selectedAnchorRefs.map((ref) => ref.pathId))
+  const multiPathSelection = selectedPathIds.size > 1
 
   // double-click on the curve inserts an anchor into the nearest segment
   const insertAt = (point: THREE.Vector3) => {
@@ -461,33 +543,43 @@ export function PathEditor() {
   }
 
   return (
-    <ParentSpaceGroup pathId={active!.id} renderOrder={10}>
-      {points && (
-        <group userData={{ pickKind: 'path-line', pickId: `path:${active!.id}` }}>
-          <Line
-            points={points}
-            color={pathSelected ? '#ffffff' : ACCENT}
-            lineWidth={pathSelected ? 2.75 : 2}
-            depthTest={false}
-            {...(isPathStrokeTool(tool) ? { raycast: ignoreRaycast } : {})}
-            onDoubleClick={(e) => {
-              if (isPathStrokeTool(tool)) return
-              e.stopPropagation()
-              insertAt(e.point)
-            }}
-          />
-        </group>
+    <>
+      <ParentSpaceGroup pathId={active!.id} renderOrder={10}>
+        {points && (
+          <group userData={{ pickKind: 'path-line', pickId: `path:${active!.id}` }}>
+            <Line
+              points={points}
+              color={pathSelected ? '#ffffff' : ACCENT}
+              lineWidth={pathSelected ? 2.75 : 2}
+              depthTest={false}
+              {...(isPathStrokeTool(tool) ? { raycast: ignoreRaycast } : {})}
+              onDoubleClick={(e) => {
+                if (isPathStrokeTool(tool)) return
+                e.stopPropagation()
+                insertAt(e.point)
+              }}
+            />
+          </group>
+        )}
+        {anchors.map((a, i) => (
+          <AnchorGizmo key={a.id} anchor={a} isFirst={i === 0} />
+        ))}
+        {pointContextActive && selected && (
+          <>
+            <HandleGizmo anchor={selected} which="in" />
+            <HandleGizmo anchor={selected} which="out" />
+          </>
+        )}
+      </ParentSpaceGroup>
+      {pointContextActive && !isPathStrokeTool(tool) && selectedAnchorId && (
+        multiPathSelection ? (
+          <PathTransformGizmo worldSpace />
+        ) : (
+          <ParentSpaceGroup pathId={active!.id} renderOrder={11}>
+            <PathTransformGizmo worldSpace={false} />
+          </ParentSpaceGroup>
+        )
       )}
-      {anchors.map((a, i) => (
-        <AnchorGizmo key={a.id} anchor={a} isFirst={i === 0} />
-      ))}
-      {selected && (
-        <>
-          <HandleGizmo anchor={selected} which="in" />
-          <HandleGizmo anchor={selected} which="out" />
-        </>
-      )}
-      {!isPathStrokeTool(tool) && selectedAnchorId && <PathTransformGizmo />}
-    </ParentSpaceGroup>
+    </>
   )
 }

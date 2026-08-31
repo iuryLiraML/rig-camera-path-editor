@@ -4,13 +4,22 @@ import { useThree } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import {
   appendLassoPoint,
-  collectLassoHits,
+  collectLassoResult,
+  projectPathAnchorsToPane,
   projectObjectToPane,
   samplePathToPane,
   type LassoCandidate,
+  type ProjectedAnchorCandidate,
   type ScreenPoint,
 } from '../lib/lasso'
-import { hasLassoDrag, shouldArmLasso } from '../lib/lassoGesture'
+import {
+  captureLassoSelectionSnapshot,
+  hasLassoDrag,
+  resolveLassoGestureFinish,
+  shouldArmLasso,
+  type LassoCancelReason,
+  type LassoSelectionSnapshot,
+} from '../lib/lassoGesture'
 import { lockOrbit, unlockOrbit } from '../lib/orbitLock'
 import { currentPathParentTransform } from '../lib/pathSpaceBind'
 import { tagHits } from '../lib/viewportPick'
@@ -30,6 +39,7 @@ interface Gesture {
   pointerId: number
   pane: Rect
   points: ScreenPoint[]
+  snapshot: LassoSelectionSnapshot
 }
 
 export function LassoSelection({
@@ -49,7 +59,20 @@ export function LassoSelection({
     const raycaster = new THREE.Raycaster()
     const ndc = new THREE.Vector2()
 
-    const finish = (complete: boolean) => {
+    const restoreSelection = (snapshot: LassoSelectionSnapshot) => {
+      usePathStore.getState().setSelectedAnchorRefs(snapshot.anchorRefs)
+      usePathStore.setState({ activePathId: snapshot.activePathId })
+      useEditorStore.setState({
+        selection: snapshot.selection,
+        selectionIds: [...snapshot.selectionIds],
+      })
+    }
+
+    const finish = (
+      outcome:
+        | { kind: 'complete' }
+        | { kind: 'cancel'; reason: LassoCancelReason },
+    ) => {
       const active = gesture.current
       if (!active) return
       gesture.current = null
@@ -57,7 +80,7 @@ export function LassoSelection({
       if (controls) controls.enabled = true
 
       const dragged = hasLassoDrag(active.points, DRAG_THRESHOLD)
-      if (complete && dragged) {
+      if (outcome.kind === 'complete' && dragged) {
         const camera = editorCameraRef.current
         if (camera) {
           camera.updateMatrixWorld(true)
@@ -65,6 +88,7 @@ export function LassoSelection({
           const sceneState = useSceneStore.getState()
           const pathState = usePathStore.getState()
           const candidates: LassoCandidate[] = []
+          const anchorCandidates: ProjectedAnchorCandidate[] = []
           if (editor.showSceneObjects) {
             for (const object of sceneState.objects) {
               if (editor.hiddenIds.includes(`obj:${object.id}`)) continue
@@ -86,22 +110,44 @@ export function LassoSelection({
           if (curvesVisible) {
             for (const path of pathState.paths) {
               if (editor.hiddenIds.includes(`path:${path.id}`)) continue
+              const parent = currentPathParentTransform(path.id, pathScene)
               candidates.push({
                 id: `path:${path.id}`,
                 points: samplePathToPane(
                   path,
                   camera,
                   active.pane,
-                  currentPathParentTransform(path.id, pathScene),
+                  parent,
                 ),
               })
+              anchorCandidates.push(
+                ...projectPathAnchorsToPane(path, camera, active.pane, parent),
+              )
             }
           }
-          editor.selectMany(collectLassoHits(active.points, candidates))
+          const result = collectLassoResult(active.points, candidates, anchorCandidates)
+          const resolution = resolveLassoGestureFinish(
+            active.snapshot,
+            {
+              kind: 'complete',
+              selectionIds: result
+                .filter((hit) => hit.kind === 'top-level')
+                .map((hit) => hit.id),
+              anchorRefs: result
+                .filter((hit) => hit.kind === 'anchor')
+                .map((hit) => hit.ref),
+            },
+          )
+          if (resolution.kind === 'apply') {
+            editor.selectMany(resolution.selectionIds, resolution.anchorRefs)
+          }
           completedRef.current = true
         }
-      } else if (complete) {
+      } else if (outcome.kind === 'complete') {
         useEditorStore.getState().select(null)
+      } else {
+        const resolution = resolveLassoGestureFinish(active.snapshot, outcome)
+        if (resolution.kind === 'restore') restoreSelection(resolution.snapshot)
       }
       onPoints([], null)
     }
@@ -146,7 +192,18 @@ export function LassoSelection({
       event.preventDefault()
       event.stopImmediatePropagation()
       const start = { x: x - pane.x, y: y - pane.y }
-      gesture.current = { pointerId: event.pointerId, pane, points: [start] }
+      const pathState = usePathStore.getState()
+      gesture.current = {
+        pointerId: event.pointerId,
+        pane,
+        points: [start],
+        snapshot: captureLassoSelectionSnapshot({
+          selection: editor.selection,
+          selectionIds: editor.selectionIds,
+          anchorRefs: pathState.selectedAnchorRefs,
+          activePathId: pathState.activePathId,
+        }),
+      }
       lockOrbit()
       if (controls) controls.enabled = false
       onPoints([start], pane)
@@ -166,14 +223,14 @@ export function LassoSelection({
 
     const onPointerUp = (event: PointerEvent) => {
       if (gesture.current?.pointerId !== event.pointerId) return
-      finish(true)
+      finish({ kind: 'complete' })
     }
     const onPointerCancel = (event: PointerEvent) => {
       if (gesture.current?.pointerId !== event.pointerId) return
-      finish(false)
+      finish({ kind: 'cancel', reason: 'pointercancel' })
     }
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') finish(false)
+      if (event.key === 'Escape') finish({ kind: 'cancel', reason: 'escape' })
     }
 
     element.addEventListener('pointerdown', onPointerDown, true)
@@ -187,7 +244,7 @@ export function LassoSelection({
       window.removeEventListener('pointerup', onPointerUp, true)
       window.removeEventListener('pointercancel', onPointerCancel, true)
       window.removeEventListener('keydown', onKeyDown)
-      finish(false)
+      finish({ kind: 'cancel', reason: 'teardown' })
     }
   }, [completedRef, controls, gl, onPoints, scene])
 

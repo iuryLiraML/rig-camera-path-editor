@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import {
+  captureLassoSelectionSnapshot,
   hasLassoDrag,
+  resolveLassoGestureFinish,
   shouldArmLasso,
   shouldSuppressMissedClick,
   type LassoGateInput,
@@ -62,5 +64,66 @@ describe('lasso gesture gate', () => {
         5,
       ),
     ).toBe(false)
+  })
+})
+
+describe('lasso selection transaction', () => {
+  const before = {
+    selection: 'camera-path' as const,
+    selectionIds: ['obj:subject', 'path:route-a'] as const,
+    anchorRefs: [
+      { pathId: 'route-a', anchorId: 'anchor-a' },
+      { pathId: 'route-b', anchorId: 'anchor-b' },
+    ] as const,
+    activePathId: 'route-b',
+  }
+
+  it.each(['escape', 'pointercancel', 'teardown'] as const)(
+    'restores the exact pre-gesture selection on %s',
+    (reason) => {
+      const snapshot = captureLassoSelectionSnapshot(before)
+      const resolution = resolveLassoGestureFinish(snapshot, {
+        kind: 'cancel',
+        reason,
+      })
+
+      expect(resolution).toEqual({ kind: 'restore', snapshot: before })
+      expect(resolution.kind === 'restore' && resolution.snapshot).not.toBe(before)
+      expect(resolution.kind === 'restore' && resolution.snapshot.selectionIds).not.toBe(
+        before.selectionIds,
+      )
+      expect(resolution.kind === 'restore' && resolution.snapshot.anchorRefs).not.toBe(
+        before.anchorRefs,
+      )
+    },
+  )
+
+  it('applies an intentional empty completion instead of restoring the snapshot', () => {
+    const resolution = resolveLassoGestureFinish(
+      captureLassoSelectionSnapshot(before),
+      { kind: 'complete', selectionIds: [], anchorRefs: [] },
+    )
+
+    expect(resolution).toEqual({
+      kind: 'apply',
+      selectionIds: [],
+      anchorRefs: [],
+    })
+  })
+
+  it('never mutates curve geometry while snapshotting, cancelling, or completing empty', () => {
+    const paths = [{
+      id: 'route-a',
+      anchors: [{ id: 'anchor-a', position: [1, 2, 3] }],
+    }]
+    const geometryBefore = structuredClone(paths)
+    const snapshot = captureLassoSelectionSnapshot(before)
+
+    resolveLassoGestureFinish(snapshot, { kind: 'cancel', reason: 'escape' })
+    resolveLassoGestureFinish(snapshot, { kind: 'cancel', reason: 'pointercancel' })
+    resolveLassoGestureFinish(snapshot, { kind: 'cancel', reason: 'teardown' })
+    resolveLassoGestureFinish(snapshot, { kind: 'complete', selectionIds: [], anchorRefs: [] })
+
+    expect(paths).toEqual(geometryBefore)
   })
 })

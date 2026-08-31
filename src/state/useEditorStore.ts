@@ -8,7 +8,7 @@ import {
 } from '../lib/compositionGuides'
 import { clampTimeView, FULL_TIME_VIEW, type TimeView } from '../lib/timeView'
 import { resetOrbitLock } from '../lib/orbitLock'
-import { usePathStore } from './usePathStore'
+import { usePathStore, type AnchorRef } from './usePathStore'
 import type { RigChannel } from './useRigStore'
 
 export type SelectedTimelineKey =
@@ -43,6 +43,16 @@ export type SelectableId =
   | `obj:${string}`
 
 export type SelectionMemberId = `obj:${string}` | `path:${string}`
+
+export const isObjectGizmoActive = (
+  selection: SelectableId | null,
+  objectId: string,
+) => selection === `obj:${objectId}`
+
+export const isPointGizmoActive = (
+  selection: SelectableId | null,
+  primaryAnchorRef: AnchorRef | null,
+) => selection === 'camera-path' && primaryAnchorRef !== null
 
 interface EditorState {
   tool: Tool
@@ -156,7 +166,7 @@ interface EditorState {
   setTool: (tool: Tool) => void
   setProjection: (projection: Projection) => void
   select: (id: SelectableId | null) => void
-  selectMany: (ids: SelectionMemberId[]) => void
+  selectMany: (ids: SelectionMemberId[], anchorRefs?: readonly AnchorRef[]) => void
   setDummyBone: (name: string | null) => void
   selectKeyframe: (key: SelectedTimelineKey | null) => void
   selectTimelineKey: (key: SelectedTimelineKey, id: SelectableId) => void
@@ -220,7 +230,7 @@ interface EditorState {
   toggleCompositionGuide: (id: CompositionGuideId) => void
 }
 
-export const useEditorStore = create<EditorState>((set) => ({
+export const useEditorStore = create<EditorState>((set, get) => ({
   tool: 'select',
   projection: 'perspective',
   selection: null,
@@ -311,15 +321,24 @@ export const useEditorStore = create<EditorState>((set) => ({
     // spline-point set, otherwise W/E/R stays glued to the last anchors.
     if (selection !== 'camera-path') usePathStore.getState().selectAnchor(null)
   },
-  selectMany: (ids) => {
+  selectMany: (ids, anchorRefs = []) => {
     const selectionIds = [...new Set(ids)]
     const active = selectionIds.at(-1) ?? null
-    if (active?.startsWith('path:')) {
+    if (anchorRefs.length > 0) {
+      usePathStore.getState().setSelectedAnchorRefs(anchorRefs)
+    } else if (active?.startsWith('path:')) {
       usePathStore.getState().setActivePath(active.slice(5))
+    } else {
+      usePathStore.getState().selectAnchor(null)
     }
-    usePathStore.getState().selectAnchor(null)
     const selection: SelectableId | null =
-      active === null ? null : active.startsWith('path:') ? 'camera-path' : active as `obj:${string}`
+      anchorRefs.length > 0
+        ? 'camera-path'
+        : active === null
+          ? null
+          : active.startsWith('path:')
+            ? 'camera-path'
+            : active as `obj:${string}`
     set({
       selectionIds,
       selection,
@@ -415,12 +434,20 @@ export const useEditorStore = create<EditorState>((set) => ({
         ? s.lockedIds.filter((locked) => locked !== id)
         : [...s.lockedIds, id],
     })),
-  toggleHidden: (id) =>
+  toggleHidden: (id) => {
     set((s) => ({
       hiddenIds: s.hiddenIds.includes(id)
         ? s.hiddenIds.filter((hidden) => hidden !== id)
         : [...s.hiddenIds, id],
-    })),
+    }))
+    if (id.startsWith('path:')) {
+      usePathStore.getState().pruneSelectedAnchorRefs(
+        get().hiddenIds
+          .filter((hidden) => hidden.startsWith('path:'))
+          .map((hidden) => hidden.slice(5)),
+      )
+    }
+  },
   setVisualizeMedia: (visualizeMedia) => set({ visualizeMedia }),
   setDirectorExpanded: (directorExpanded) => set({ directorExpanded }),
   toggleExportPass: (pass) =>

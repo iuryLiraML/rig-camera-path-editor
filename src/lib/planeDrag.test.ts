@@ -43,6 +43,16 @@ describe('snapVec3', () => {
 })
 
 describe('object mesh drag', () => {
+  it('preserves Shift-drag mesh lifting without starting a ground move', () => {
+    const mode = objectDragMode(true)
+    const plane = objectDragPlane([3, 2, 7], [0.6, -0.2, 0.8], mode)
+    const next = applyObjectDrag([9, 6, 11], [-1, 0.5, 2], [3, 2, 7], mode)
+
+    expect(mode).toBe('lift')
+    expect(plane.normal[1]).toBe(0)
+    expect(next).toEqual([3, 6.5, 7])
+  })
+
   it('uses the floor unless Shift lifts on Y', () => {
     expect(objectDragMode(false)).toBe('ground')
     expect(objectDragMode(true)).toBe('lift')

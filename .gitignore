@@ -2,6 +2,8 @@
 # Dependencies & build output
 node_modules/
 dist/
+build/
+coverage/
 *.tsbuildinfo
 
 # Secrets / real env — NEVER commit. Templates (*.example) ARE tracked.
@@ -33,5 +35,9 @@ tmp-figure/
 # Logs & OS cruft
 *.log
 npm-debug.log*
+*.tmp
+*.swp
 .DS_Store
 Thumbs.db
+.vscode/
+.idea/

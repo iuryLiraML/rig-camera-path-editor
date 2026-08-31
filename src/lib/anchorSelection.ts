@@ -1,6 +1,12 @@
 import * as THREE from 'three'
-import type { Vec3 } from '../state/useSceneStore'
-import type { PathAnchor } from '../state/usePathStore'
+import type { Transform, Vec3 } from '../state/useSceneStore'
+import type { AnchorRef, PathAnchor } from '../state/usePathStore'
+import {
+  localDirToWorld,
+  localPointToWorld,
+  worldDirToLocal,
+  worldPointToLocal,
+} from './pathSpace'
 
 const _q = new THREE.Quaternion()
 const _v = new THREE.Vector3()
@@ -10,6 +16,20 @@ export type AnchorPoseSnapshot = {
   position: Vec3
   handleIn: Vec3
   handleOut: Vec3
+}
+
+export interface WorldPathAnchors {
+  pathId: string
+  anchors: readonly PathAnchor[]
+  parent: Transform | null
+}
+
+export interface WorldAnchorPoseSnapshot {
+  ref: AnchorRef
+  worldPosition: Vec3
+  worldHandleIn: Vec3
+  worldHandleOut: Vec3
+  parent: Transform | null
 }
 
 /** Replace the selection with one id, or clear it. */
@@ -83,10 +103,101 @@ export function centroidOf(points: readonly Vec3[]): Vec3 {
   return [x / n, y / n, z / n]
 }
 
+function cloneTransform(transform: Transform | null): Transform | null {
+  if (!transform) return null
+  return {
+    position: [...transform.position] as Vec3,
+    rotation: [...transform.rotation] as Vec3,
+    scale: [...transform.scale] as Vec3,
+  }
+}
+
+/** Captures immutable world-space drag-start poses in reference order. */
+export function snapshotWorldAnchors(
+  paths: readonly WorldPathAnchors[],
+  refs: readonly AnchorRef[],
+): WorldAnchorPoseSnapshot[] {
+  const byPath = new Map(paths.map((path) => [path.pathId, path]))
+  const snapshots: WorldAnchorPoseSnapshot[] = []
+  for (const ref of refs) {
+    const path = byPath.get(ref.pathId)
+    const anchor = path?.anchors.find((candidate) => candidate.id === ref.anchorId)
+    if (!path || !anchor) continue
+    const parent = cloneTransform(path.parent)
+    snapshots.push({
+      ref: { ...ref },
+      worldPosition: parent
+        ? localPointToWorld(anchor.position, parent)
+        : [...anchor.position] as Vec3,
+      worldHandleIn: parent
+        ? localDirToWorld(anchor.handleIn, parent)
+        : [...anchor.handleIn] as Vec3,
+      worldHandleOut: parent
+        ? localDirToWorld(anchor.handleOut, parent)
+        : [...anchor.handleOut] as Vec3,
+      parent,
+    })
+  }
+  return snapshots
+}
+
+export function worldAnchorPivot(snapshot: readonly WorldAnchorPoseSnapshot[]): Vec3 {
+  return centroidOf(snapshot.map((anchor) => anchor.worldPosition))
+}
+
 function rotateScaleOffset(offset: Vec3, quat: THREE.Quaternion, scale: Vec3): Vec3 {
   _v.set(offset[0] * scale[0], offset[1] * scale[1], offset[2] * scale[2])
   _v.applyQuaternion(quat)
   return [_v.x, _v.y, _v.z]
+}
+
+/**
+ * Applies one visual-space pose to immutable snapshots, then groups local-space
+ * results by owning path for atomic path updates.
+ */
+export function transformWorldAnchorSnapshots(
+  snapshot: readonly WorldAnchorPoseSnapshot[],
+  startPivot: Vec3,
+  currentPivot: Vec3,
+  quat: readonly [number, number, number, number],
+  scale: Vec3,
+): Map<string, AnchorPoseSnapshot[]> {
+  const grouped = new Map<string, AnchorPoseSnapshot[]>()
+  _q.set(quat[0], quat[1], quat[2], quat[3])
+  for (const anchor of snapshot) {
+    const offset = rotateScaleOffset(
+      [
+        anchor.worldPosition[0] - startPivot[0],
+        anchor.worldPosition[1] - startPivot[1],
+        anchor.worldPosition[2] - startPivot[2],
+      ],
+      _q,
+      scale,
+    )
+    const worldPosition: Vec3 = [
+      currentPivot[0] + offset[0],
+      currentPivot[1] + offset[1],
+      currentPivot[2] + offset[2],
+    ]
+    const worldHandleIn = rotateScaleOffset(anchor.worldHandleIn, _q, scale)
+    const worldHandleOut = rotateScaleOffset(anchor.worldHandleOut, _q, scale)
+    const result: AnchorPoseSnapshot = {
+      id: anchor.ref.anchorId,
+      position: anchor.parent
+        ? worldPointToLocal(worldPosition, anchor.parent)
+        : worldPosition,
+      handleIn: anchor.parent
+        ? worldDirToLocal(worldHandleIn, anchor.parent)
+        : worldHandleIn,
+      handleOut: anchor.parent
+        ? worldDirToLocal(worldHandleOut, anchor.parent)
+        : worldHandleOut,
+    }
+    const pathResults = grouped.get(anchor.ref.pathId)
+    if (pathResults) pathResults.push(result)
+    else grouped.set(anchor.ref.pathId, [result])
+  }
+  return grouped
 }
 
 /**
