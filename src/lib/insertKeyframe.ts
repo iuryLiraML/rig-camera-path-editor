@@ -12,17 +12,40 @@ import {
   insertVec3GroupAt,
   selectRigKeyAtTime,
 } from './timelineKey'
-import { VEC3_AXIS_CHANNELS, VEC3_GROUP_LABELS } from './vec3Axes'
+import { VEC3_AXIS_CHANNELS, VEC3_GROUP_LABELS, type Vec3GroupId } from './vec3Axes'
 import { requestPersistFlush } from './persistFlush'
 import { keysForObjectChannel, OBJECT_CHANNEL_LABELS, type ValueKey } from './keyframes'
 import { useEditorStore } from '../state/useEditorStore'
 import { CHANNEL_FIELD, useRigStore } from '../state/useRigStore'
 import { useSceneStore } from '../state/useSceneStore'
 
+function isTrackingLookAt(): boolean {
+  const id = useRigStore.getState().targetObjectId
+  if (!id) return false
+  return useSceneStore.getState().objects.some((object) => object.id === id)
+}
+
+/** Look-At / Offset under I — the target handle, or a focused Look row. */
+export function lookAtKeyGroup(): Vec3GroupId | null {
+  const editor = useEditorStore.getState()
+  const grouped = groupedTimelineVec3(editor.keyableFocus)
+  if (grouped === 'target' || grouped === 'lookOffset') return grouped
+  if (editor.selection === 'target') return isTrackingLookAt() ? 'lookOffset' : 'target'
+  return null
+}
+
 export function insertKeyframeAtPlayhead() {
   const editor = useEditorStore.getState()
   const rig = useRigStore.getState()
   rig.setPlaying(false)
+
+  const lookAt = lookAtKeyGroup()
+  if (lookAt && !editor.timelineGraph) {
+    insertVec3GroupAt(lookAt)
+    selectRigKeyAtTime(VEC3_AXIS_CHANNELS[lookAt][0], rig.t)
+    useSceneStore.getState().showNotice(`Keyframe set (${VEC3_GROUP_LABELS[lookAt]})`)
+    return
+  }
 
   if (!editor.keyableFocus && !editor.selection?.startsWith('obj:') && rig.cameraKind === 'static') {
     const anyAxis = KEY_CHANNELS.some((channel) => {
@@ -35,6 +58,18 @@ export function insertKeyframeAtPlayhead() {
       useSceneStore.getState().showNotice('Keyframe set (Position)')
       return
     }
+  }
+
+  if (
+    !editor.keyableFocus &&
+    !editor.selection?.startsWith('obj:') &&
+    rig.cameraKind === 'path' &&
+    rig.lookAtMode === 'free'
+  ) {
+    insertVec3GroupAt('staticRot')
+    selectRigKeyAtTime('staticRotX', rig.t)
+    useSceneStore.getState().showNotice(`Keyframe set (${VEC3_GROUP_LABELS.staticRot})`)
+    return
   }
 
   const grouped = groupedTimelineVec3(editor.keyableFocus)

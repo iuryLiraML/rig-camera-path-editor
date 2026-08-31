@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { consumeLiftAttachment, getLiftAttachment, setLiftAttachment } from './attachment'
-import { configureFal, resetFalForTests, setFalTransportForTests } from './client'
-import { requireModelGlb } from './files'
-import { generateFromImage, generateFromText } from './generate3d'
+import { configureFal, falErrorMessage, resetFalForTests, setFalTransportForTests } from './client'
+import { falSplatFile, requireModelGlb } from './files'
+import { generateFromImage, generateFromText, stillForMeshy } from './generate3d'
 import { liftPerson, liftPersonDetailed, liftProp, liftPropDetailed } from './lift'
 import {
   GENERATE_FACE_LIMIT,
@@ -23,7 +23,7 @@ import { makeFixtureSplatPly } from '../environment'
 import { alignBodyToImage } from './samAlign'
 import { animatePersonWithMeshy, MESHY_CURATED_CLIPS } from './meshyAnimation'
 import { liftAttachedStill, runMaskThenLift } from './pipeline'
-import { remeshGlb } from './remesh'
+import { remeshFaceLimit, remeshGlb, TRIPO_REMESH_FACE_MAX, TRIPO_REMESH_FACE_MIN } from './remesh'
 import { segmentImage, segmentImageWithFallback } from './segment'
 
 function fakeGlbBytes(): Uint8Array {
@@ -35,6 +35,19 @@ function fakeGlbBytes(): Uint8Array {
 afterEach(() => {
   resetFalForTests()
   consumeLiftAttachment()
+})
+
+describe('falErrorMessage', () => {
+  it('reads Fal validation detail from a non-Error payload', () => {
+    expect(
+      falErrorMessage({
+        status: 422,
+        body: { detail: [{ loc: ['body', 'num_gaussians'], msg: 'Input should be less than or equal to 262144' }] },
+      }),
+    ).toMatch(/262144/)
+    expect(falErrorMessage({ body: { detail: 'NSFW content detected' } })).toBe('NSFW content detected')
+    expect(falErrorMessage({}, 'Environment generate failed')).toBe('Environment generate failed')
+  })
 })
 
 describe('segmentImage', () => {
@@ -63,6 +76,24 @@ describe('segmentImage', () => {
     expect(calls[0]?.input.return_multiple_masks).toBe(true)
     expect(calls[0]?.input.max_masks).toBe(8)
     expect(calls[0]?.input.include_boxes).toBe(true)
+  })
+
+  it('lets scene block raise the mask cap', async () => {
+    const calls: { input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (_modelId, input) => {
+        calls.push({ input })
+        return { masks: [{ url: 'https://cdn.example/mask.png' }] }
+      },
+    })
+    await segmentImage({
+      version: '3.1',
+      imageUrl: 'https://photo',
+      prompt: 'table',
+      maxMasks: 32,
+    })
+    expect(calls[0]?.input.max_masks).toBe(32)
   })
 
   it('returns every SAM mask, not only the first person', async () => {
@@ -167,7 +198,7 @@ describe('lift', () => {
         image_url: 'https://photo',
         mask_urls: ['https://mask'],
         prompt: 'helmet',
-        export_textured_glb: false,
+        export_textured_glb: true,
       },
     })
   })
@@ -189,6 +220,25 @@ describe('lift', () => {
       export_meshes: false,
       include_3d_keypoints: false,
       include_mhr_params: false,
+    })
+  })
+
+  it('asks 3d-objects for a textured GLB from a noun without a 3.1 mask', async () => {
+    const calls: Record<string, unknown>[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (_modelId, input) => {
+        calls.push(input)
+        return { model_glb: { url: 'https://cdn.example/chair.glb' } }
+      },
+    })
+    await expect(liftProp({ imageUrl: 'https://photo', prompt: 'chair' })).resolves.toBe(
+      'https://cdn.example/chair.glb',
+    )
+    expect(calls[0]).toEqual({
+      image_url: 'https://photo',
+      prompt: 'chair',
+      export_textured_glb: true,
     })
   })
 
@@ -260,6 +310,48 @@ describe('align', () => {
         body_mesh_url: 'https://body.glb',
         body_mask_url: 'https://mask',
       },
+    })
+  })
+
+  it('sends the first object mesh so body lands in the objects frame', async () => {
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { metadata: { scale_factor: 0.8, translation: [0, 0, 0] } }
+      },
+    })
+    await alignBodyToImage({
+      imageUrl: 'https://photo',
+      bodyMeshUrl: 'https://body.glb',
+      bodyMaskUrl: 'https://mask',
+      objectMeshUrl: 'https://chair.glb',
+      focalLength: 1200,
+    })
+    expect(calls[0]?.input).toMatchObject({
+      object_mesh_url: 'https://chair.glb',
+      focal_length: 1200,
+    })
+  })
+
+  it('returns scene_glb when Fal includes the combined scene', async () => {
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async () => ({
+        model_glb: { url: 'https://cdn.example/aligned.glb' },
+        scene_glb: { url: 'https://cdn.example/scene.glb' },
+      }),
+    })
+    await expect(
+      alignBodyToImage({
+        imageUrl: 'https://photo',
+        bodyMeshUrl: 'https://body.glb',
+        objectMeshUrl: 'https://chair.glb',
+      }),
+    ).resolves.toMatchObject({
+      glbUrl: 'https://cdn.example/aligned.glb',
+      sceneGlbUrl: 'https://cdn.example/scene.glb',
     })
   })
 })
@@ -487,6 +579,15 @@ describe('requireModelGlb', () => {
       requireModelGlb({ model_mesh: { url: 'https://a.ply', file_name: 'room.ply' } }, 'triposplat'),
     ).toThrow(/Gaussian splat/)
   })
+
+  it('picks a splat file over a PNG placeholder on the same payload', () => {
+    expect(
+      falSplatFile({
+        model_mesh: { url: 'https://cdn.example/z.png', file_name: 'z.png' },
+        model_urls: { ply: { url: 'https://cdn.example/room.ply', file_name: 'room.ply' } },
+      }),
+    ).toEqual({ url: 'https://cdn.example/room.ply', file_name: 'room.ply' })
+  })
 })
 
 describe('generateFromText', () => {
@@ -524,6 +625,16 @@ describe('generateFromText', () => {
   })
 })
 
+describe('stillForMeshy', () => {
+  it('accepts JPEG and PNG and refuses WebP', () => {
+    expect(stillForMeshy(new File([new Uint8Array([1])], 'a.jpg', { type: 'image/jpeg' })).name).toBe('a.jpg')
+    expect(stillForMeshy(new File([new Uint8Array([1])], 'a.png', { type: 'image/png' })).name).toBe('a.png')
+    expect(() => stillForMeshy(new File([new Uint8Array([1])], 'a.webp', { type: 'image/webp' }))).toThrow(
+      /JPEG or PNG/,
+    )
+  })
+})
+
 describe('generateFromImage', () => {
   it('calls Meshy v7 without texture or PBR and remeshes to triangles', async () => {
     const calls: { modelId: string; input: Record<string, unknown> }[] = []
@@ -541,16 +652,47 @@ describe('generateFromImage', () => {
     expect(calls[0]?.input).toMatchObject({
       image_url: 'https://photo',
       should_texture: false,
-      enable_pbr: false,
       should_remesh: true,
       target_polycount: MESHY_TARGET_POLYCOUNT,
       topology: 'triangle',
     })
+    // Meshy 422s: enable_pbr is only valid when should_texture is true.
+    expect(calls[0]?.input).not.toHaveProperty('enable_pbr')
+  })
+})
+
+describe('remeshFaceLimit', () => {
+  it('keeps half the source faces and clamps to the Fal remesh range', () => {
+    expect(remeshFaceLimit(8_000)).toBe(4_000)
+    expect(remeshFaceLimit(400_000)).toBe(TRIPO_REMESH_FACE_MAX)
+    expect(remeshFaceLimit(100)).toBe(TRIPO_REMESH_FACE_MIN)
   })
 })
 
 describe('remeshGlb', () => {
-  it('calls Tripo remesh without quad, bake, or a face_limit', async () => {
+  it('prefers the explicit GLB variant over a non-GLB model_mesh', async () => {
+    configureFal('key-test')
+    setFalTransportForTests({
+      subscribe: async () => ({
+        model_mesh: {
+          url: 'https://cdn.example/remesh-preview.png',
+          file_name: 'remesh-preview.png',
+        },
+        model_urls: {
+          glb: {
+            url: 'https://cdn.example/remeshed-boat.glb',
+            file_name: 'remeshed-boat.glb',
+          },
+        },
+      }),
+    })
+
+    await expect(remeshGlb({ meshUrl: 'https://source.glb' })).resolves.toBe(
+      'https://cdn.example/remeshed-boat.glb',
+    )
+  })
+
+  it('calls Tripo remesh with triangles, no quad/bake, and a face_limit', async () => {
     const calls: { modelId: string; input: Record<string, unknown> }[] = []
     configureFal('key-test')
     setFalTransportForTests({
@@ -561,8 +703,14 @@ describe('remeshGlb', () => {
     })
     await expect(remeshGlb({ meshUrl: 'https://source.glb' })).resolves.toBe('https://retopo.glb')
     expect(calls[0]?.modelId).toBe(TRIPO_REMESH)
-    expect(calls[0]?.input).toEqual({ mesh_url: 'https://source.glb', quad: false, bake: false })
-    expect(calls[0]?.input).not.toHaveProperty('face_limit')
+    expect(calls[0]?.input).toEqual({
+      mesh_url: 'https://source.glb',
+      quad: false,
+      bake: false,
+      face_limit: TRIPO_REMESH_FACE_MAX,
+    })
+    await remeshGlb({ meshUrl: 'https://source.glb', sourceTriangles: 8_000 })
+    expect(calls[1]?.input.face_limit).toBe(4_000)
   })
 
   it('asks Fal for runner logs so remesh can show real progress', async () => {
@@ -582,10 +730,12 @@ describe('remeshGlb', () => {
 describe('generateTripoSplat', () => {
   it('requests ply and downloads binary splat bytes', async () => {
     const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    const optsSeen: Array<{ logs?: boolean } | undefined> = []
     configureFal('key-test')
     setFalTransportForTests({
-      subscribe: async (modelId, input) => {
+      subscribe: async (modelId, input, opts) => {
         calls.push({ modelId, input })
+        optsSeen.push(opts)
         return { model_mesh: { url: 'https://cdn.example/room.ply', file_name: 'room.ply' } }
       },
     })
@@ -598,6 +748,7 @@ describe('generateTripoSplat', () => {
       expect(calls[0]?.input.output_format).toBe('ply')
       expect(calls[0]?.input.num_gaussians).toBe(TRIPO_SPLAT_GAUSSIANS)
       expect(calls[0]?.input.image_url).toBe('https://photo')
+      expect(optsSeen[0]?.logs).toBe(true)
       expect(result.fileName).toBe('room.ply')
       expect(result.format).toBe('ply')
       expect(result.buffer.byteLength).toBe(ply.byteLength)

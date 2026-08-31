@@ -12,6 +12,7 @@ import {
 } from './mp4Encode'
 import { renderBridge } from './renderBridge'
 import { normalizeShotFps, shotFrameCount } from './timeView'
+import { applyAssetDisplay, type AssetDisplayContext } from './assetDisplay'
 
 /** output dimensions per aspect × resolution preset (all even, H.264-safe) */
 export function exportDimensions(
@@ -48,6 +49,12 @@ function resolvePasses(): ViewMode[] {
   return editor.exportPasses.length > 0 ? [...editor.exportPasses] : [editor.viewMode]
 }
 
+function applyOfflineAssetDisplay(viewMode: ViewMode, context: AssetDisplayContext) {
+  for (const object of useSceneStore.getState().objects) {
+    applyAssetDisplay(object, viewMode, context)
+  }
+}
+
 /**
  * Enters the deterministic offline-render environment (play mode, exact output
  * size via the canvas container, manual frame loop). Returns a restore fn.
@@ -64,6 +71,7 @@ async function setupOffline(preserveT: boolean, kind: 'video' | 'still' = 'video
   editor.setPlayMode(true)
   rig.setPlaying(false)
   if (!preserveT) rig.setT(0)
+  applyOfflineAssetDisplay(editor.viewMode, 'export')
 
   // resize the canvas CONTAINER to the output size — R3F's resize observer
   // follows it (overriding state.setSize directly gets stomped by that observer)
@@ -80,6 +88,7 @@ async function setupOffline(preserveT: boolean, kind: 'video' | 'still' = 'video
     r.setT(preserveT ? prev.t : 0)
     const ed = useEditorStore.getState()
     ed.setViewMode(prev.viewMode)
+    applyOfflineAssetDisplay(prev.viewMode, 'live')
     ed.setPlayMode(false)
     ed.setRecording(false)
     ed.setRecordProgress(NaN)
@@ -125,6 +134,7 @@ export async function encodePassVideos(): Promise<EncodedPass[] | null> {
     for (let p = 0; p < passes.length && !cancelled && !encodeError; p++) {
       const pass = passes[p]
       useEditorStore.getState().setViewMode(pass)
+      applyOfflineAssetDisplay(pass, 'export')
       await sleep(80)
 
       const muxer = new Muxer({
@@ -248,6 +258,7 @@ export async function exportFrame() {
     for (let p = 0; p < passes.length && !cancelled; p++) {
       const pass = passes[p]
       useEditorStore.getState().setViewMode(pass)
+      applyOfflineAssetDisplay(pass, 'export')
       await sleep(80)
       advance(performance.now())
       ctx.drawImage(canvas, 0, 0, width, height)

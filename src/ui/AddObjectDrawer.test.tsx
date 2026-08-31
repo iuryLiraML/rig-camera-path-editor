@@ -5,6 +5,7 @@ import { NO_SERVER_KEYS } from '../lib/agent/serverKeys'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
+import { useSceneStore } from '../state/useSceneStore'
 import { AddObjectDrawer } from './AddObjectDrawer'
 
 beforeEach(() => {
@@ -16,6 +17,7 @@ afterEach(() => {
   cleanup()
   useAgentStore.setState({ falKey: '', serverKeys: NO_SERVER_KEYS })
   useEnvironmentStore.setState({ findOpen: false, findPlaceMode: 'unplaced' })
+  useSceneStore.setState({ pendingLifts: [] })
 })
 
 describe('AddObjectDrawer generate chip', () => {
@@ -60,6 +62,45 @@ describe('AddObjectDrawer generate chip', () => {
     expect(container.textContent).toContain('Lands in Unplaced')
     expect(container.textContent).toContain('Photo → Unplaced')
   })
+
+  it('offers SAM 3.0 Body, Object, and Align as separate Generate modes', () => {
+    useAgentStore.setState({ falKey: 'test-key' })
+    const { container, getByText } = render(<AddObjectDrawer />)
+    fireEvent.click(getByText('Generate'))
+    expect(container.textContent).toContain('3D Body')
+    expect(container.textContent).toContain('3D Object')
+    expect(container.textContent).toContain('3D Align')
+    expect(container.textContent).toContain('Name the object')
+    expect(container.textContent).not.toContain('Block scene')
+    expect(container.textContent).not.toContain('SAM 3.1')
+  })
+
+  it('opens a still drop for 3D Body and a noun field for 3D Object', () => {
+    useAgentStore.setState({ falKey: 'test-key' })
+    const { container, getByText } = render(<AddObjectDrawer />)
+    fireEvent.click(getByText('Generate'))
+    fireEvent.click(getByText('3D Body'))
+    expect(container.textContent).toContain('Generate body')
+    expect(container.textContent).toContain('SAM 3.0 reconstructs a textured body')
+    fireEvent.click(getByText('← Back'))
+    fireEvent.click(getByText('3D Object'))
+    expect(container.querySelector('input[placeholder="chair, lamp, guitar…"]')).not.toBeNull()
+    expect(container.textContent).toContain('Generate object')
+  })
+
+  it('offers From views as a separate VGGT tile and asks for overlapping stills', () => {
+    useAgentStore.setState({ falKey: 'test-key' })
+    const { container, getByText } = render(<AddObjectDrawer />)
+    fireEvent.click(getByText('Generate'))
+    expect(container.textContent).toContain('From views')
+    expect(container.textContent).toContain('VGGT-1B')
+    expect(container.textContent).toContain('Cloud → Unplaced')
+    fireEvent.click(getByText('From views'))
+    expect(container.textContent).toContain('overlapping photos')
+    expect(container.textContent).toContain('Reconstruct')
+    expect(container.textContent).toContain('not the palco')
+    expect(container.querySelector('input[multiple]')).not.toBeNull()
+  })
 })
 
 describe('AddObjectDrawer environment chip', () => {
@@ -92,6 +133,7 @@ describe('AddObjectDrawer find objects', () => {
     const { container } = render(<AddObjectDrawer />)
     expect(container.textContent).toContain('Block this scene')
     expect(container.textContent).toContain('Place in scene')
+    expect(container.textContent).toContain('Location stays on the Environment chip')
     expect(container.textContent).not.toContain('Queue to Unplaced')
   })
 })
@@ -101,7 +143,8 @@ describe('AddObjectDrawer primitive previews', () => {
     const { container } = render(<AddObjectDrawer />)
     const tiles = Array.from(container.querySelectorAll('[data-primitive]'))
     expect(tiles.map((tile) => tile.getAttribute('data-primitive'))).toEqual([
-      'dummy',
+      'female',
+      'male',
       'box',
       'sphere',
       'cylinder',
@@ -112,7 +155,7 @@ describe('AddObjectDrawer primitive previews', () => {
     const previews = tiles
       .map((tile) => tile.querySelector('[data-primitive-preview]')?.getAttribute('data-primitive-preview'))
       .filter((value): value is string => Boolean(value))
-    expect(previews).toEqual(['box', 'sphere', 'cylinder', 'cone', 'plane', 'torus'])
+    expect(previews).toEqual(['female', 'male', 'box', 'sphere', 'cylinder', 'cone', 'plane', 'torus'])
     expect(container.querySelector('button[data-primitive] svg[viewBox="0 0 16 16"]')).toBeNull()
   })
 })

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { insertKeyframeAtPlayhead } from './insertKeyframe'
+import { insertKeyframeAtPlayhead, lookAtKeyGroup } from './insertKeyframe'
 import { emptyVec3AxisKeyState } from './vec3Axes'
 import { useEditorStore } from '../state/useEditorStore'
 import { useRigStore } from '../state/useRigStore'
@@ -25,6 +25,9 @@ beforeEach(() => {
     fovKeys: [],
     rollKeys: [],
     progressKeys: [],
+    targetObjectId: null,
+    cameraKind: 'path',
+    lookAtMode: 'target',
     ...emptyVec3AxisKeyState(),
     cameraNoise: {
       ...useRigStore.getState().cameraNoise,
@@ -66,6 +69,39 @@ describe('insertKeyframeAtPlayhead', () => {
     expect(keys[0].value).toBeCloseTo(0.8, 5)
   })
 
+  it('writes Look-At axes when the target handle is selected', () => {
+    useRigStore.setState({
+      cameraKind: 'static',
+      lookAtMode: 'target',
+      target: [1, 2, 3],
+      targetObjectId: null,
+      ...emptyVec3AxisKeyState(),
+    })
+    useEditorStore.setState({ keyableFocus: null, selection: 'target', timelineGraph: false })
+    expect(lookAtKeyGroup()).toBe('target')
+    insertKeyframeAtPlayhead()
+    expect(useRigStore.getState().targetXKeys).toHaveLength(1)
+    expect(useRigStore.getState().targetYKeys[0].value).toBeCloseTo(2, 5)
+    expect(useRigStore.getState().staticPosXKeys).toHaveLength(0)
+  })
+
+  it('writes Look Offset axes when the target handle is tracking an object', () => {
+    useSceneStore.getState().addPrimitive('box')
+    const id = useSceneStore.getState().objects[0].id
+    useRigStore.setState({
+      lookAtMode: 'target',
+      targetObjectId: id,
+      lookOffset: [0, 0.8, 0],
+      ...emptyVec3AxisKeyState(),
+    })
+    useEditorStore.setState({ keyableFocus: null, selection: 'target', timelineGraph: false })
+    expect(lookAtKeyGroup()).toBe('lookOffset')
+    insertKeyframeAtPlayhead()
+    expect(useRigStore.getState().lookOffsetYKeys).toHaveLength(1)
+    expect(useRigStore.getState().lookOffsetYKeys[0].value).toBeCloseTo(0.8, 5)
+    expect(useRigStore.getState().targetXKeys).toHaveLength(0)
+  })
+
   it('writes all Look Offset axes when that row is focused', () => {
     useRigStore.setState({
       lookOffset: [0, 1.2, 0],
@@ -78,6 +114,21 @@ describe('insertKeyframeAtPlayhead', () => {
     expect(useRigStore.getState().lookOffsetZKeys).toHaveLength(1)
     expect(useRigStore.getState().lookOffsetYKeys[0].time).toBeCloseTo(0.4, 5)
     expect(useRigStore.getState().lookOffsetYKeys[0].value).toBeCloseTo(1.2, 5)
+  })
+
+  it('writes Rotation on a path camera in Free when nothing is focused', () => {
+    useRigStore.setState({
+      cameraKind: 'path',
+      lookAtMode: 'free',
+      staticPose: { position: [0, 1, 5], rotation: [10, 20, 0] },
+      ...emptyVec3AxisKeyState(),
+    })
+    useEditorStore.setState({ keyableFocus: null, selection: 'cinema-camera', timelineGraph: false })
+    insertKeyframeAtPlayhead()
+    expect(useRigStore.getState().staticRotXKeys).toHaveLength(1)
+    expect(useRigStore.getState().staticRotYKeys[0].value).toBeCloseTo(20, 5)
+    expect(useRigStore.getState().staticPosXKeys).toHaveLength(0)
+    expect(useRigStore.getState().cameraKind).toBe('path')
   })
 
   it('writes all transform channels when an object is selected', () => {

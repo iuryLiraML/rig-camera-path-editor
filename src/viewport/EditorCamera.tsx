@@ -196,7 +196,13 @@ export function EditorCamera() {
       // Pen / Draw own LMB — locking orbit here left the viewport stuck
       // if pointerup did not reach the release handler after a stroke.
       if (isPathStrokeTool(useEditorStore.getState().tool)) return
-      if (!hasInteractivePick(hits)) return
+      if (
+        !hasInteractivePick(hits, {
+          orbitThroughEnv: useEditorStore.getState().selection === 'env',
+        })
+      ) {
+        return
+      }
       lockOrbit()
       held = true
       const current = controlsRef.current

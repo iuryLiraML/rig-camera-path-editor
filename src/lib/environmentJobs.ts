@@ -11,9 +11,10 @@ import {
 } from './environment'
 import { assertGaussianSplat } from './assetSniff'
 import { generateTripoSplat } from './fal/tripoSplat'
-import { configureFal, falUsable, uploadImage } from './fal/client'
+import { frameStillForTripoSplat, tripoSplatUserError } from './fal/tripoSplatFrame'
+import { configureFal, falErrorMessage, falUsable, uploadImage } from './fal/client'
 import { combineAbortSignals, finishFalJobAbort, isFalAbortError, startFalJobAbort } from './fal/jobAbort'
-import { readFalAbortSignal } from './fal/settings'
+import { readFalAbortSignal, readFalSettings } from './fal/settings'
 import { useAgentStore } from '../state/useAgentStore'
 import {
   makeEnvironmentId,
@@ -82,37 +83,70 @@ export async function importEnvironmentFile(file: File): Promise<string | null> 
   }
 }
 
+function progressFromQueue(status: unknown): number | null {
+  if (!status || typeof status !== 'object') return null
+  const rec = status as Record<string, unknown>
+  const value = rec.progress ?? rec.percentage
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    if (value < 0) return 0
+    if (value <= 1) return value
+    if (value <= 100) return value / 100
+    return 1
+  }
+  return null
+}
+
 export async function generateEnvironmentFromPhoto(
   file: File,
   opts?: { signal?: AbortSignal },
 ): Promise<string | null> {
   const scene = useSceneStore.getState()
+  // Settings persist hydrates the zustand key but does not call configureFal.
+  // The Environment chip enables From photo from that key; checking falUsable
+  // first returned before TripoSplat ever ran.
+  configureFal(useAgentStore.getState().falKey || readFalSettings().falKey)
   if (!falUsable()) {
-    scene.showNotice('Add your Fal API key in Settings first.')
+    const message = 'Add your Fal API key in Settings first.'
+    try {
+      sessionStorage.setItem('rig:last-env-error', message)
+    } catch {
+      /* private mode */
+    }
+    scene.showNotice(message, 12_000)
     return null
   }
-  configureFal(useAgentStore.getState().falKey)
   const ownsJob = !opts?.signal
   const liftId = ownsJob ? scene.beginLift('Generating environment…', 'generate') : null
   const signal = ownsJob
     ? combineAbortSignals(startFalJobAbort(liftId!), readFalAbortSignal())
     : opts.signal
   try {
-    const imageUrl = await uploadImage(file, signal, { storage: true })
-    const { buffer, fileName, format } = await generateTripoSplat({ imageUrl, signal })
+    const framed = await frameStillForTripoSplat(file)
+    const imageUrl = await uploadImage(framed, signal, { storage: true })
+    const { buffer, fileName, format } = await generateTripoSplat({
+      imageUrl,
+      signal,
+      onQueueUpdate: (status) => {
+        if (!liftId) return
+        const fraction = progressFromQueue(status)
+        if (fraction != null) useSceneStore.getState().setLiftProgress(liftId, fraction)
+      },
+    })
     const name = file.name.replace(/\.[^.]+$/, '') || 'Environment'
     const id = await addEnvironmentBuffer(buffer, name, 'triposplat', format, file, fileName)
     scene.showNotice('Environment ready')
     return id
   } catch (error) {
     console.error(error)
-    scene.showNotice(
-      isFalAbortError(error)
-        ? 'Environment generate cancelled.'
-        : error instanceof Error
-          ? error.message
-          : 'Environment generate failed',
-    )
+    const message = isFalAbortError(error)
+      ? 'Environment generate cancelled.'
+      : tripoSplatUserError(falErrorMessage(error, 'Environment generate failed'))
+    try {
+      sessionStorage.setItem('rig:last-env-error', message)
+    } catch {
+      /* private mode */
+    }
+    scene.showNotice(message, 12_000)
     return null
   } finally {
     if (liftId) {
@@ -180,6 +214,8 @@ export async function parkUnplacedAsset(opts: {
   buffer: ArrayBuffer
   name: string
   rigKind: RigKind
+  keepTexture?: boolean
+  keepPoints?: boolean
 }): Promise<{ assetId: string; objectName: string }> {
   const id = makeUnplacedId()
   await persistModelBuffer(id, opts.buffer)
@@ -188,6 +224,8 @@ export async function parkUnplacedAsset(opts: {
     name: opts.name,
     bufferKey: id,
     rigKind: opts.rigKind,
+    keepTexture: opts.keepTexture,
+    keepPoints: opts.keepPoints,
   }
   const store = useEnvironmentStore.getState()
   store.setUnplacedAssets([...store.unplacedAssets, asset])
@@ -204,7 +242,13 @@ export async function instantiateUnplaced(assetId: string): Promise<string | nul
     return null
   }
   const { importModelBuffer } = await import('./sceneIO')
-  const imported = await importModelBuffer(buffer.slice(0), asset.name, { announce: true })
+  const imported = await importModelBuffer(buffer.slice(0), asset.name, {
+    announce: true,
+    keepTexture: asset.keepTexture,
+    keepPoints: asset.keepPoints,
+    keepDenseMesh: asset.keepPoints,
+    autoRemesh: false,
+  })
   if (!imported) return null
   useSceneStore.setState((s) => ({
     objects: s.objects.map((item) =>
@@ -213,7 +257,10 @@ export async function instantiateUnplaced(assetId: string): Promise<string | nul
             ...item,
             rigKind: asset.rigKind,
             bufferKey: asset.bufferKey,
-            playClips: asset.rigKind === 'dummy',
+            playClips: false,
+            keepTexture: asset.keepTexture,
+            keepPoints: asset.keepPoints,
+            keepDenseMesh: asset.keepPoints ? true : item.keepDenseMesh,
           }
         : item,
     ),

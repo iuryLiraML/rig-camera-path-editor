@@ -11,6 +11,25 @@ claim marked shipped / spec / open. `docs/HANDOFF.md` is the team-facing archite
 version header: it can lag behind the code). `docs/BACKLOG.md` is the live bug
 and gap list. `CONTEXT.md` is the domain glossary.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues at `iuryLiraML/rig-cloud`; every `gh`
+command must pass `--repo iuryLiraML/rig-cloud`. See
+`docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five canonical labels: `needs-triage`, `needs-info`,
+`ready-for-agent`, `ready-for-human`, and `wontfix`. See
+`docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repository: read root `CONTEXT.md` and relevant ADRs
+under `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Commands
 
 ```bash

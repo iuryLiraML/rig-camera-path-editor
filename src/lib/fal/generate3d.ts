@@ -27,9 +27,31 @@ export async function generateFromText(opts: {
       face_limit: GENERATE_FACE_LIMIT,
       geometry_quality: 'standard',
     },
-    { signal: opts.signal, onQueueUpdate: opts.onQueueUpdate },
+    { signal: opts.signal, logs: true, onQueueUpdate: opts.onQueueUpdate },
   )
   return requireModelGlb(data, TRIPO_H31_TEXT_TO_3D)
+}
+
+/** Clay From image: omit enable_pbr — Meshy 422s it unless should_texture is true. */
+export function meshyClayImageInput(imageUrl: string): Record<string, unknown> {
+  return {
+    image_url: imageUrl,
+    model_type: 'standard',
+    should_texture: false,
+    should_remesh: true,
+    target_polycount: MESHY_TARGET_POLYCOUNT,
+    topology: 'triangle',
+  }
+}
+
+export function meshyAcceptsStill(file: File): boolean {
+  if (file.type === 'image/jpeg' || file.type === 'image/png') return true
+  return /\.(jpe?g|png)$/i.test(file.name) && (!file.type || file.type === 'application/octet-stream')
+}
+
+export function stillForMeshy(file: File): File {
+  if (meshyAcceptsStill(file)) return file
+  throw new Error('Meshy accepts JPEG or PNG. Convert the photo or use From text.')
 }
 
 export async function generateFromImage(opts: {
@@ -42,16 +64,8 @@ export async function generateFromImage(opts: {
     model_urls?: { glb?: { url?: string } }
   }>(
     MESHY_V7_IMAGE_TO_3D,
-    {
-      image_url: opts.imageUrl,
-      model_type: 'standard',
-      should_texture: false,
-      enable_pbr: false,
-      should_remesh: true,
-      target_polycount: MESHY_TARGET_POLYCOUNT,
-      topology: 'triangle',
-    },
-    { signal: opts.signal, onQueueUpdate: opts.onQueueUpdate },
+    meshyClayImageInput(opts.imageUrl),
+    { signal: opts.signal, logs: true, onQueueUpdate: opts.onQueueUpdate },
   )
   return requireModelGlb(data, MESHY_V7_IMAGE_TO_3D)
 }

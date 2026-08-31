@@ -1,0 +1,8 @@
+Quaternius Universal Base / Superhero Female and Male (CC0 1.0)
+
+Author: Quaternius (https://quaternius.com)
+License: Creative Commons Zero 1.0 Universal
+https://creativecommons.org/publicdomain/zero/1.0/
+
+These files replace the earlier KayKit Knight placeholder. See VENDOR.md
+for the Codeberg source and what was stripped (textures, unused extras).

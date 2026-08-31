@@ -3,6 +3,14 @@ import * as THREE from 'three'
 import { useCursor } from '@react-three/drei'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { clipPlayheadSeconds } from '../lib/clipClock'
+import {
+  applyDummyBonePose,
+  commitDummyFk,
+  dummyBoneFromHit,
+  dummyBoneFromObject,
+  isDummyBoneName,
+} from '../lib/dummyCharacter'
+import { DummyJointGizmo, DummyPoseHandles } from './DummyPoseHandles'
 import { aimObject } from '../lib/cameraOrientation'
 import { buildCurve, clamp01 } from '../lib/curve'
 import { evalModelTransform, type ObjectChannel } from '../lib/keyframes'
@@ -26,6 +34,7 @@ import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneSto
 import { GizmoControls } from './GizmoControls'
 import { isTechMode } from './RenderPasses'
 import { capturePointer, releasePointer } from './path/PenTool'
+import { applyAssetDisplay } from '../lib/assetDisplay'
 
 const DEG = Math.PI / 180
 const RAD = 180 / Math.PI
@@ -75,23 +84,24 @@ export function sceneBoundsThrottled(frame: number): THREE.Box3 | null {
 }
 
 function ObjectGizmo({
-  groupRef,
+  targetRef,
+  mode,
   onChange,
   onDragStart,
   onDragEnd,
 }: {
-  groupRef: React.RefObject<THREE.Group | null>
+  targetRef: React.RefObject<THREE.Object3D | null>
+  mode: 'translate' | 'rotate' | 'scale'
   onChange: () => void
   onDragStart: () => void
   onDragEnd: () => void
 }) {
-  const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const gridSize = useEditorStore((s) => s.gridSize)
   return (
     <GizmoControls
-      object={groupRef as React.RefObject<THREE.Group>}
-      mode={gizmoMode}
+      object={targetRef as React.RefObject<THREE.Group>}
+      mode={mode}
       size={0.65}
       translationSnap={snapEnabled ? gridSize : undefined}
       onMouseDown={onDragStart}
@@ -103,6 +113,9 @@ function ObjectGizmo({
 
 function ObjectNode({ object }: { object: SceneObject }) {
   const selected = useEditorStore((s) => s.selection === `obj:${object.id}`)
+  const selectedMember = useEditorStore((s) => s.selectionIds.includes(`obj:${object.id}`))
+  const dummyBone = useEditorStore((s) => (s.selection === `obj:${object.id}` ? s.dummyBone : null))
+  const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const tool = useEditorStore((s) => s.tool)
   const playMode = useEditorStore((s) => s.playMode)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
@@ -110,7 +123,9 @@ function ObjectNode({ object }: { object: SceneObject }) {
   const showSceneObjects = useEditorStore((s) => s.showSceneObjects)
   const objectHidden = useEditorStore((s) => s.hiddenIds.includes(`obj:${object.id}`))
   const editing = isSceneEditing(playMode, workspaceMode)
-  const tech = useEditorStore((s) => isTechMode(s.viewMode))
+  const viewMode = useEditorStore((s) => s.viewMode)
+  const recording = useEditorStore((s) => s.recording)
+  const tech = isTechMode(viewMode)
   const [hovered, setHovered] = useState(false)
   const groupRef = useRef<THREE.Group>(null)
   const gizmoDragging = useRef(false)
@@ -134,19 +149,32 @@ function ObjectNode({ object }: { object: SceneObject }) {
     object.material.needsUpdate = true
   }, [object.root, object.material])
 
+  useEffect(() => {
+    applyAssetDisplay(object, viewMode, recording ? 'export' : 'live')
+  }, [object, object.root, object.displayMode, recording, viewMode])
+
+  useEffect(() => {
+    if (object.rigKind !== 'dummy' || object.playClips) return
+    applyDummyBonePose(object.root, object.bonePose, object.boneTranslate)
+  }, [object.rigKind, object.playClips, object.bonePose, object.boneTranslate, object.root])
+
   // hover/selection feedback: a subtle grayscale lift, no color involved
   useEffect(() => {
-    object.material.emissive.setScalar(!editing ? 0 : selected ? 0.1 : hovered ? 0.05 : 0)
-  }, [object.material, selected, hovered, editing])
+    const emissive = !editing ? 0 : selectedMember ? 0.1 : hovered ? 0.05 : 0
+    object.material.emissive.setScalar(emissive)
+    object.wireframeMaterial.emissive.setScalar(emissive)
+  }, [object.material, object.wireframeMaterial, selectedMember, hovered, editing])
 
   useEffect(() => {
     const group = groupRef.current
     if (!group) return
     objectGroups.set(object.id, group)
+    invalidateSceneBoundsCache()
     return () => {
       objectGroups.delete(object.id)
+      invalidateSceneBoundsCache()
     }
-  }, [object.id])
+  }, [object.id, object.root])
 
   useEffect(() => {
     object.clips.forEach((clip) => mixer.clipAction(clip).stop())
@@ -228,6 +256,11 @@ function ObjectNode({ object }: { object: SceneObject }) {
       },
       channels ?? [channel],
     )
+  }
+
+  const syncBonePose = () => {
+    if (object.rigKind !== 'dummy') return
+    commitDummyFk(object.id)
   }
 
   const meshDrag = useRef<{
@@ -320,7 +353,17 @@ function ObjectNode({ object }: { object: SceneObject }) {
             return
           }
           e.stopPropagation()
+          const alreadySelected = editor.selection === `obj:${object.id}`
           editor.select(`obj:${object.id}`)
+          if (object.rigKind === 'dummy' && alreadySelected) {
+            const limb = dummyBoneFromObject(e.object) ?? dummyBoneFromHit(object.root, e.point)
+            if (limb) {
+              editor.setDummyBone(limb)
+              if (object.playClips) useSceneStore.getState().setPlayClips(object.id, false)
+              return
+            }
+            editor.setDummyBone(null)
+          }
           if (follow) return
           const g = groupRef.current
           if (!g) return
@@ -344,11 +387,51 @@ function ObjectNode({ object }: { object: SceneObject }) {
         }}
         onPointerOut={() => setHovered(false)}
       >
-        <primitive object={object.root} />
+        <primitive key={object.root.uuid} object={object.root} />
       </group>
-      {selected && tool === 'select' && editing && !tech && !follow && !locked && (
+      {selected &&
+        object.rigKind === 'dummy' &&
+        editing &&
+        !tech &&
+        !object.playClips &&
+        showSceneObjects &&
+        !objectHidden && (
+        <DummyPoseHandles
+          root={object.root}
+          focus={dummyBone && isDummyBoneName(dummyBone) ? dummyBone : null}
+          onFocus={(name) => {
+            useEditorStore.getState().setDummyBone(name)
+            if (name) useSceneStore.getState().setPlayClips(object.id, false)
+          }}
+        />
+      )}
+      {selected &&
+        tool === 'select' &&
+        object.rigKind === 'dummy' &&
+        dummyBone &&
+        isDummyBoneName(dummyBone) &&
+        editing &&
+        !tech &&
+        !object.playClips &&
+        showSceneObjects &&
+        !objectHidden && (
+          <DummyJointGizmo
+            root={object.root}
+            boneName={dummyBone}
+            mode={gizmoMode}
+            onChange={syncBonePose}
+            onDragStart={() => {
+              gizmoDragging.current = true
+            }}
+            onDragEnd={() => {
+              gizmoDragging.current = false
+            }}
+          />
+        )}
+      {selected && tool === 'select' && editing && !tech && !follow && !locked && !dummyBone && (
         <ObjectGizmo
-          groupRef={groupRef}
+          targetRef={groupRef}
+          mode={gizmoMode}
           onChange={syncTransform}
           onDragStart={() => {
             gizmoDragging.current = true
@@ -367,7 +450,7 @@ export function SceneObjects() {
   return (
     <>
       {objects.map((object) => (
-        <ObjectNode key={object.id} object={object} />
+        <ObjectNode key={`${object.id}:${object.root.uuid}`} object={object} />
       ))}
     </>
   )

@@ -1,13 +1,22 @@
 import { countGltfTriangles } from './glbTriangleCount'
 import { idbGet, idbPut, STORES } from './idb'
+import { countObjTriangles } from './objTriangleCount'
+
+export type ModelSourceFormat = 'glb' | 'gltf' | 'obj'
 
 export type ModelBytes = {
   buffer: ArrayBuffer
   triangles: number | null
 }
 
-export function inspectModelBuffer(buffer: ArrayBuffer): ModelBytes {
-  return { buffer, triangles: countGltfTriangles(buffer) }
+export function inspectModelBuffer(
+  buffer: ArrayBuffer,
+  format: ModelSourceFormat = 'glb',
+): ModelBytes {
+  return {
+    buffer,
+    triangles: format === 'obj' ? countObjTriangles(buffer) : countGltfTriangles(buffer),
+  }
 }
 
 type WorkerReadOk = { id: number; buffer: ArrayBuffer; triangles?: number | null }
@@ -53,8 +62,8 @@ function workerCall<T>(
   })
 }
 
-function readInWorker(file: Blob): Promise<ModelBytes> {
-  return workerCall({ op: 'read', id: 1, file }, [], (data) => {
+function readInWorker(file: Blob, format: ModelSourceFormat): Promise<ModelBytes> {
+  return workerCall({ op: 'read', id: 1, file, format }, [], (data) => {
     if (!('buffer' in data)) throw new Error('Model worker did not return bytes')
     return { buffer: data.buffer, triangles: data.triangles ?? null }
   })
@@ -85,16 +94,19 @@ export async function fileFromBuffer(buffer: ArrayBuffer, name: string, type: st
 }
 
 /** Reads GLB/GLTF bytes and counts triangles. Uses a worker when the browser has one. */
-export async function readModelBytes(source: Blob | ArrayBuffer): Promise<ModelBytes> {
-  if (source instanceof ArrayBuffer) return inspectModelBuffer(source)
+export async function readModelBytes(
+  source: Blob | ArrayBuffer,
+  format: ModelSourceFormat = 'glb',
+): Promise<ModelBytes> {
+  if (source instanceof ArrayBuffer) return inspectModelBuffer(source, format)
   if (typeof Worker === 'function') {
     try {
-      return await readInWorker(source)
+      return await readInWorker(source, format)
     } catch {
       // Node tests and browsers that reject module workers fall back here.
     }
   }
-  return inspectModelBuffer(await source.arrayBuffer())
+  return inspectModelBuffer(await source.arrayBuffer(), format)
 }
 
 export function modelIoOffthreadAvailable(): boolean {

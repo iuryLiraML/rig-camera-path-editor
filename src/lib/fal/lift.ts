@@ -72,7 +72,7 @@ export async function liftPerson(opts: {
 
 export async function liftProp(opts: {
   imageUrl: string
-  maskUrl: string
+  maskUrl?: string
   prompt: string
   signal?: AbortSignal
   onQueueUpdate?: FalSubscribeOpts['onQueueUpdate']
@@ -82,8 +82,10 @@ export async function liftProp(opts: {
 
 export async function liftPropDetailed(opts: {
   imageUrl: string
-  maskUrl: string
+  maskUrl?: string
   prompt: string
+  /** Official SAM 3 Objects flag — false was 422 / splat-only on some stills. */
+  textured?: boolean
   signal?: AbortSignal
   onQueueUpdate?: FalSubscribeOpts['onQueueUpdate']
 }): Promise<{ glbUrl: string; metadata?: unknown }> {
@@ -93,9 +95,9 @@ export async function liftPropDetailed(opts: {
     SAM_3D_OBJECTS,
     {
       image_url: opts.imageUrl,
-      mask_urls: [opts.maskUrl],
+      ...(opts.maskUrl ? { mask_urls: [opts.maskUrl] } : {}),
       prompt,
-      export_textured_glb: false,
+      export_textured_glb: opts.textured ?? true,
     },
     { signal: opts.signal, onQueueUpdate: opts.onQueueUpdate },
   )

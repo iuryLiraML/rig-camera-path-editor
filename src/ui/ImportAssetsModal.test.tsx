@@ -23,6 +23,8 @@ describe('Import remesh warning', () => {
     const text = container.textContent ?? ''
     expect(text).toContain('Import Assets')
     expect(text).toContain('Drag & Drop models or browse.')
+    expect(text).toContain('.obj')
+    expect(container.querySelector('input[type="file"]')?.getAttribute('accept')).toContain('.obj')
     expect(text).not.toContain('Keep as-is')
     expect(text).not.toContain('Dense model')
     expect(text).not.toContain('Remesh with Tripo to a clay-friendly')

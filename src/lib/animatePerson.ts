@@ -24,6 +24,7 @@ export async function animateSelectedPerson(objectId: string) {
   const scene = useSceneStore.getState()
   const object = scene.objects.find((item) => item.id === objectId)
   if (!object || object.rigKind !== 'sam-person') return
+  configureFal(readFalSettings().falKey)
   if (!falUsable()) {
     scene.showNotice('Add your Fal API key in Settings first.')
     return
@@ -34,7 +35,6 @@ export async function animateSelectedPerson(objectId: string) {
   }
   const liftId = scene.beginLift(`${object.name} — Animate…`, 'generate', objectId)
   try {
-    configureFal(readFalSettings().falKey)
     const file = await fileFromStoredBuffer(object.bufferKey, `${object.name}.glb`, 'model/gltf-binary')
     if (!file) throw new Error('Could not read the stored mesh.')
     const modelUrl = await uploadFile(file)

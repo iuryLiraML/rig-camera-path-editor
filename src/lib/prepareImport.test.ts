@@ -43,6 +43,24 @@ describe('prepareImportedRoot', () => {
     expect(size.y).toBeLessThan(3)
   })
 
+  it('keeps the VGGT cloud and drops estimated-camera cones', () => {
+    const root = new THREE.Group()
+    const cloud = new THREE.BufferGeometry()
+    cloud.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 4, 0, 0, 0, 2, 0]), 3))
+    root.add(new THREE.Points(cloud))
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.2, 0.4, 8))
+    cone.name = 'CameraCone'
+    root.add(cone)
+    root.add(new THREE.PerspectiveCamera())
+
+    prepareImportedRoot(root, { keepPoints: true })
+
+    expect(root.children).toHaveLength(1)
+    expect(root.children[0]).toBeInstanceOf(THREE.Points)
+    const size = meshWorldBounds(root, { keepPoints: true }).getSize(new THREE.Vector3())
+    expect(size.x).toBeGreaterThan(3)
+  })
+
   it('recomputes zeroed normals', () => {
     const geometry = new THREE.BoxGeometry(1, 1, 1)
     const zeros = new Float32Array(geometry.attributes.normal.count * 3)
@@ -73,5 +91,17 @@ describe('normalizeModel', () => {
     const maxDim = Math.max(size.x, size.y, size.z)
     expect(maxDim).toBeCloseTo(2, 1)
     expect(boundsAreUsable(meshWorldBounds(root))).toBe(true)
+  })
+
+  it('scales a kept point cloud to about two units', () => {
+    const root = new THREE.Group()
+    const cloud = new THREE.BufferGeometry()
+    cloud.setAttribute('position', new THREE.BufferAttribute(new Float32Array([0, 0, 0, 10, 0, 0, 0, 20, 0]), 3))
+    root.add(new THREE.Points(cloud))
+    prepareImportedRoot(root, { keepPoints: true })
+    normalizeModel(root, { includePoints: true })
+    const size = meshWorldBounds(root, { keepPoints: true }).getSize(new THREE.Vector3())
+    const maxDim = Math.max(size.x, size.y, size.z)
+    expect(maxDim).toBeCloseTo(2, 1)
   })
 })

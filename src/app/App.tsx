@@ -23,7 +23,7 @@ import { reloadActiveProjectFromCloud } from '../lib/projects'
 import { syncActiveProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
 import { redo, undo, historyIsDirty } from '../lib/history'
-import { insertKeyframeAtPlayhead } from '../lib/insertKeyframe'
+import { insertKeyframeAtPlayhead, lookAtKeyGroup } from '../lib/insertKeyframe'
 import { stopFlyRecord } from '../lib/flyRecord'
 import { insertPoseKeyframeAtPlayhead } from '../lib/poseKeyframe'
 import {
@@ -144,10 +144,15 @@ function useShortcuts() {
         case 'I':
           e.preventDefault()
           if (editor.flyRecording) break
-          if (editor.cameraView && editor.workspaceMode !== 'visualize') {
-            insertPoseKeyframeAtPlayhead()
-          } else {
+          if (
+            lookAtKeyGroup() ||
+            (useRigStore.getState().cameraKind === 'path' &&
+              useRigStore.getState().lookAtMode === 'free') ||
+            !(editor.cameraView && editor.workspaceMode !== 'visualize')
+          ) {
             insertKeyframeAtPlayhead()
+          } else {
+            insertPoseKeyframeAtPlayhead()
           }
           break
         case ' ':
@@ -352,7 +357,7 @@ function EditorWorkspace() {
       {dragging && (
         <div className="pointer-events-none absolute inset-0 z-40 flex items-center justify-center bg-black/40">
           <div className="panel border-2 border-dashed border-accent px-10 py-8 text-sm text-ink">
-            Drop your <span className="font-semibold text-accent">.glb</span> to import
+            Drop your <span className="font-semibold text-accent">.glb or .obj</span> to import
           </div>
         </div>
       )}

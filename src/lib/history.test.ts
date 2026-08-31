@@ -1,6 +1,8 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { VIEWPORT_BG_DEFAULT_TOP } from '../viewport/viewportBackground'
+import { addDummyToScene, setDummyBoneAxis } from './dummyCharacter'
 import { useSceneStore } from '../state/useSceneStore'
+import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { IDENTITY_ENV_TRANSFORM } from './environment'
 import {
@@ -13,7 +15,8 @@ import {
 } from './history'
 
 afterEach(() => {
-  useSceneStore.setState({ bgColor: VIEWPORT_BG_DEFAULT_TOP })
+  useSceneStore.setState({ bgColor: VIEWPORT_BG_DEFAULT_TOP, objects: [] })
+  useEditorStore.setState({ selection: null })
   useEnvironmentStore.setState({
     environmentId: null,
     environmentTransform: IDENTITY_ENV_TRANSFORM,
@@ -52,6 +55,17 @@ describe('history vs environment pose', () => {
     expect(undo()).toBe(true)
     expect(useEnvironmentStore.getState().environmentTransform.position).toEqual([0, 0, 0])
     expect(useEnvironmentStore.getState().environmentId).toBeNull()
+  })
+})
+
+describe('history vs dummy FK', () => {
+  it('undoes a stored bone pose', () => {
+    const id = addDummyToScene()
+    resetHistory()
+    setDummyBoneAxis(id, 'LeftArm', 2, 40)
+    expect(useSceneStore.getState().objects.find((item) => item.id === id)?.bonePose?.LeftArm?.[2]).toBe(40)
+    expect(undo()).toBe(true)
+    expect(useSceneStore.getState().objects.find((item) => item.id === id)?.bonePose).toBeUndefined()
   })
 })
 

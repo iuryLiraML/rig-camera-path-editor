@@ -138,6 +138,35 @@ function resolveLookTarget(t: number, channels: CinemaChannels, out: THREE.Vecto
   }
 }
 
+/** YXZ Euler degrees → camera quaternion and a look point along −Z. */
+function applyAuthoredRotation(
+  rotation: Vec3,
+  pos: THREE.Vector3,
+  outLook: THREE.Vector3,
+  outQuat: THREE.Quaternion,
+): void {
+  _euler.set(
+    rotation[0] * THREE.MathUtils.DEG2RAD,
+    rotation[1] * THREE.MathUtils.DEG2RAD,
+    rotation[2] * THREE.MathUtils.DEG2RAD,
+    'YXZ',
+  )
+  outQuat.setFromEuler(_euler)
+  _fwd.copy(FWD).applyQuaternion(outQuat)
+  outLook.copy(pos).add(_fwd)
+}
+
+function evalAuthoredRotation(t: number, channels: CinemaChannels): Vec3 {
+  const sp = channels.staticPose ?? { position: [0, 0, 0] as Vec3, rotation: [0, 0, 0] as Vec3 }
+  return evalCinemaVec3(
+    t,
+    { x: channels.staticRotXKeys, y: channels.staticRotYKeys, z: channels.staticRotZKeys },
+    channels.staticRotKeys,
+    sp.rotation,
+    channels.ease,
+  )
+}
+
 /** Pose of a manually-posed, pathless camera — position/rotation are f(t) when keyed. */
 function evaluateStaticPose(t: number, channels: CinemaChannels): CinemaPose {
   const sp = channels.staticPose ?? { position: [0, 0, 0] as Vec3, rotation: [0, 0, 0] as Vec3 }
@@ -165,15 +194,7 @@ function evaluateStaticPose(t: number, channels: CinemaChannels): CinemaPose {
     _tan.set(0, 0, -1)
     orientationTo(_view, _tan, _quat)
   } else {
-    _euler.set(
-      rotation[0] * THREE.MathUtils.DEG2RAD,
-      rotation[1] * THREE.MathUtils.DEG2RAD,
-      rotation[2] * THREE.MathUtils.DEG2RAD,
-      'YXZ',
-    )
-    _quat.setFromEuler(_euler)
-    _fwd.copy(FWD).applyQuaternion(_quat)
-    _look.copy(_pos).add(_fwd)
+    applyAuthoredRotation(rotation, _pos, _look, _quat)
   }
   if (rollDeg !== 0) {
     _quat.multiply(_roll.setFromAxisAngle(LOCAL_Z, rollDeg * THREE.MathUtils.DEG2RAD))
@@ -235,11 +256,17 @@ export function evaluateCinemaPose(
   switch (channels.lookAtMode) {
     case 'target':
       resolveLookTarget(clampedT, channels, _look)
+      _view.subVectors(_look, _pos)
+      orientationTo(_view, _tan, _quat)
       break
     case 'path-tangent':
-    case 'free':
-      // a path camera has no authored orientation, so 'free' rides the tangent
       _look.copy(_pos).add(_tan)
+      _view.subVectors(_look, _pos)
+      orientationTo(_view, _tan, _quat)
+      break
+    case 'free':
+      // position stays on the path; orientation is the authored YXZ rest / keys
+      applyAuthoredRotation(evalAuthoredRotation(clampedT, channels), _pos, _look, _quat)
       break
     default: {
       const _never: never = channels.lookAtMode
@@ -247,8 +274,6 @@ export function evaluateCinemaPose(
     }
   }
 
-  _view.subVectors(_look, _pos)
-  orientationTo(_view, _tan, _quat)
   if (rollDeg !== 0) {
     _quat.multiply(_roll.setFromAxisAngle(LOCAL_Z, rollDeg * THREE.MathUtils.DEG2RAD))
   }

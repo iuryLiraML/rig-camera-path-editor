@@ -21,6 +21,9 @@ export interface ProjectMeshAsset {
   name: string
   bufferKey: string
   rigKind: RigKind
+  keepTexture?: boolean
+  /** VGGT point-cloud GLB — Place keeps POINTS and never remeshes. */
+  keepPoints?: boolean
 }
 
 export const IDENTITY_ENV_TRANSFORM: Transform = {
@@ -28,6 +31,12 @@ export const IDENTITY_ENV_TRANSFORM: Transform = {
   rotation: [0, 0, 0],
   scale: [1, 1, 1],
 }
+
+/**
+ * INRIA Gaussian PLY is Y-down (OpenCV). DropInViewer does not convert.
+ * Rotate 180° about X so the palco stands in Rig (Y-up). User transform stays identity.
+ */
+export const SPLAT_INRIA_TO_Y_UP: [number, number, number] = [Math.PI, 0, 0]
 
 export function cloneEnvTransform(transform?: Transform | null): Transform {
   const src = transform ?? IDENTITY_ENV_TRANSFORM
@@ -68,7 +77,7 @@ export function partitionDroppedSceneFiles(files: File[]): {
   const models: File[] = []
   const environments: File[] = []
   for (const file of files) {
-    if (/\.(glb|gltf)$/i.test(file.name)) models.push(file)
+    if (/\.(glb|gltf|obj)$/i.test(file.name)) models.push(file)
     else if (environmentFileKind(file.name)) environments.push(file)
   }
   return { models, environments }

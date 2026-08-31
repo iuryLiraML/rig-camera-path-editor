@@ -1,5 +1,4 @@
 import { useMemo, useRef } from 'react'
-import { useCameraReady } from '../../state/cameraPathLink'
 import * as THREE from 'three'
 import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import { GizmoControls } from '../GizmoControls'
@@ -38,8 +37,6 @@ export function LookAtTarget() {
   const objects = useSceneStore((s) => s.objects)
   const paths = usePathStore((s) => s.paths)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
-  const cameraKind = useRigStore((s) => s.cameraKind)
-  const hasPath = useCameraReady()
   const playMode = useEditorStore((s) => s.playMode)
   const cameraView = useEditorStore((s) => s.cameraView)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
@@ -86,15 +83,7 @@ export function LookAtTarget() {
     attr.needsUpdate = true
   })
 
-  if (
-    !hasPath ||
-    lookAtMode !== 'target' ||
-    playMode ||
-    workspaceMode === 'visualize' ||
-    tech ||
-    cameraKind === 'static' ||
-    targetHidden
-  ) {
+  if (lookAtMode !== 'target' || playMode || workspaceMode === 'visualize' || tech || targetHidden) {
     return null
   }
 
@@ -109,7 +98,9 @@ export function LookAtTarget() {
           onPointerDown={(e: ThreeEvent<PointerEvent>) => {
             if (e.button !== 0) return
             e.stopPropagation()
-            useEditorStore.getState().select('target')
+            const editor = useEditorStore.getState()
+            editor.select('target')
+            editor.setKeyableFocus(track ? 'lookOffsetX' : 'targetX')
           }}
         >
           <sphereGeometry args={[1, 16, 16]} />

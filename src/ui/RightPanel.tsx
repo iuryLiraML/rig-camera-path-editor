@@ -36,6 +36,15 @@ import { easeGroups, easeDef, type EaseKind } from '../lib/easing'
 import { exportDimensions } from '../lib/recorder'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
 import { animateSelectedPerson } from '../lib/animatePerson'
+import {
+  applyDummyBonePose,
+  DUMMY_BONE_LABELS,
+  dummyRestPose,
+  isDummyBoneName,
+  listDummyPoseBones,
+  resetDummyBonePose,
+  setDummyBoneAxis,
+} from '../lib/dummyCharacter'
 import { PRIMITIVE_DEFS } from '../lib/primitiveGeometry'
 import {
   ColorField,
@@ -51,6 +60,7 @@ import {
   XYZInput,
 } from './primitives'
 import { writeFov, writeRoll } from '../lib/autoKey'
+import { applyLookAtMode } from '../lib/pathFreeLook'
 import { SettingsIcon } from './icons'
 import { PoseKeyButton } from './PoseKeyButton'
 import { Vec3GroupFields } from './Vec3GroupFields'
@@ -366,6 +376,7 @@ function FollowSection({ objectId }: { objectId: string }) {
 
 function ObjectSections({ objectId }: { objectId: string }) {
   const object = useSceneStore((s) => s.objects.find((o) => o.id === objectId))
+  const dummyBone = useEditorStore((s) => s.dummyBone)
   const t = useRigStore((s) => s.t)
   const duration = useRigStore((s) => s.duration)
   const scene = useSceneStore.getState()
@@ -423,7 +434,13 @@ function ObjectSections({ objectId }: { objectId: string }) {
                   { value: 'off', label: 'Off' },
                 ]}
                 value={object.playClips ? 'on' : 'off'}
-                onChange={(v) => scene.setPlayClips(object.id, v === 'on')}
+                onChange={(v) => {
+                  const play = v === 'on'
+                  scene.setPlayClips(object.id, play)
+                  if (!play && object.rigKind === 'dummy') {
+                    applyDummyBonePose(object.root, object.bonePose, object.boneTranslate)
+                  }
+                }}
               />
             </Row>
           )}
@@ -435,6 +452,41 @@ function ObjectSections({ objectId }: { objectId: string }) {
                 onChange={(name) => scene.setActiveClip(object.id, name)}
               />
             </Row>
+          )}
+          {object.rigKind === 'dummy' && (
+            <>
+              <Row label="Bone">
+                <select
+                  value={dummyBone ?? ''}
+                  onChange={(e) => {
+                    const name = e.target.value
+                    useEditorStore.getState().setDummyBone(name || null)
+                    if (name) scene.setPlayClips(object.id, false)
+                  }}
+                  className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
+                >
+                  <option value="">Whole figure</option>
+                  {listDummyPoseBones(object.root).map((name) => (
+                    <option key={name} value={name}>
+                      {DUMMY_BONE_LABELS[name]}
+                    </option>
+                  ))}
+                </select>
+              </Row>
+              {dummyBone && isDummyBoneName(dummyBone) && (
+                <Row label="Joint">
+                  <XYZInput
+                    value={object.bonePose?.[dummyBone] ?? dummyRestPose(object.root)[dummyBone]}
+                    step={1}
+                    onChange={(axis, value) => setDummyBoneAxis(object.id, dummyBone, axis, value)}
+                  />
+                </Row>
+              )}
+              <PanelButton label="Reset pose" onClick={() => resetDummyBonePose(object.id)} />
+              <p className="text-[10px] text-ink-dim">
+                File clips Off, click a joint sphere, then W to move or E to rotate that bone.
+              </p>
+            </>
           )}
           {object.rigKind === 'sam-person' && (
             <PanelButton
@@ -948,12 +1000,16 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
                 : [
                     { value: 'target', label: 'Target' },
                     { value: 'path-tangent', label: 'Motion' },
+                    { value: 'free', label: 'Free' },
                   ]
             }
             value={lookAtMode}
-            onChange={(v) => rig.setLookAtMode(v)}
+            onChange={(v) => applyLookAtMode(v)}
           />
         </Row>
+        {!isStatic && lookAtMode === 'free' && (
+          <Vec3GroupFields group="staticRot" values={staticRotNow} step={1} />
+        )}
         {lookAtMode !== 'free' && <TrackObjectRow />}
         {!isStatic && (
           <>
@@ -1372,6 +1428,9 @@ function CameraFormatSection() {
 
 function TargetSections() {
   const target = useRigStore((s) => s.target)
+  const targetXKeys = useRigStore((s) => s.targetXKeys)
+  const targetYKeys = useRigStore((s) => s.targetYKeys)
+  const targetZKeys = useRigStore((s) => s.targetZKeys)
   const lookOffset = useRigStore((s) => s.lookOffset)
   const lookOffsetXKeys = useRigStore((s) => s.lookOffsetXKeys)
   const lookOffsetYKeys = useRigStore((s) => s.lookOffsetYKeys)
@@ -1389,6 +1448,7 @@ function TargetSections() {
     lookOffset,
     ease,
   )
+  const targetNow = evalSeparatedVec3(t, targetXKeys, targetYKeys, targetZKeys, target, ease)
   return (
     <Section title="Look-At Target">
       <TrackObjectRow />
@@ -1400,7 +1460,7 @@ function TargetSections() {
           <Vec3GroupFields group="lookOffset" values={lookOffsetNow} />
         </>
       ) : (
-        <Vec3GroupFields group="target" values={target} />
+        <Vec3GroupFields group="target" values={targetNow} />
       )}
     </Section>
   )

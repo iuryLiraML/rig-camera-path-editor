@@ -33,6 +33,7 @@ import {
   clearParkedMeshesForTests,
   objectFromStoredBuffer,
   objectFromDenseMeta,
+  installHighMeshBuffer,
   denseLoadCanSkipBuffer,
   denseLoadParkCopy,
   denseLoadParkManyCopy,
@@ -61,6 +62,45 @@ function encodeGlb(doc: object): ArrayBuffer {
   view.setUint32(16, 0x4e4f534a, true)
   bytes.set(json, 20)
   return bytes.buffer
+}
+
+function embeddedGltf(
+  nodes: Array<{ mesh: number }>,
+  meshes: Array<{ primitives: Array<{ attributes: { POSITION: number } }> }>,
+): ArrayBuffer {
+  const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+  const data = Buffer.from(positions.buffer).toString('base64')
+  return new TextEncoder().encode(JSON.stringify({
+    asset: { version: '2.0' },
+    scene: 0,
+    scenes: [{ nodes: nodes.map((_, index) => index) }],
+    nodes,
+    meshes,
+    accessors: [{
+      bufferView: 0,
+      componentType: 5126,
+      count: 3,
+      type: 'VEC3',
+      max: [1, 1, 0],
+      min: [0, 0, 0],
+    }],
+    bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: positions.byteLength }],
+    buffers: [{ uri: `data:application/octet-stream;base64,${data}`, byteLength: positions.byteLength }],
+  })).buffer
+}
+
+async function withProgressEvent<T>(run: () => Promise<T>): Promise<T> {
+  const previous = globalThis.ProgressEvent
+  globalThis.ProgressEvent = class extends Event {
+    lengthComputable = false
+    loaded = 0
+    total = 0
+  } as typeof ProgressEvent
+  try {
+    return await run()
+  } finally {
+    globalThis.ProgressEvent = previous
+  }
 }
 
 afterEach(() => {
@@ -130,7 +170,7 @@ describe('auto-remesh import decision', () => {
       notice: denseRemeshStartCopy('Car', 240_000),
     })
     expect(denseRemeshStartCopy('Car', 240_000)).toBe(
-      '"Car" is dense (240k triangles). Remeshing with Tripo…',
+      '"Car" is dense (estimated source: 240k triangles). Remeshing with Tripo…',
     )
   })
 
@@ -140,7 +180,7 @@ describe('auto-remesh import decision', () => {
       notice: denseRemeshNeedsKeyCopy('Car', 240_000),
     })
     expect(denseRemeshNeedsKeyCopy('Car', 240_000)).toBe(
-      '"Car" is dense (240k triangles). Add a Fal key in Settings to remesh.',
+      '"Car" is dense (estimated source: 240k triangles). Add a Fal key in Settings to remesh.',
     )
   })
 
@@ -160,6 +200,116 @@ describe('auto-remesh import decision', () => {
 })
 
 describe('dense import without a viewport parse', () => {
+  it('imports embedded glTF with an accurate cached triangle count', async () => {
+    const positions = new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0])
+    const data = Buffer.from(positions.buffer).toString('base64')
+    const buffer = new TextEncoder().encode(JSON.stringify({
+      asset: { version: '2.0' },
+      scene: 0,
+      scenes: [{ nodes: [0] }],
+      nodes: [{ mesh: 0 }],
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+      accessors: [{
+        bufferView: 0,
+        componentType: 5126,
+        count: 3,
+        type: 'VEC3',
+        max: [1, 1, 0],
+        min: [0, 0, 0],
+      }],
+      bufferViews: [{ buffer: 0, byteOffset: 0, byteLength: positions.byteLength }],
+      buffers: [{ uri: `data:application/octet-stream;base64,${data}`, byteLength: positions.byteLength }],
+    })).buffer
+    const previousProgressEvent = globalThis.ProgressEvent
+    globalThis.ProgressEvent = class extends Event {
+      lengthComputable = false
+      loaded = 0
+      total = 0
+    } as typeof ProgressEvent
+    try {
+      const imported = await importModelFile(
+        new File([buffer], 'Triangle.gltf', { type: 'model/gltf+json' }),
+        { autoRemesh: false },
+      )
+      expect(imported?.triangles).toBe(1)
+      expect(useSceneStore.getState().objects[0]?.modelFormat).toBe('gltf')
+    } finally {
+      globalThis.ProgressEvent = previousProgressEvent
+    }
+  })
+
+  it('imports geometry-only OBJ with an accurate cached triangle count', async () => {
+    const obj = new TextEncoder().encode([
+      'v 0 0 0',
+      'v 1 0 0',
+      'v 1 1 0',
+      'v 0 1 0',
+      'f 1 2 3 4',
+    ].join('\n')).buffer
+    const imported = await importModelFile(new File([obj], 'Panel.obj', { type: 'text/plain' }), {
+      autoRemesh: false,
+    })
+    expect(imported?.triangles).toBe(2)
+    const object = useSceneStore.getState().objects[0]
+    expect(object?.sourceFormat).toBe('obj')
+    expect(object?.modelFormat).toBe('obj')
+    expect(object?.triangleCount).toBe(2)
+    expect(object?.bufferKey).toBe(object?.id)
+    expect(countTriangles(object.root)).toBe(2)
+    expect(isRemeshPlaceholder(object.root)).toBe(false)
+  })
+
+  it('keeps a dense placeholder when Fal is unavailable so high mesh remains an option', async () => {
+    const enqueued: string[] = []
+    setDenseRemeshEnqueue((id) => {
+      enqueued.push(id)
+    })
+    const buffer = encodeGlb({
+      asset: { version: '2.0' },
+      meshes: [{ primitives: [{ attributes: { POSITION: 0 }, indices: 1 }] }],
+      accessors: [{ count: 4 }, { count: 240_003 }],
+    })
+
+    const imported = await importModelBuffer(buffer, 'Boat', { autoRemesh: true })
+
+    expect(imported?.triangles).toBe(80_001)
+    expect(enqueued).toEqual([])
+    expect(useSceneStore.getState().objects).toHaveLength(1)
+    expect(isRemeshPlaceholder(useSceneStore.getState().objects[0].root)).toBe(true)
+    expect(useSceneStore.getState().notice).toBe(
+      '"Boat" is dense (estimated source: 80k triangles). Add a Fal key in Settings to remesh.',
+    )
+  })
+
+  it('counts only glTF meshes instantiated by the loaded scene', async () => {
+    const buffer = embeddedGltf(
+      [{ mesh: 0 }],
+      [
+        { primitives: [{ attributes: { POSITION: 0 } }] },
+        { primitives: [{ attributes: { POSITION: 0 } }] },
+      ],
+    )
+    const imported = await withProgressEvent(
+      () => importModelBuffer(buffer, 'Unused mesh', { autoRemesh: false }),
+    )
+
+    expect(imported?.triangles).toBe(1)
+    expect(useSceneStore.getState().objects[0]?.triangleCount).toBe(1)
+  })
+
+  it('counts every rendered instance of a shared glTF mesh', async () => {
+    const buffer = embeddedGltf(
+      [{ mesh: 0 }, { mesh: 0 }],
+      [{ primitives: [{ attributes: { POSITION: 0 } }] }],
+    )
+    const imported = await withProgressEvent(
+      () => importModelBuffer(buffer, 'Instanced mesh', { autoRemesh: false }),
+    )
+
+    expect(imported?.triangles).toBe(2)
+    expect(useSceneStore.getState().objects[0]?.triangleCount).toBe(2)
+  })
+
   it('parks a placeholder and never builds the dense GLB scene', async () => {
     configureFal('key-test')
     syncFalSettings('key-test', '3.1')
@@ -201,7 +351,7 @@ describe('dense import without a viewport parse', () => {
     expect(enqueued).toEqual([object.id])
   })
 
-  it('does not enqueue remesh when persist throws', async () => {
+  it('remeshes from memory when persisting the dense source fails', async () => {
     configureFal('key-test')
     syncFalSettings('key-test', '3.1')
     const enqueued: string[] = []
@@ -216,8 +366,10 @@ describe('dense import without a viewport parse', () => {
     })
     const imported = await importModelBuffer(buffer, 'Car', { autoRemesh: true })
     expect(imported?.triangles).toBe(80_001)
-    expect(enqueued).toEqual([])
-    expect(useSceneStore.getState().notice).toBe('"Car" imported, but remesh needs a re-import')
+    expect(enqueued).toEqual([useSceneStore.getState().objects[0].id])
+    expect(useSceneStore.getState().notice).toBe(
+      '"Car" storage is unavailable. Remeshing from the in-memory source…',
+    )
     const object = useSceneStore.getState().objects[0]
     expect(object?.name).toBe('Car')
     expect(isRemeshPlaceholder(object.root)).toBe(true)
@@ -225,9 +377,76 @@ describe('dense import without a viewport parse', () => {
 })
 
 describe('dense project restore without a viewport parse', () => {
+  it('reloads persisted OBJ metadata and source geometry', async () => {
+    const buffer = new TextEncoder().encode([
+      'v 0 0 0',
+      'v 1 0 0',
+      'v 0 1 0',
+      'f 1 2 3',
+    ].join('\n')).buffer
+    const object = await objectFromStoredBuffer(
+      {
+        id: 'panel',
+        name: 'Panel',
+        shade: 0.7,
+        bufferKey: 'panel',
+        modelFormat: 'obj',
+        displayMode: 'wireframe',
+        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        keys: [],
+        playClips: true,
+        triangleCount: 1,
+      },
+      buffer,
+    )
+    expect(object.modelFormat).toBe('obj')
+    expect(object.displayMode).toBe('wireframe')
+    expect(object.triangleCount).toBe(1)
+    expect(isRemeshPlaceholder(object.root)).toBe(false)
+  })
+
+  it('keeps the placeholder cube solid until Keep high mesh installs the source topology', async () => {
+    const buffer = new TextEncoder().encode([
+      'v 0 0 0',
+      'v 1 0 0',
+      'v 1 1 0',
+      'v 0 1 0',
+      'f 1 2 3 4',
+    ].join('\n')).buffer
+    const parked = objectFromDenseMeta({
+      id: 'panel',
+      name: 'Panel',
+      shade: 0.7,
+      bufferKey: 'panel',
+      modelFormat: 'obj',
+      displayMode: 'wireframe',
+      transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      keys: [],
+      playClips: true,
+      triangleCount: RETOPO_TRIANGLES + 1,
+    })
+    useSceneStore.setState({ objects: [parked] })
+    let placeholderMaterial: THREE.Material | undefined
+    parked.root.traverse((child) => {
+      if (child instanceof THREE.Mesh) placeholderMaterial = child.material as THREE.Material
+    })
+    expect(placeholderMaterial).toBe(parked.material)
+
+    await installHighMeshBuffer('panel', buffer)
+    const live = useSceneStore.getState().objects[0]
+    expect(isRemeshPlaceholder(live.root)).toBe(false)
+    expect(live.displayMode).toBe('wireframe')
+    expect(live.triangleCount).toBe(2)
+    let sourceMaterial: THREE.Material & { wireframe?: boolean } | undefined
+    live.root.traverse((child) => {
+      if (child instanceof THREE.Mesh) sourceMaterial = child.material as THREE.Material
+    })
+    expect(sourceMaterial?.wireframe).toBe(true)
+  })
+
   it('explains why a saved dense mesh comes back as a cube', () => {
     expect(denseLoadParkCopy('Car', 240_000)).toBe(
-      '"Car" is dense (240k triangles). Remesh from the object bar.',
+      '"Car" is dense (estimated source: 240k triangles). Remesh from the object bar.',
     )
     expect(denseLoadParkManyCopy(3)).toBe('3 dense models loaded as placeholders. Remesh from the object bar.')
   })
@@ -271,8 +490,11 @@ describe('dense project restore without a viewport parse', () => {
       triangleCount: RETOPO_TRIANGLES + 1,
     }
     expect(denseLoadCanSkipBuffer(meta)).toBe(true)
+    expect(denseLoadCanSkipBuffer({ ...meta, remeshed: true })).toBe(false)
     expect(denseLoadCanSkipBuffer({ ...meta, triangleCount: RETOPO_TRIANGLES })).toBe(false)
     expect(denseLoadCanSkipBuffer({ ...meta, triangleCount: undefined })).toBe(false)
+    expect(denseLoadCanSkipBuffer({ ...meta, keepDenseMesh: true })).toBe(false)
+    expect(denseLoadCanSkipBuffer({ ...meta, rigKind: 'sam-person' })).toBe(false)
     const object = objectFromDenseMeta(meta)
     expect(isRemeshPlaceholder(object.root)).toBe(true)
     expect(object.triangleCount).toBe(RETOPO_TRIANGLES + 1)

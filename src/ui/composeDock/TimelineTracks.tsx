@@ -761,7 +761,7 @@ function Vec3GroupTrack({
   rest,
   selectedKeyframe,
 }: {
-  group: Exclude<Vec3GroupId, 'staticRot'>
+  group: Vec3GroupId
   label: string
   t: number
   duration: number
@@ -929,6 +929,7 @@ export function TimelineTracks(props: {
     fxParamBag,
     fxParamPlots,
   } = props
+  const lookAtMode = useRigStore((s) => s.lookAtMode)
   const rig = useRigStore.getState()
   const scene = useSceneStore.getState()
   const channelPlots = {
@@ -999,16 +1000,30 @@ export function TimelineTracks(props: {
               selectedKeyframe={selectedKeyframe}
             />
           )}
-          <Vec3GroupTrack
-            group={tracking ? 'lookOffset' : 'target'}
-            label={tracking ? VEC3_GROUP_LABELS.lookOffset : VEC3_GROUP_LABELS.target}
-            t={t}
-            duration={duration}
-            ease={ease}
-            axisKeys={axisKeys}
-            rest={tracking ? lookOffset : target}
-            selectedKeyframe={selectedKeyframe}
-          />
+          {lookAtMode === 'free' && (
+            <Vec3GroupTrack
+              group="staticRot"
+              label={VEC3_GROUP_LABELS.staticRot}
+              t={t}
+              duration={duration}
+              ease={ease}
+              axisKeys={axisKeys}
+              rest={staticPose.rotation}
+              selectedKeyframe={selectedKeyframe}
+            />
+          )}
+          {lookAtMode === 'target' && (
+            <Vec3GroupTrack
+              group={tracking ? 'lookOffset' : 'target'}
+              label={tracking ? VEC3_GROUP_LABELS.lookOffset : VEC3_GROUP_LABELS.target}
+              t={t}
+              duration={duration}
+              ease={ease}
+              axisKeys={axisKeys}
+              rest={tracking ? lookOffset : target}
+              selectedKeyframe={selectedKeyframe}
+            />
+          )}
           {cameraNoise.enabled && (
             <Track
               label="FX"
@@ -1180,6 +1195,7 @@ export function TimelineTracks(props: {
             if (track.when === 'target' || track.when === 'offset') return null
             if (track.when === 'static' && vec3GroupOf(track.id) === 'staticPos') return null
             if (track.when === 'static' && cameraKind !== 'static') return null
+            if (track.when === 'free') return null
             const keys = axisKeys[track.id]
             if (keys.length === 0) return null
             const plot = axisPlots[track.id]

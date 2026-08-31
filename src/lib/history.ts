@@ -74,6 +74,12 @@ function capture() {
         name: o.name,
         primitive: o.primitive,
         follow: o.follow,
+        bonePose: o.bonePose,
+        boneTranslate: o.boneTranslate,
+        playClips: o.playClips,
+        figureSex: o.figureSex,
+        activeClip: o.activeClip,
+        displayMode: o.displayMode,
       })),
     },
     environment: {

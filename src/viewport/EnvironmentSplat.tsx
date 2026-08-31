@@ -1,9 +1,9 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
 import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
-import { showEnvironmentSplat, type EnvironmentFormat } from '../lib/environment'
+import { showEnvironmentSplat, SPLAT_INRIA_TO_Y_UP, type EnvironmentFormat } from '../lib/environment'
 import { attachEnvironmentPickProxy } from '../lib/splatPick'
 import { pickKindOf } from '../lib/viewportPick'
 import { useSceneStore } from '../state/useSceneStore'
@@ -57,13 +57,15 @@ function EnvironmentSplatLoaded({
   const gridSize = useEditorStore((s) => s.gridSize)
   const visible = Boolean(!hidden && showEnvironmentSplat(viewMode, recording))
   const groupRef = useRef<THREE.Group>(null)
+  const [basis, setBasis] = useState<THREE.Group | null>(null)
   const viewerRef = useRef<SplatViewer | null>(null)
 
   useLayoutEffect(() => {
-    const group = groupRef.current
-    if (!group) return
+    if (!basis) return
     let cancelled = false
-    const url = URL.createObjectURL(new Blob([buffer], { type: 'application/octet-stream' }))
+    const url = URL.createObjectURL(
+      new Blob([new Uint8Array(buffer)], { type: 'application/octet-stream' }),
+    )
 
     void import('@mkkellogg/gaussian-splats-3d')
       .then((mod) => {
@@ -83,7 +85,7 @@ function EnvironmentSplatLoaded({
         viewer.name = 'drop-in-viewer'
         disableRaycast(viewer)
         viewerRef.current = viewer
-        group.add(viewer)
+        basis.add(viewer)
         return viewer.addSplatScene?.(url, {
           format: format === 'splat' ? lib.SceneFormat.Splat : lib.SceneFormat.Ply,
           showLoadingUI: false,
@@ -94,10 +96,14 @@ function EnvironmentSplatLoaded({
         })
       })
       .catch((error) => {
+        if (cancelled) return
         console.error('Environment splat failed to load', error)
         useSceneStore.getState().showNotice(
           'Environment splat failed to load. The file may be ASCII PLY or not a Gaussian splat.',
         )
+      })
+      .finally(() => {
+        URL.revokeObjectURL(url)
       })
 
     return () => {
@@ -105,12 +111,11 @@ function EnvironmentSplatLoaded({
       const viewer = viewerRef.current
       viewerRef.current = null
       if (viewer) {
-        group.remove(viewer)
+        basis.remove(viewer)
         void Promise.resolve(viewer.dispose?.()).catch(() => undefined)
       }
-      URL.revokeObjectURL(url)
     }
-  }, [buffer, format])
+  }, [basis, buffer, format])
 
   const editing = isSceneEditing(playMode, workspaceMode)
   const tech = isTechMode(viewMode)
@@ -133,13 +138,15 @@ function EnvironmentSplatLoaded({
         ) {
           return
         }
-        e.stopPropagation()
         editor.select('env')
+        if (selected) return
+        e.stopPropagation()
       }}
       position={transform.position}
       rotation={[transform.rotation[0] * DEG, transform.rotation[1] * DEG, transform.rotation[2] * DEG]}
       scale={transform.scale}
     >
+      <group ref={setBasis} name="splat-inria-basis" rotation={SPLAT_INRIA_TO_Y_UP} />
       {selected && tool === 'select' && editing && !tech && (
         <GizmoControls
           object={groupRef as React.RefObject<THREE.Group>}

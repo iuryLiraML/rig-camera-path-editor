@@ -140,6 +140,11 @@ describe('viewportPick', () => {
   it('does not treat a lone spline hit as an orbit lock', () => {
     expect(hasInteractivePick([hit('path-line', 'path:a', 1)])).toBe(false)
     expect(hasInteractivePick([hit('object', 'obj:a', 1)])).toBe(true)
+    expect(hasInteractivePick([hit('env', 'env', 1)])).toBe(true)
+    expect(hasInteractivePick([hit('env', 'env', 1)], { orbitThroughEnv: true })).toBe(false)
+    expect(hasInteractivePick([hit('gizmo', 'gizmo', 0.5), hit('env', 'env', 1)], { orbitThroughEnv: true })).toBe(
+      true,
+    )
   })
 
   it('drops unmarked helpers from the R3F hit list', () => {

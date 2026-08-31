@@ -66,6 +66,38 @@ function throwIfAborted(signal?: AbortSignal) {
   throw new DOMException('The user aborted a request.', 'AbortError')
 }
 
+function detailFromUnknown(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    return trimmed && trimmed !== '[object Object]' ? trimmed : null
+  }
+  if (!value || typeof value !== 'object') return null
+  const rec = value as Record<string, unknown>
+  if (typeof rec.msg === 'string') return detailFromUnknown(rec.msg)
+  if (typeof rec.message === 'string') return detailFromUnknown(rec.message)
+  if (Array.isArray(rec.detail)) {
+    const parts = rec.detail.map((item) => detailFromUnknown(item)).filter((item): item is string => Boolean(item))
+    return parts.length ? parts.join(' ') : null
+  }
+  if (rec.detail != null) return detailFromUnknown(rec.detail)
+  if (rec.body != null) return detailFromUnknown(rec.body)
+  return null
+}
+
+/** Fal often throws a non-Error `{ status, body: { detail } }` — `instanceof Error` drops that. */
+export function falErrorMessage(error: unknown, fallback = 'The Fal request failed.'): string {
+  if (typeof error === 'string' && error.trim()) return error.trim()
+  const fromBody =
+    error && typeof error === 'object' ? detailFromUnknown((error as { body?: unknown }).body) : null
+  if (fromBody) return fromBody
+  const fromSelf = detailFromUnknown(error)
+  if (fromSelf) return fromSelf
+  if (error instanceof Error && error.message.trim() && error.message !== '[object Object]') {
+    return error.message.trim()
+  }
+  return fallback
+}
+
 export async function subscribe<T>(
   modelId: string,
   input: Record<string, unknown>,
@@ -79,13 +111,23 @@ export async function subscribe<T>(
     return (await subscribeImpl(modelId, input, opts)) as T
   }
   const client = liveClient()
-  const result = await client.subscribe(modelId, {
-    input,
-    abortSignal: opts?.signal,
-    logs: opts?.logs,
-    onQueueUpdate: opts?.onQueueUpdate,
-  })
-  return result.data as T
+  try {
+    const result = await client.subscribe(modelId, {
+      input,
+      abortSignal: opts?.signal,
+      logs: opts?.logs,
+      onQueueUpdate: opts?.onQueueUpdate,
+    })
+    const data = result && typeof result === 'object' && 'data' in result ? result.data : result
+    if (data == null) throw new Error(`${modelId} returned an empty payload.`)
+    return data as T
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error
+    if (error && typeof error === 'object' && 'name' in error && (error as { name: string }).name === 'AbortError') {
+      throw error
+    }
+    throw new Error(falErrorMessage(error, `${modelId} failed.`))
+  }
 }
 
 export const DATA_URI_LIMIT = 4_000_000
@@ -139,5 +181,17 @@ export async function uploadFile(
   if (uploadImpl) return uploadImpl(file, signal)
   if (!opts?.storage && uploadUsesDataUri(file)) return fileToDataUri(file)
   throwIfAborted(signal)
-  return liveClient().storage.upload(file)
+  const uploaded = liveClient().storage.upload(file)
+  if (!signal) return uploaded
+  return Promise.race([
+    uploaded,
+    new Promise<never>((_, reject) => {
+      const fail = () => reject(new DOMException('The user aborted a request.', 'AbortError'))
+      if (signal.aborted) {
+        fail()
+        return
+      }
+      signal.addEventListener('abort', fail, { once: true })
+    }),
+  ])
 }

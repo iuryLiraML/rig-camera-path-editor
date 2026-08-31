@@ -69,6 +69,8 @@ export function assertGaussianSplat(buffer: ArrayBuffer, fileName?: string): 'pl
   if (kind === 'png' || kind === 'html') {
     throw new Error('Fal returned an image or error page instead of a splat file.')
   }
+  // INRIA .splat is 32 bytes/gaussian. Fal sometimes labels that file .ply.
+  if (buffer.byteLength >= 32 * 1024 && buffer.byteLength % 32 === 0) return 'splat'
   if (fileName && /\.splat$/i.test(fileName) && buffer.byteLength >= 32) return 'splat'
   if (fileName && /\.ply$/i.test(fileName)) {
     throw new Error('This PLY is not a binary Gaussian splat the viewport can load.')

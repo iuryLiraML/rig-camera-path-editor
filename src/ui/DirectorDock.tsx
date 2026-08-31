@@ -297,7 +297,7 @@ export function DirectorDock() {
           <div className="flex items-center gap-0.5">
             <button
               type="button"
-              title="Import a .glb or .gltf"
+              title="Import a .glb, .gltf or .obj"
               onClick={() => useEditorStore.getState().setShowImportModal(true)}
               className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-ink-dim hover:bg-panel-2 hover:text-ink"
             >

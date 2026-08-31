@@ -26,7 +26,7 @@ export const CAMERA_CHANNELS: CameraChannel[] = [
   },
 ]
 
-export type CameraAxisWhen = 'static' | 'target' | 'offset'
+export type CameraAxisWhen = 'static' | 'free' | 'target' | 'offset'
 
 export type CameraAxisTrack = {
   id: Vec3AxisChannel
@@ -39,9 +39,9 @@ export const CAMERA_AXIS_TRACKS: CameraAxisTrack[] = [
   { id: 'staticPosX', label: `Camera · ${VEC3_AXIS_LABELS.staticPosX}`, format: 'look', when: 'static' },
   { id: 'staticPosY', label: `Camera · ${VEC3_AXIS_LABELS.staticPosY}`, format: 'look', when: 'static' },
   { id: 'staticPosZ', label: `Camera · ${VEC3_AXIS_LABELS.staticPosZ}`, format: 'look', when: 'static' },
-  { id: 'staticRotX', label: `Camera · ${VEC3_AXIS_LABELS.staticRotX}`, format: 'degrees', when: 'static' },
-  { id: 'staticRotY', label: `Camera · ${VEC3_AXIS_LABELS.staticRotY}`, format: 'degrees', when: 'static' },
-  { id: 'staticRotZ', label: `Camera · ${VEC3_AXIS_LABELS.staticRotZ}`, format: 'degrees', when: 'static' },
+  { id: 'staticRotX', label: `Camera · ${VEC3_AXIS_LABELS.staticRotX}`, format: 'degrees', when: 'free' },
+  { id: 'staticRotY', label: `Camera · ${VEC3_AXIS_LABELS.staticRotY}`, format: 'degrees', when: 'free' },
+  { id: 'staticRotZ', label: `Camera · ${VEC3_AXIS_LABELS.staticRotZ}`, format: 'degrees', when: 'free' },
   { id: 'targetX', label: VEC3_AXIS_LABELS.targetX, format: 'look', when: 'target' },
   { id: 'targetY', label: VEC3_AXIS_LABELS.targetY, format: 'look', when: 'target' },
   { id: 'targetZ', label: VEC3_AXIS_LABELS.targetZ, format: 'look', when: 'target' },

@@ -41,12 +41,12 @@ export function ImportAssetsModal() {
         >
           <CubeIcon size={28} />
           <span className="text-[12px] text-ink">Drag & Drop models or browse.</span>
-          <span className="text-[10px] text-ink-dim">.glb, .gltf, .ply, .splat</span>
+          <span className="text-[10px] text-ink-dim">.glb, .gltf, .obj, .ply, .splat</span>
         </button>
         <input
           ref={inputRef}
           type="file"
-          accept=".glb,.gltf,.ply,.splat"
+          accept=".glb,.gltf,.obj,.ply,.splat"
           multiple
           className="hidden"
           onChange={(e) => {

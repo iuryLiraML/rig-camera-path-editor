@@ -194,20 +194,21 @@ After people or prop lifts:
 - Then build the camera move as usual (preset or path) and play_preview.
 
 Fail closed: if the tool says to add a Fal key or attach a photo, tell the user that
-in one sentence. Never claim a Generate tab or a visible segment tool exists.`,
+in one sentence. Manual SAM 3.0 tiles (3D Body / 3D Object / 3D Align) live on the
+Generate chip when the user wants a reconstruction without chat.`,
 }
 
 const sceneBlock: AgentSkill = {
   name: 'scene-block',
   description:
-    'Block the attached still as palco + posed clay people/props. Propose a mask list; the user confirms Place in scene.',
+    'Block the attached still as posed clay people/props. Propose a mask list; the user confirms Place in scene. Palco is the Environment chip, not this command.',
   body: `# Scene block
 
 The user attached a still and wants to **block this scene** (also: "block this shot", "quero blocar essa cena").
 
 Call \`block_scene_from_image\` **once**. No extra arguments. That tool:
-- Segments people and props (SAM 3.1) and opens the review list.
-- Does **not** lift, pose, or generate the palco yet.
+- Segments people, animals, and props with SAM 3.1 **nouns** (person, dog, table, plant, …) and opens the review list.
+- Does **not** lift, pose, or generate the palco. Location is the Environment chip.
 
 Then **stop**. The user edits the list and clicks **Place in scene**. Do not call:
 - \`generate_prop\`, \`block_people_from_image\`, \`set_scene_environment\`, or \`pose_object\`

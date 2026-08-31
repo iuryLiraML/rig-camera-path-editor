@@ -29,6 +29,19 @@ import {
   isShippedViewportBgDefault,
 } from '../viewport/viewportBackground'
 import { boundsAreUsable, meshWorldBounds } from '../lib/prepareImport'
+import {
+  applyAssetDisplay,
+  captureSourceMaterials,
+  createAssetDisplayResources,
+  disposeAssetDisplayResources,
+  sourceMaterialsForClone,
+  type AssetDisplayMode,
+  type SourceMaterialMap,
+} from '../lib/assetDisplay'
+import { countRenderedTriangles } from '../lib/geometryStats'
+import type { ModelFormat } from '../lib/modelCodec'
+
+export type { ModelFormat } from '../lib/modelCodec'
 
 export type Vec3 = [number, number, number]
 
@@ -40,19 +53,10 @@ export const SHADE_RAMP = [0.79, 0.55, 0.92, 0.44, 0.68, 0.33, 0.85, 0.6]
 let shadeCursor = 0
 export const nextShade = () => SHADE_RAMP[shadeCursor++ % SHADE_RAMP.length]
 
-export function makeClayMaterial(shade: number) {
-  return new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setScalar(shade),
-    roughness: 0.9,
-    metalness: 0,
-    side: THREE.DoubleSide,
-  })
-}
-
 /** Center on origin, rest on the floor and normalize to ~2 world units. */
-export function normalizeModel(root: THREE.Object3D): THREE.Object3D {
+export function normalizeModel(root: THREE.Object3D, opts?: { includePoints?: boolean }): THREE.Object3D {
   root.updateMatrixWorld(true)
-  const box = meshWorldBounds(root)
+  const box = meshWorldBounds(root, { keepPoints: opts?.includePoints })
   if (!boundsAreUsable(box)) return root
 
   const size = box.getSize(new THREE.Vector3())
@@ -60,7 +64,7 @@ export function normalizeModel(root: THREE.Object3D): THREE.Object3D {
   root.scale.multiplyScalar(2 / maxDim)
 
   root.updateMatrixWorld(true)
-  const scaled = meshWorldBounds(root)
+  const scaled = meshWorldBounds(root, { keepPoints: opts?.includePoints })
   if (!boundsAreUsable(scaled)) return root
   const center = scaled.getCenter(new THREE.Vector3())
   root.position.x -= center.x
@@ -79,6 +83,21 @@ export function applyClay(root: THREE.Object3D, material: THREE.MeshStandardMate
   })
 }
 
+export function stashImportedMaterials(root: THREE.Object3D) {
+  root.traverse((child) => {
+    if (child instanceof THREE.Mesh && child.userData.rigSourceMaterial == null) {
+      child.userData.rigSourceMaterial = child.material
+    }
+  })
+}
+
+export function restoreImportedMaterials(root: THREE.Object3D) {
+  root.traverse((child) => {
+    if (child instanceof THREE.Mesh && child.userData.rigSourceMaterial) {
+      child.material = child.userData.rigSourceMaterial
+    }
+  })
+}
 export interface Transform {
   position: Vec3
   rotation: Vec3 // degrees
@@ -121,10 +140,17 @@ export interface SceneObject {
   name: string
   root: THREE.Object3D
   material: THREE.MeshStandardMaterial
+  sourceMaterials: SourceMaterialMap
+  wireframeMaterial: THREE.MeshStandardMaterial
+  displayMode: AssetDisplayMode
   /** grayscale tone 0..1 */
   shade: number
-  /** IndexedDB key of the source .glb buffer; null for primitives / built-in shape */
+  /** IndexedDB key of the source model buffer; null for primitives / built-in shape */
   bufferKey: string | null
+  /** Raw source bytes stored under bufferKey. Remesh output always becomes glb. */
+  sourceFormat?: 'glb' | 'gltf' | 'obj'
+  /** Encoding of the persisted mesh source; legacy imported objects are glTF. */
+  modelFormat?: ModelFormat
   /** parametric primitive descriptor (serializable); absent for GLB imports */
   primitive?: PrimitiveSpec
   transform: Transform
@@ -139,27 +165,38 @@ export interface SceneObject {
   follow?: FollowConfig
   /** Cached so ObjectBar remesh does not walk a dense live mesh every render. */
   triangleCount?: number
+  /** True after a remesh GLB replaced the dense source — never restore as a cube. */
+  remeshed?: boolean
   rigKind?: import('../lib/environment').RigKind
+  /** Scene-block clay: load the GLB, never the remesh cube. */
+  keepDenseMesh?: boolean
+  /** SAM 3.0 textured GLB — Clay mode can still gray it. */
+  keepTexture?: boolean
+  /** VGGT coloured point cloud — import keeps THREE.Points, not camera cones. */
+  keepPoints?: boolean
+  /** Dummy FK pose in degrees, applied when Play clips is off. */
+  bonePose?: Record<string, Vec3>
+  /** Dummy FK local bone positions that left bind. */
+  boneTranslate?: Record<string, Vec3>
+  /** Female / Male bundled figure. Ignored unless rigKind is dummy. */
+  figureSex?: 'female' | 'male'
 }
 
 let nextId = 1
 export const makeSceneId = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${nextId++}`
 
-function meshTriangleCount(root: THREE.Object3D): number {
-  let total = 0
-  root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh)) return
-    const geometry = child.geometry as THREE.BufferGeometry
-    total += (geometry.index?.count ?? geometry.attributes.position?.count ?? 0) / 3
-  })
-  return Math.round(total)
-}
-
 /**
  * Removed objects are parked here (roots stay alive in memory) so undo/redo
  * can resurrect them — meshes can't be serialized into history snapshots.
  */
-export const objectGraveyard = new Map<string, SceneObject>()
+class ObjectGraveyard extends Map<string, SceneObject> {
+  clear(): void {
+    for (const object of this.values()) disposeAssetDisplayResources(object)
+    super.clear()
+  }
+}
+
+export const objectGraveyard = new ObjectGraveyard()
 const GRAVEYARD_CAP = 40
 
 const objectRemovedListeners = new Set<(id: string) => void>()
@@ -173,11 +210,23 @@ export function onSceneObjectRemoved(listener: (id: string) => void) {
 }
 
 function bury(object: SceneObject) {
+  const replaced = objectGraveyard.get(object.id)
+  if (replaced && replaced !== object) disposeAssetDisplayResources(replaced)
   objectGraveyard.set(object.id, object)
   while (objectGraveyard.size > GRAVEYARD_CAP) {
     const oldest = objectGraveyard.keys().next().value as string
+    const evicted = objectGraveyard.get(oldest)
     objectGraveyard.delete(oldest)
+    if (evicted) disposeAssetDisplayResources(evicted)
   }
+}
+
+export function clearObjectGraveyard(): void {
+  objectGraveyard.clear()
+}
+
+export function disposeSceneObjectDisplays(objects: Iterable<SceneObject>): void {
+  for (const object of objects) disposeAssetDisplayResources(object)
 }
 
 export function makeObject(
@@ -186,20 +235,23 @@ export function makeObject(
   options: Partial<
     Pick<
       SceneObject,
-      'id' | 'shade' | 'bufferKey' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'rigKind'
+      'id' | 'shade' | 'bufferKey' | 'sourceFormat' | 'modelFormat' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'remeshed' | 'rigKind' | 'keepDenseMesh' | 'keepTexture' | 'keepPoints' | 'bonePose' | 'boneTranslate' | 'figureSex' | 'displayMode'
     >
   > = {},
 ): SceneObject {
   const shade = options.shade ?? nextShade()
-  const material = makeClayMaterial(shade)
-  applyClay(root, material)
-  return {
+  if (options.keepTexture) stashImportedMaterials(root)
+  const displayResources = createAssetDisplayResources(root, shade)
+  const object: SceneObject = {
     id: options.id ?? makeSceneId('obj'),
     name,
     root,
-    material,
+    ...displayResources,
+    displayMode: options.displayMode ?? 'solid',
     shade,
     bufferKey: options.bufferKey ?? null,
+    sourceFormat: options.sourceFormat,
+    modelFormat: options.modelFormat,
     primitive: options.primitive,
     transform: options.transform ?? identityTransform,
     keys: options.keys ?? [],
@@ -207,9 +259,18 @@ export function makeObject(
     playClips: options.playClips ?? true,
     activeClip: options.activeClip,
     follow: options.follow,
-    triangleCount: options.triangleCount,
+    triangleCount: options.triangleCount ?? countRenderedTriangles(root),
+    remeshed: options.remeshed,
     rigKind: options.rigKind ?? 'none',
+    keepDenseMesh: options.keepDenseMesh,
+    keepTexture: options.keepTexture,
+    keepPoints: options.keepPoints,
+    bonePose: options.bonePose,
+    boneTranslate: options.boneTranslate,
+    figureSex: options.figureSex,
   }
+  applyAssetDisplay(object, options.keepTexture ? 'look' : 'clay')
+  return object
 }
 
 /** Build a parametric primitive object (geometry rebuilt from its spec). */
@@ -245,8 +306,10 @@ export type PendingLift = {
   name: string
   kind: LiftKind
   objectId?: string
-  /** 0..1 when Fal reports a real fraction; null = indeterminate job bar. */
+  /** 0..1 when Fal reports a real fraction; null = time-based remesh bar. */
   progress: number | null
+  /** Epoch ms when the job entered the queue — drives the remesh clock. */
+  startedAt: number
 }
 
 interface SceneState {
@@ -264,13 +327,20 @@ interface SceneState {
   setLiftProgress: (id: string, progress: number | null) => void
   endLift: (id: string) => void
   addObject: (object: SceneObject) => void
-  replaceImportedRoot: (id: string, root: THREE.Object3D, clips: THREE.AnimationClip[]) => void
+  replaceImportedRoot: (
+    id: string,
+    root: THREE.Object3D,
+    clips: THREE.AnimationClip[],
+    sourceMaterials?: SourceMaterialMap,
+    modelFormat?: ModelFormat,
+  ) => void
   addPrimitive: (kind: PrimitiveKind) => void
   updatePrimitiveParams: (id: string, params: Record<string, number>) => void
   removeObject: (id: string) => void
   renameObject: (id: string, name: string) => void
   duplicateObject: (id: string) => void
   setObjectShade: (id: string, shade: number) => void
+  setObjectDisplayMode: (id: string, displayMode: AssetDisplayMode) => void
   setImporting: (delta: number) => void
   setTransform: (id: string, part: keyof Transform, axis: 0 | 1 | 2, value: number) => void
   setTransformAll: (id: string, transform: Transform) => void
@@ -295,6 +365,15 @@ interface SceneState {
   clearObjectKeys: (id: string) => void
   applySpinPreset: (id: string) => void
   setPlayClips: (id: string, on: boolean) => void
+  setBonePose: (id: string, bonePose: Record<string, Vec3> | undefined) => void
+  setDummyFk: (
+    id: string,
+    patch: {
+      bonePose?: Record<string, Vec3>
+      boneTranslate?: Record<string, Vec3>
+      playClips?: boolean
+    },
+  ) => void
   setActiveClip: (id: string, name: string) => void
   /** attach/detach an object to a motion path (null = free, keyframe-driven) */
   setFollow: (id: string, follow: FollowConfig | null) => void
@@ -311,13 +390,19 @@ interface SceneState {
       name: string
       primitive?: PrimitiveSpec
       follow?: FollowConfig
+      bonePose?: Record<string, Vec3>
+      boneTranslate?: Record<string, Vec3>
+      playClips?: boolean
+      figureSex?: 'female' | 'male'
+      activeClip?: string
+      displayMode?: AssetDisplayMode
     }[],
   ) => void
   setBgColor: (hex: string) => void
   setShowGrid: (show: boolean) => void
   setLightIntensity: (value: number) => void
   dismissOnboarding: () => void
-  showNotice: (message: string) => void
+  showNotice: (message: string, durationMs?: number) => void
 }
 
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
@@ -342,7 +427,12 @@ export const useSceneStore = create<SceneState>()(
 
         beginLift: (name, kind, objectId) => {
           const id = `lift-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-          set((s) => ({ pendingLifts: [...s.pendingLifts, { id, name, kind, objectId, progress: null }] }))
+          set((s) => ({
+            pendingLifts: [
+              ...s.pendingLifts,
+              { id, name, kind, objectId, progress: null, startedAt: Date.now() },
+            ],
+          }))
           return id
         },
         renameLift: (id, name) =>
@@ -357,15 +447,19 @@ export const useSceneStore = create<SceneState>()(
 
         addObject: (object) => set((s) => ({ objects: [...s.objects, object] })),
 
-        replaceImportedRoot: (id, root, clips) =>
+        replaceImportedRoot: (id, root, clips, sourceMaterials, modelFormat) =>
           updateObject(id, (o) => {
-            applyClay(root, o.material)
-            return {
+            const next = {
+              ...o,
               root,
               clips,
               primitive: undefined,
-              triangleCount: root.userData.rigRemeshPlaceholder ? o.triangleCount : meshTriangleCount(root),
+              sourceMaterials: sourceMaterials ?? captureSourceMaterials(root),
+              triangleCount: root.userData.rigRemeshPlaceholder ? o.triangleCount : countRenderedTriangles(root),
+              modelFormat: modelFormat ?? o.modelFormat,
             }
+            applyAssetDisplay(next, useEditorStore.getState().viewMode)
+            return next
           }),
 
         addPrimitive: (kind) => {
@@ -384,7 +478,7 @@ export const useSceneStore = create<SceneState>()(
               mesh.geometry = buildPrimitiveGeometry(spec)
               mesh.position.y = floorOffsetY(mesh.geometry)
             }
-            return { primitive: spec }
+            return { primitive: spec, triangleCount: countRenderedTriangles(o.root) }
           }),
 
         removeObject: (id) => {
@@ -417,18 +511,33 @@ export const useSceneStore = create<SceneState>()(
               playClips: src.playClips,
               activeClip: src.activeClip,
               shade: src.shade,
+              sourceFormat: src.sourceFormat,
               follow: src.follow ? { ...src.follow } : undefined,
               rigKind: src.rigKind,
+              remeshed: src.remeshed,
+              keepDenseMesh: src.keepDenseMesh,
+              keepTexture: src.keepTexture,
+              keepPoints: src.keepPoints,
+              bonePose: src.bonePose ? { ...src.bonePose } : undefined,
+              boneTranslate: src.boneTranslate ? { ...src.boneTranslate } : undefined,
+              figureSex: src.figureSex,
+              displayMode: src.displayMode,
+              modelFormat: src.modelFormat,
             }
             // rebuild primitives from their spec; clone meshes for GLBs
-            const copy = src.primitive
-              ? makePrimitive(src.primitive.kind, { ...common, params: src.primitive.params })
-              : makeObject(`${src.name} copy`, SkeletonUtils.clone(src.root), {
+            let copy: SceneObject
+            if (src.primitive) {
+              copy = makePrimitive(src.primitive.kind, { ...common, params: src.primitive.params })
+            } else {
+              const clonedRoot = SkeletonUtils.clone(src.root)
+              sourceMaterialsForClone(src, clonedRoot)
+              copy = makeObject(`${src.name} copy`, clonedRoot, {
                   ...common,
                   bufferKey: src.bufferKey,
                   clips: src.clips,
                   triangleCount: src.triangleCount,
                 })
+            }
             if (src.primitive) copy.name = `${src.name} copy`
             return { objects: [...s.objects, copy] }
           }),
@@ -436,7 +545,15 @@ export const useSceneStore = create<SceneState>()(
         setObjectShade: (id, shade) =>
           updateObject(id, (o) => {
             o.material.color.setScalar(shade)
+            o.wireframeMaterial.color.setScalar(shade)
             return { shade }
+          }),
+
+        setObjectDisplayMode: (id, displayMode) =>
+          updateObject(id, (o) => {
+            const next = { ...o, displayMode }
+            applyAssetDisplay(next, useEditorStore.getState().viewMode)
+            return { displayMode }
           }),
 
         setImporting: (delta) => set((s) => ({ importing: Math.max(0, s.importing + delta) })),
@@ -578,6 +695,8 @@ export const useSceneStore = create<SceneState>()(
           })),
 
         setPlayClips: (id, playClips) => updateObject(id, () => ({ playClips })),
+        setBonePose: (id, bonePose) => updateObject(id, () => ({ bonePose })),
+        setDummyFk: (id, patch) => updateObject(id, () => patch),
         setActiveClip: (id, activeClip) => updateObject(id, () => ({ activeClip })),
 
         setFollow: (id, follow) => updateObject(id, () => ({ follow: follow ?? undefined })),
@@ -590,6 +709,7 @@ export const useSceneStore = create<SceneState>()(
               const base = live.get(snap.id) ?? objectGraveyard.get(snap.id)
               if (!base) continue // root lost (graveyard cap) — cannot resurrect
               base.material.color.setScalar(snap.shade)
+              base.wireframeMaterial.color.setScalar(snap.shade)
               objectGraveyard.delete(snap.id)
               // rebuild the primitive geometry if its params changed
               let primitive = base.primitive
@@ -602,7 +722,7 @@ export const useSceneStore = create<SceneState>()(
                 }
                 primitive = snap.primitive
               }
-              next.push({
+              const restored = {
                 ...base,
                 transform: snap.transform,
                 keys: snap.keys,
@@ -610,7 +730,15 @@ export const useSceneStore = create<SceneState>()(
                 name: snap.name,
                 primitive,
                 follow: snap.follow,
-              })
+                bonePose: 'bonePose' in snap ? snap.bonePose : base.bonePose,
+                boneTranslate: 'boneTranslate' in snap ? snap.boneTranslate : base.boneTranslate,
+                playClips: snap.playClips ?? base.playClips,
+                figureSex: snap.figureSex ?? base.figureSex,
+                activeClip: 'activeClip' in snap ? snap.activeClip : base.activeClip,
+                displayMode: snap.displayMode ?? 'solid',
+              }
+              applyAssetDisplay(restored, useEditorStore.getState().viewMode)
+              next.push(restored)
             }
             for (const o of s.objects) {
               if (!snaps.some((x) => x.id === o.id)) bury(o)
@@ -623,10 +751,10 @@ export const useSceneStore = create<SceneState>()(
         setLightIntensity: (lightIntensity) => set({ lightIntensity }),
         dismissOnboarding: () => set({ onboardingDismissed: true }),
 
-        showNotice: (message) => {
+        showNotice: (message, durationMs = 2600) => {
           clearTimeout(noticeTimer)
           set({ notice: message })
-          noticeTimer = setTimeout(() => set({ notice: null }), 2600)
+          noticeTimer = setTimeout(() => set({ notice: null }), durationMs)
         },
       }
     },

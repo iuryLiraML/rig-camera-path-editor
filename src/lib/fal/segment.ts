@@ -64,6 +64,7 @@ export async function segmentImage(opts: {
   prompt: string
   points?: PointPrompt[]
   boxes?: BoxPrompt[]
+  maxMasks?: number
   signal?: AbortSignal
   onQueueUpdate?: FalSubscribeOpts['onQueueUpdate']
 }): Promise<SegmentResult> {
@@ -76,7 +77,7 @@ export async function segmentImage(opts: {
       prompt,
       apply_mask: false,
       return_multiple_masks: true,
-      max_masks: MAX_PERSON_MASKS,
+      max_masks: opts.maxMasks ?? MAX_PERSON_MASKS,
       include_scores: true,
       include_boxes: true,
       ...(opts.points?.length ? { point_prompts: opts.points } : {}),
@@ -103,6 +104,7 @@ export async function segmentImageWithFallback(opts: {
   prompt: string
   points?: PointPrompt[]
   boxes?: BoxPrompt[]
+  maxMasks?: number
   signal?: AbortSignal
   onQueueUpdate?: FalSubscribeOpts['onQueueUpdate']
 }): Promise<SegmentResult> {

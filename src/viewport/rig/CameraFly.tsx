@@ -3,6 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { detachCinemaToStatic } from '../../lib/addStaticCamera'
 import { evaluatedStaticPose, nudgeFov, writeStaticPose } from '../../lib/autoKey'
 import { shouldSampleFlyKey, stopFlyRecord } from '../../lib/flyRecord'
+import { applyLookAtMode } from '../../lib/pathFreeLook'
 import { applyFly } from '../../lib/staticCamera'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useRigStore } from '../../state/useRigStore'
@@ -37,6 +38,7 @@ function commitFlyPose(
   keys: Set<string>,
   speed: number,
   lastKeyed: { current: number | null },
+  pathLookOnly: boolean,
 ) {
   const rig = useRigStore.getState()
   const live = editor.lookThroughLivePose
@@ -53,27 +55,32 @@ function commitFlyPose(
       })
     : source
   const sample = recording && shouldSampleFlyKey(rig.t, lastKeyed.current)
-  writeStaticPose(next, { key: sample })
+  if (pathLookOnly) writeStaticPose({ rotation: next.rotation }, { key: sample })
+  else writeStaticPose(next, { key: sample })
   if (sample) lastKeyed.current = rig.t
   if (!live) editor.setLookThroughLivePose(true)
 }
 
-function prepareFly() {
+function prepareFly(translating: boolean) {
   const rig = useRigStore.getState()
   if (rig.cameraKind !== 'static') {
-    detachCinemaToStatic({ stayInView: true })
-    useRigStore.getState().setLookAtMode('free')
-    useSceneStore.getState().showNotice('Flying a free camera. The path stays in the project.')
-  } else if (rig.lookAtMode === 'target') {
-    rig.setLookAtMode('free')
+    if (translating) {
+      detachCinemaToStatic({ stayInView: true })
+      useRigStore.getState().setLookAtMode('free')
+      useSceneStore.getState().showNotice('Flying a free camera. The path stays in the project.')
+    } else {
+      applyLookAtMode('free')
+    }
+    return
   }
+  if (rig.lookAtMode === 'target') applyLookAtMode('free')
 }
 
 /**
  * Blender-style walk/fly while looking through any cinema camera. WASD or
  * arrows move, Q/E down/up, Shift sprints, LMB or RMB looks, wheel changes
- * speed (Shift+wheel nudges FOV). A path camera detaches on the first move.
- * Fly writes the rest pose only; pose keys come from Add pose or Record fly.
+ * speed (Shift+wheel nudges FOV). Look-only stays on a path camera; WASD
+ * detaches. Fly writes the rest pose only; pose keys come from Add pose or Record fly.
  */
 export function CameraFly() {
   const gl = useThree((s) => s.gl)
@@ -186,12 +193,14 @@ export function CameraFly() {
     const pitchDelta = looking.current ? pitchAcc.current : 0
     yawAcc.current = 0
     pitchAcc.current = 0
-    const moving = forward !== 0 || right !== 0 || up !== 0 || yawDelta !== 0 || pitchDelta !== 0
+    const translating = forward !== 0 || right !== 0 || up !== 0
+    const moving = translating || yawDelta !== 0 || pitchDelta !== 0
 
     if (useRigStore.getState().playing || editor.playMode) return
     if (!recording && !moving) return
 
-    prepareFly()
+    prepareFly(translating)
+    const pathLookOnly = !translating && useRigStore.getState().cameraKind !== 'static'
     const rig = useRigStore.getState()
     if (recording) {
       let t = rig.t + delta / Math.max(0.001, rig.duration)
@@ -211,6 +220,7 @@ export function CameraFly() {
           k,
           speed.current,
           lastKeyed,
+          pathLookOnly,
         )
         lastKeyed.current = null
         stopFlyRecord()
@@ -232,6 +242,7 @@ export function CameraFly() {
       k,
       speed.current,
       lastKeyed,
+      pathLookOnly,
     )
   })
 

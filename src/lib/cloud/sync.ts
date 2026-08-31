@@ -83,18 +83,19 @@ async function uploadDirtyAssets(
       if (!meta.bufferKey) continue
       const buffer = await idbGet<ArrayBuffer>(STORES.buffers, meta.bufferKey)
       if (!buffer) {
-        throw new Error(`The GLB for “${meta.name}” is missing from this browser cache.`)
+        throw new Error(`The model for “${meta.name}” is missing from this browser cache.`)
       }
       const sha256 = await sha256Hex(buffer)
       const existing = assets.bufferAssets[meta.bufferKey]
       if (existing?.sha256 === sha256) continue
+      const format = meta.sourceFormat ?? 'glb'
       const uploaded = await uploadCloudBytes(
         accessToken,
         projectId,
         buffer,
-        `${meta.name || 'model'}.glb`,
-        'model/gltf-binary',
-        'glb',
+        `${meta.name || 'model'}.${format}`,
+        format === 'obj' ? 'text/plain' : format === 'gltf' ? 'model/gltf+json' : 'model/gltf-binary',
+        format === 'obj' ? 'ingest-source' : 'glb',
       )
       assets.bufferAssets[meta.bufferKey] = uploaded
     }

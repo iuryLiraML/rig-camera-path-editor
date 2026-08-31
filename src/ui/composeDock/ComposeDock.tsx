@@ -110,6 +110,7 @@ export function ComposeDock() {
   const targetYKeys = useRigStore((s) => s.targetYKeys)
   const targetZKeys = useRigStore((s) => s.targetZKeys)
   const cameraKind = useRigStore((s) => s.cameraKind)
+  const lookAtMode = useRigStore((s) => s.lookAtMode)
   const staticPose = useRigStore((s) => s.staticPose)
   const fov = useRigStore((s) => s.fov)
   const roll = useRigStore((s) => s.roll)
@@ -351,6 +352,7 @@ export function ComposeDock() {
                       targetObjectId && objects.some((object) => object.id === targetObjectId),
                     ),
                     cameraKind,
+                    lookAtMode,
                     axisKeys,
                     axisPlots,
                   })}

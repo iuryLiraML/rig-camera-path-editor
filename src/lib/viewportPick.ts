@@ -179,8 +179,15 @@ export function filterViewportHits<T extends { object: Object3D; distance: numbe
 }
 
 /** True when a left-click should hold orbit (not a fat spline miss). */
-export function hasInteractivePick(hits: { object: Object3D; distance: number }[]): boolean {
-  return tagHits(hits).some((item) => item.kind !== 'path-line')
+export function hasInteractivePick(
+  hits: { object: Object3D; distance: number }[],
+  opts?: { orbitThroughEnv?: boolean },
+): boolean {
+  return tagHits(hits).some((item) => {
+    if (item.kind === 'path-line') return false
+    if (item.kind === 'env' && opts?.orbitThroughEnv) return false
+    return true
+  })
 }
 
 /**

@@ -16,6 +16,8 @@ export const TRIPO_SPLAT = 'tripo3d/triposplat'
 export const TRIPO_SPLAT_GAUSSIANS = 131_072
 export const MESHY_V7_IMAGE_TO_3D = 'meshy/v7/image-to-3d'
 export const MESHY_MULTI_ANIMATION = 'fal-ai/meshy/rigging/multi-animation'
+/** Feed-forward multi-view reconstruction. Geometry only — estimated cameras are discarded. */
+export const VGGT_1B = 'fal-ai/vggt-1b'
 
 /** Clay-friendly cap so Generate does not immediately trip the remesh warning. */
 export const GENERATE_FACE_LIMIT = 15_000

@@ -27,6 +27,7 @@ describe('buildGraphChannels', () => {
     const channels = buildGraphChannels({
       ...base,
       cameraKind: 'static',
+      lookAtMode: 'free',
       axisKeys: {
         staticPosX: [{ id: 'p', time: 0, value: 1 }],
         staticRotY: [{ id: 'r', time: 0.5, value: 45 }],
@@ -55,5 +56,19 @@ describe('buildGraphChannels', () => {
     expect(ids).toContain('targetX')
     expect(ids).not.toContain('staticRotY')
     expect(ids).not.toContain('fov')
+  })
+
+  it('lists Rotation on a path camera in Free, not Look-At', () => {
+    const channels = buildGraphChannels({
+      ...base,
+      cameraKind: 'path',
+      lookAtMode: 'free',
+      axisKeys: {},
+      axisPlots: {},
+    })
+    const ids = channels.map((channel) => channel.id)
+    expect(ids).toContain('staticRotY')
+    expect(ids).not.toContain('staticPosX')
+    expect(ids).not.toContain('targetX')
   })
 })

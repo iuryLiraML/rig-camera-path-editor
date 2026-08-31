@@ -186,6 +186,7 @@ describe('shortcut handlers', () => {
       'Space',
       'P',
       'D',
+      'Shift+drag',
       'W E R',
       'T',
       'Shift+T',

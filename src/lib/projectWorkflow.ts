@@ -761,11 +761,11 @@ export function buildSubjectProposal(
   const deliverable = workflow.foundation.deliverable.trim() || 'the production'
   const briefHint = workflow.brief.draft?.trim()
   const focusSummary = briefHint
-    ? `Treat "${asset.fileName.replace(/\.(glb|gltf)$/i, '')}" as the hero subject for ${deliverable}. Keep framing centered on it and align camera moves with the approved creative brief.`
-    : `Treat "${asset.fileName.replace(/\.(glb|gltf)$/i, '')}" as the hero subject for ${deliverable}. Center framing and primary camera moves on this object.`
+    ? `Treat "${asset.fileName.replace(/\.(glb|gltf|obj)$/i, '')}" as the hero subject for ${deliverable}. Keep framing centered on it and align camera moves with the approved creative brief.`
+    : `Treat "${asset.fileName.replace(/\.(glb|gltf|obj)$/i, '')}" as the hero subject for ${deliverable}. Center framing and primary camera moves on this object.`
   return {
     sceneObjectId: asset.sceneObjectId,
-    objectName: asset.fileName.replace(/\.(glb|gltf)$/i, ''),
+    objectName: asset.fileName.replace(/\.(glb|gltf|obj)$/i, ''),
     focusSummary,
   }
 }

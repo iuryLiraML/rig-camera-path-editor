@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { AGENT_SKILLS, skillNameForPlan } from './skills'
-import { liftToolFailure, objectPhaseInstruction } from './shotCompiler'
+import { liftToolFailure, objectPhaseInstruction, sceneBlockHandoff } from './shotCompiler'
 import { toolsForPhase } from './toolPhases'
 import { failChipsFor, parseVisionJudge } from './visionJudge'
 import type { AgentMessage, ToolDef } from './providers'
@@ -217,5 +217,36 @@ describe('liftToolFailure', () => {
       ]),
     ).toBeNull()
     expect(liftToolFailure([])).toBeNull()
+  })
+
+  it('does not treat an open Block-this-scene list as a lift failure', () => {
+    const opened: AgentMessage = {
+      role: 'tool',
+      toolCallId: '1',
+      name: 'block_scene_from_image',
+      content: 'Found 2 items. Review the list and confirm Place in scene. Do not pose_object yet.',
+    }
+    expect(liftToolFailure([opened])).toBeNull()
+    expect(sceneBlockHandoff([opened])).toMatch(/Place in scene/)
+    expect(
+      liftToolFailure([
+        {
+          role: 'tool',
+          toolCallId: '2',
+          name: 'block_scene_from_image',
+          content: 'Attach a photo in the chat, then ask again.',
+        },
+      ]),
+    ).toMatch(/Attach a photo/)
+    expect(
+      sceneBlockHandoff([
+        {
+          role: 'tool',
+          toolCallId: '2',
+          name: 'block_scene_from_image',
+          content: 'Attach a photo in the chat, then ask again.',
+        },
+      ]),
+    ).toBeNull()
   })
 })

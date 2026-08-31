@@ -31,6 +31,15 @@ const denseDoc = {
 }
 
 describe('readModelBytes', () => {
+  it('counts triangulated faces from an OBJ source', async () => {
+    const buffer = new TextEncoder().encode(
+      ['v 0 0 0', 'v 1 0 0', 'v 1 1 0', 'v 0 1 0', 'f 1 2 3 4'].join('\n'),
+    ).buffer
+    expect(inspectModelBuffer(buffer, 'obj').triangles).toBe(2)
+    const read = await readModelBytes(buffer, 'obj')
+    expect(read.triangles).toBe(2)
+  })
+
   it('counts triangles from a GLB buffer without building a scene', async () => {
     const buffer = encodeGlb(denseDoc)
     expect(inspectModelBuffer(buffer).triangles).toBe(80_001)

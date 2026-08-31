@@ -42,10 +42,16 @@ export type SelectableId =
   | 'env'
   | `obj:${string}`
 
+export type SelectionMemberId = `obj:${string}` | `path:${string}`
+
 interface EditorState {
   tool: Tool
   projection: Projection
   selection: SelectableId | null
+  /** Ordered lasso members; session-only. `selection` remains the active member. */
+  selectionIds: SelectionMemberId[]
+  /** Dummy limb under FK pose (null = whole-object gizmo). */
+  dummyBone: string | null
   gizmoMode: GizmoMode
   playMode: boolean
   /** main viewport looks through the cinema camera (editing UI stays visible) */
@@ -150,6 +156,8 @@ interface EditorState {
   setTool: (tool: Tool) => void
   setProjection: (projection: Projection) => void
   select: (id: SelectableId | null) => void
+  selectMany: (ids: SelectionMemberId[]) => void
+  setDummyBone: (name: string | null) => void
   selectKeyframe: (key: SelectedTimelineKey | null) => void
   selectTimelineKey: (key: SelectedTimelineKey, id: SelectableId) => void
   setGizmoMode: (mode: GizmoMode) => void
@@ -216,6 +224,8 @@ export const useEditorStore = create<EditorState>((set) => ({
   tool: 'select',
   projection: 'perspective',
   selection: null,
+  selectionIds: [],
+  dummyBone: null,
   gizmoMode: 'translate',
   playMode: false,
   cameraView: false,
@@ -281,8 +291,16 @@ export const useEditorStore = create<EditorState>((set) => ({
     }),
   setProjection: (projection) => set({ projection }),
   select: (selection) => {
+    const selectionIds: SelectionMemberId[] =
+      selection?.startsWith('obj:')
+        ? [selection as `obj:${string}`]
+        : selection === 'camera-path'
+          ? [`path:${usePathStore.getState().activePathId}`]
+          : []
     set((s) => ({
       selection,
+      selectionIds,
+      dummyBone: selection && s.selection === selection ? s.dummyBone : null,
       selectedKeyframe: null,
       cameraPanel:
         selection === 'cinema-camera' && s.workspaceMode === 'compose' && s.cameraPanel === 'closed'
@@ -293,8 +311,30 @@ export const useEditorStore = create<EditorState>((set) => ({
     // spline-point set, otherwise W/E/R stays glued to the last anchors.
     if (selection !== 'camera-path') usePathStore.getState().selectAnchor(null)
   },
+  selectMany: (ids) => {
+    const selectionIds = [...new Set(ids)]
+    const active = selectionIds.at(-1) ?? null
+    if (active?.startsWith('path:')) {
+      usePathStore.getState().setActivePath(active.slice(5))
+    }
+    usePathStore.getState().selectAnchor(null)
+    const selection: SelectableId | null =
+      active === null ? null : active.startsWith('path:') ? 'camera-path' : active as `obj:${string}`
+    set({
+      selectionIds,
+      selection,
+      dummyBone: null,
+      selectedKeyframe: null,
+    })
+  },
+  setDummyBone: (dummyBone) => set({ dummyBone }),
   selectKeyframe: (selectedKeyframe) => set({ selectedKeyframe }),
-  selectTimelineKey: (selectedKeyframe, selection) => set({ selectedKeyframe, selection }),
+  selectTimelineKey: (selectedKeyframe, selection) =>
+    set({
+      selectedKeyframe,
+      selection,
+      selectionIds: selection.startsWith('obj:') ? [selection as `obj:${string}`] : [],
+    }),
   setGizmoMode: (gizmoMode) =>
     set((s) => ({
       gizmoMode,

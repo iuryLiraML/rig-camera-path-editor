@@ -123,6 +123,17 @@ export async function runShotCompiler(opts: {
           retried,
         }
       }
+      const blockHandoff = sceneBlockHandoff(messages.slice(objectPhaseFrom))
+      if (blockHandoff) {
+        return {
+          messages,
+          plan,
+          passed: false,
+          failChips: [],
+          retried,
+          askUser: blockHandoff,
+        }
+      }
       if (opts.hasImage && cycle === 0) {
         plan = retargetPlanSubjectAfterLift(plan, idsBeforeLift, objectCandidates())
       }
@@ -144,7 +155,6 @@ export async function runShotCompiler(opts: {
     if (report.pass) {
       if (opts.provider.vision) {
         const vision = await runVisionJudge(opts, messages, plan)
-        messages = vision.messages
         if (!vision.pass) {
           lastBlame = vision.blame
           lastCodes = ['vision']
@@ -184,7 +194,22 @@ export async function runShotCompiler(opts: {
   }
 }
 
-const LIFT_TOOLS = new Set(['block_people_from_image', 'generate_prop'])
+const LIFT_TOOLS = new Set(['block_people_from_image', 'generate_prop', 'block_scene_from_image'])
+
+export function isSceneBlockHandoff(content: string): boolean {
+  return /Place in scene/i.test(content) || /^Found \d+ item/i.test(content)
+}
+
+/** Review list is open — stop the compiler; do not run camera or the vision judge. */
+export function sceneBlockHandoff(messages: AgentMessage[]): string | null {
+  let last: string | null = null
+  for (const message of messages) {
+    if (message.role !== 'tool' || message.name !== 'block_scene_from_image') continue
+    last = message.content
+  }
+  if (!last || !isSceneBlockHandoff(last)) return null
+  return last
+}
 
 /** Last lift-tool result in this slice, if it did not place an object. */
 export function liftToolFailure(messages: AgentMessage[]): string | null {
@@ -195,6 +220,7 @@ export function liftToolFailure(messages: AgentMessage[]): string | null {
   }
   if (last === null) return null
   if (last.startsWith('Placed ') || last.startsWith('Added to Unplaced')) return null
+  if (isSceneBlockHandoff(last)) return null
   if (last.startsWith('Error:')) return last.replace(/^Error:\s*/, '')
   return last
 }
@@ -248,7 +274,7 @@ async function runVisionJudge(
   },
   messages: AgentMessage[],
   plan: ShotPlan,
-): Promise<{ messages: AgentMessage[]; pass: boolean; blame: JudgeBlame }> {
+): Promise<{ pass: boolean; blame: JudgeBlame }> {
   const stills: string[] = []
   const rig = useRigStore.getState()
   for (const t of [0, 0.5, 1] as const) {
@@ -259,7 +285,6 @@ async function runVisionJudge(
   }
   if (stills.length === 0) {
     return {
-      messages,
       pass: false,
       blame: 'camera',
     }
@@ -286,5 +311,5 @@ async function runVisionJudge(
   const last = result.messages.at(-1)
   const text = last && last.role === 'assistant' ? last.text : ''
   const parsed = parseVisionJudge(text)
-  return { messages: result.messages, pass: parsed.pass, blame: parsed.blame }
+  return { pass: parsed.pass, blame: parsed.blame }
 }

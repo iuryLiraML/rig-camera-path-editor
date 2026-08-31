@@ -30,6 +30,7 @@ import {
   getCameraOptionsSnapshot,
   useCameraOptionsStore,
 } from '../../state/useCameraOptionsStore'
+import { applyLookAtMode } from '../pathFreeLook'
 import { setCameraPathSpace, setTrackObjectId } from '../pathSpaceBind'
 import { vec3GroupHasKeys } from '../timelineKey'
 import { getLiftAttachment, isVideoFile } from '../fal/attachment'
@@ -175,11 +176,11 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'set_look_at',
     description:
-      'Where the camera looks, and whether the path is world-space or rides with a tracked object (relative camera: chase, over-shoulder, hood-mount). Optional offset is local to the tracked object.',
+      'Where the camera looks. mode=target aims at a point or tracked object; motion follows the path tangent; free keeps the camera on the path and authors view rotation. path_space object rides with a tracked object (chase, over-shoulder, hood-mount). Optional offset is local to the tracked object.',
     input_schema: {
       type: 'object',
       properties: {
-        mode: { type: 'string', enum: ['target', 'motion'] },
+        mode: { type: 'string', enum: ['target', 'motion', 'free'] },
         target: { ...vec3, description: 'World position (mode=target, when not tracking an object)' },
         object_id: {
           type: 'string',
@@ -257,7 +258,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'pose_object',
     description:
-      "Move, rotate, or scale a scene object. Position Y is feet on the floor unless lift=true — do not pass the AABB center Y. After a group photo lift, each Person N is its own id — pose them separately. Never pose a leftover primitive. Only include the parts you want to change. Cannot change a figure's body articulation; that pose comes from the photo.",
+      "Move, rotate, or scale a scene object. Position Y is feet on the floor unless lift=true — do not pass the AABB center Y. After a group photo lift, each Person N is its own id — pose them separately. Never pose a leftover primitive. Only include the parts you want to change. Cannot change a figure's body articulation — Dummy FK is the editor Bone / joint gizmos, and a photo person's pose comes from the photo.",
     input_schema: {
       type: 'object',
       properties: {
@@ -385,7 +386,7 @@ export const TOOL_DEFS: ToolDef[] = [
   {
     name: 'block_scene_from_image',
     description:
-      'Propose a Block-this-scene list from the attached still (SAM 3.1 masks). Opens the review panel. Do not lift or pose yet. Use when the user wants to block the whole scene from the photo. Not for a single person or a single prop.',
+      'Propose a Block-this-scene list from the attached still (SAM 3.1 masks for people, animals, and props). Opens the review panel. Do not lift, pose, or generate the palco. Use when the user wants to block the whole scene from the photo. Not for a single person or a single prop.',
     input_schema: { type: 'object', properties: {} },
   },
   {
@@ -602,9 +603,11 @@ const EXECUTORS: Record<string, Executor> = {
       return 'offset needs a tracked object. Pass object_id, or track an object first.'
     }
     if (input.mode === 'motion') {
-      rig.setLookAtMode('path-tangent')
+      applyLookAtMode('path-tangent')
+    } else if (input.mode === 'free') {
+      applyLookAtMode('free')
     } else {
-      rig.setLookAtMode('target')
+      applyLookAtMode('target')
     }
     if (objectId) {
       const object = scene.objects.find((item) => item.id === objectId)
@@ -635,7 +638,13 @@ const EXECUTORS: Record<string, Executor> = {
       ? scene.objects.find((item) => item.id === next.targetObjectId)?.name
       : null
     const bits = [
-      next.lookAtMode === 'path-tangent' ? 'motion' : tracked ? `tracking "${tracked}"` : 'target',
+      next.lookAtMode === 'path-tangent'
+        ? 'motion'
+        : next.lookAtMode === 'free'
+          ? 'free'
+          : tracked
+            ? `tracking "${tracked}"`
+            : 'target',
       next.pathSpace === 'object' ? 'path rides object' : 'path in world',
     ]
     if (tracked && next.lookAtMode === 'target') {
@@ -999,7 +1008,9 @@ export function buildSceneContext(): string {
                   offset: rig.lookOffset.map((n) => +n.toFixed(2)),
                 }
               : { mode: 'target', target: rig.target }
-            : { mode: 'motion' },
+            : rig.lookAtMode === 'free'
+              ? { mode: 'free', rotation: rig.staticPose.rotation.map((n) => +n.toFixed(2)) }
+              : { mode: 'motion' },
         path_space: rig.pathSpace,
         path_parent_id: rig.pathSpace === 'object' ? rig.targetObjectId : null,
         fov: rig.fov,

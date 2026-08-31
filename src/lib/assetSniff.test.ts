@@ -36,8 +36,8 @@ describe('sniffAsset', () => {
     expect(() => assertGlbMesh(png.buffer)).toThrow(/not a GLB/)
   })
 
-  it('accepts a .splat filename when bytes have no PLY header', () => {
-    const raw = new Uint8Array(32)
-    expect(assertGaussianSplat(raw.buffer, 'room.splat')).toBe('splat')
+  it('accepts packed .splat bytes even when Fal names the file .ply', () => {
+    const raw = new Uint8Array(32 * 1024)
+    expect(assertGaussianSplat(raw.buffer, 'room.ply')).toBe('splat')
   })
 })

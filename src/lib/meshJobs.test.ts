@@ -6,20 +6,31 @@ import { syncFalSettings } from './fal/settings'
 import { setHistoryClockForTests } from './history'
 import {
   cancelMeshJob,
+  generateObjectFromImage,
   generateObjectFromText,
+  generateSamAlign,
+  generateSamBody,
+  generateSamObject,
+  generatePointCloudFromViews,
   remeshProgressFromQueueUpdate,
   remeshSceneObject,
   resetMeshJobsForTests,
 } from './meshJobs'
+import { SAM_3D_ALIGN, SAM_3D_BODY, SAM_3D_OBJECTS, VGGT_1B } from './fal/models'
+import { useAgentStore } from '../state/useAgentStore'
+import { useEditorStore } from '../state/useEditorStore'
 import {
   FAL_REMESH_MAX_BYTES,
   clearMeshRevisionsForTests,
   clearParkedMeshesForTests,
   isRemeshPlaceholder,
+  makeRemeshPlaceholderRoot,
+  objectFromStoredBuffer,
   undoLastMeshRevision,
 } from './sceneIO'
 import { makeObject, objectGraveyard, useSceneStore } from '../state/useSceneStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
+import { setPersistFlusher } from './persistFlush'
 
 const { idbMemory } = vi.hoisted(() => ({
   idbMemory: new Map<string, ArrayBuffer>(),
@@ -50,6 +61,9 @@ afterEach(() => {
   objectGraveyard.clear()
   useSceneStore.setState({ objects: [], pendingLifts: [], notice: null })
   useEnvironmentStore.setState({ unplacedAssets: [] })
+  useAgentStore.setState({ falKey: '' })
+  useEditorStore.setState({ addDrawerChip: 'generate', viewMode: 'clay' })
+  setPersistFlusher(null)
 })
 
 function encodeTriangleGlb(triangles: 1 | 2): ArrayBuffer {
@@ -142,7 +156,74 @@ describe('remeshProgressFromQueueUpdate', () => {
 })
 
 describe('remeshSceneObject', () => {
-  it('does not call Fal when the file is over 150 MB', async () => {
+  it('uploads an OBJ source as OBJ instead of relabeling its bytes as GLB', async () => {
+    const source = new TextEncoder().encode(
+      ['o Boat', 'v 0 0 0', 'v 1 0 0', 'v 0 1 0', 'f 1 2 3'].join('\n'),
+    ).buffer
+    const live = makeObject('Boat', makeRemeshPlaceholderRoot(), {
+      id: 'boat-obj',
+      bufferKey: 'boat-obj',
+      sourceFormat: 'obj',
+      triangleCount: 90_000,
+    })
+
+    useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    let uploaded: File | undefined
+    setFalTransportForTests({
+      upload: async (file) => {
+        uploaded = file
+        return 'https://up'
+      },
+      subscribe: async () => {
+        throw new Error('stop after upload')
+      },
+    })
+
+    await remeshSceneObject('boat-obj', { sourceBuffer: source, placeholder: true })
+
+    expect(uploaded?.name).toBe('Boat.obj')
+    expect(uploaded?.type).toBe('text/plain')
+    expect(useSceneStore.getState().objects[0].sourceFormat).toBe('obj')
+    expect(isRemeshPlaceholder(useSceneStore.getState().objects[0].root)).toBe(false)
+  })
+
+  it('uploads an OBJ source in its original geometry format and applies the GLB result', async () => {
+    const live = boxObject('panel-1', 'Panel')
+    live.sourceFormat = 'obj'
+    live.modelFormat = 'obj'
+    live.displayMode = 'wireframe'
+    useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    let uploaded: File | undefined
+    setFalTransportForTests({
+      upload: async (file) => {
+        uploaded = file
+        return 'https://up'
+      },
+      subscribe: async () => ({ model_mesh: { url: 'https://out.glb' } }),
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      new Response(new Uint8Array(encodeTriangleGlb(2)), { status: 200 })) as typeof fetch
+    try {
+      const source = new TextEncoder().encode('v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3').buffer
+      await remeshSceneObject('panel-1', { sourceBuffer: source })
+      expect(uploaded?.name).toBe('Panel.obj')
+      expect(uploaded?.type).toBe('text/plain')
+      const remeshed = useSceneStore.getState().objects[0]
+      expect(remeshed.sourceFormat).toBe('glb')
+      expect(remeshed.modelFormat).toBe('gltf')
+      expect(remeshed.displayMode).toBe('wireframe')
+      expect(remeshed.triangleCount).toBe(2)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('does not discard the source object or call Fal when the file is over 150 MB', async () => {
     useSceneStore.setState({ objects: [boxObject('car-1', 'Car')], pendingLifts: [], notice: null })
     configureFal('key-test')
     syncFalSettings('key-test', '3.1')
@@ -160,7 +241,7 @@ describe('remeshSceneObject', () => {
     })
     expect(called).toBe(false)
     expect(useSceneStore.getState().notice).toBe('"Car" is too large to remesh (max 150 MB).')
-    expect(useSceneStore.getState().objects).toEqual([])
+    expect(useSceneStore.getState().objects).toHaveLength(1)
   })
 
   it('runs remesh jobs one at a time', async () => {
@@ -212,8 +293,13 @@ describe('remeshSceneObject', () => {
     }
   })
 
-  it('removes a placeholder when remesh is cancelled', async () => {
-    useSceneStore.setState({ objects: [boxObject('car-1', 'Car')], pendingLifts: [], notice: null })
+  it('loads the original high mesh when an auto-remesh is cancelled', async () => {
+    const live = makeObject('Car', makeRemeshPlaceholderRoot(), {
+      id: 'car-1',
+      bufferKey: 'car-1',
+      triangleCount: 90_000,
+    })
+    useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
     configureFal('key-test')
     syncFalSettings('key-test', '3.1')
     let enteredSubscribe: (() => void) | undefined
@@ -233,7 +319,7 @@ describe('remeshSceneObject', () => {
     })
 
     const pending = remeshSceneObject('car-1', {
-      sourceBuffer: new ArrayBuffer(8),
+      sourceBuffer: encodeTriangleGlb(1),
       placeholder: true,
     })
     await entered
@@ -242,12 +328,45 @@ describe('remeshSceneObject', () => {
     expect(lift?.progress).toBeNull()
     cancelMeshJob(lift!.id)
     await pending
-    expect(useSceneStore.getState().objects).toEqual([])
-    expect(useSceneStore.getState().notice).toBe('Remesh cancelled.')
+    const restored = useSceneStore.getState().objects[0]
+    expect(restored.id).toBe('car-1')
+    expect(isRemeshPlaceholder(restored.root)).toBe(false)
+    expect(restored.triangleCount).toBe(1)
+    expect(restored.keepDenseMesh).toBe(true)
+    expect(useSceneStore.getState().notice).toBe('Remesh cancelled. Keeping high mesh.')
+  })
+
+  it('shows the Fal detail when storage rejects the uploaded mesh', async () => {
+    const placeholder = makeRemeshPlaceholderRoot()
+    const live = makeObject('Boat', placeholder, {
+      id: 'boat-1',
+      bufferKey: 'boat-1',
+      triangleCount: 90_000,
+    })
+    useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    setFalTransportForTests({
+      upload: async () => {
+        throw { status: 422, body: { detail: 'Input mesh could not be processed.' } }
+      },
+    })
+
+    await remeshSceneObject('boat-1', {
+      sourceBuffer: encodeTriangleGlb(1),
+      placeholder: true,
+    })
+
+    expect(useSceneStore.getState().notice).toBe(
+      'Input mesh could not be processed. Keeping high mesh.',
+    )
+    expect(isRemeshPlaceholder(useSceneStore.getState().objects[0].root)).toBe(false)
+    expect(useSceneStore.getState().objects[0].keepDenseMesh).toBe(true)
   })
 
   it('parks the live mesh and restores it when remesh is cancelled', async () => {
     const live = boxObject('car-1', 'Car')
+    live.displayMode = 'wireframe'
     useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
     configureFal('key-test')
     syncFalSettings('key-test', '3.1')
@@ -276,6 +395,7 @@ describe('remeshSceneObject', () => {
     const restored = useSceneStore.getState().objects[0]
     expect(restored.id).toBe('car-1')
     expect(isRemeshPlaceholder(restored.root)).toBe(false)
+    expect(restored.displayMode).toBe('wireframe')
     expect(useSceneStore.getState().notice).toBe('Remesh cancelled.')
   })
 
@@ -379,11 +499,139 @@ describe('remeshSceneObject', () => {
     }
   })
 
+  it('replaces a remesh placeholder with the remeshed mesh', async () => {
+    const remeshed = encodeTriangleGlb(2)
+    const placeholder = makeRemeshPlaceholderRoot()
+    const live = makeObject('Boat', placeholder, {
+      id: 'boat-1',
+      bufferKey: 'boat-1',
+      triangleCount: 90_000,
+    })
+    useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    setFalTransportForTests({
+      upload: async () => 'https://up',
+      subscribe: async () => ({ model_mesh: { url: 'https://out.glb' } }),
+    })
+    const originalFetch = globalThis.fetch
+    let flushed = 0
+    setPersistFlusher(() => {
+      flushed += 1
+    })
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        arrayBuffer: async () => remeshed.slice(0),
+      }) as Response) as typeof fetch
+    try {
+      await remeshSceneObject('boat-1', {
+        sourceBuffer: encodeTriangleGlb(1),
+        placeholder: true,
+      })
+      const next = useSceneStore.getState().objects.find((item) => item.id === 'boat-1')
+      expect(next).toBeTruthy()
+      expect(isRemeshPlaceholder(next!.root)).toBe(false)
+      expect(next?.triangleCount).toBe(2)
+      expect(next?.remeshed).toBe(true)
+      expect(flushed).toBeGreaterThan(0)
+      expect(useSceneStore.getState().notice).toBe('Remeshed "Boat".')
+      const reloaded = await objectFromStoredBuffer(
+        {
+          id: 'boat-1',
+          name: 'Boat',
+          shade: 0.7,
+          bufferKey: 'boat-1',
+          transform: {
+            position: [0, 0, 0],
+            rotation: [0, 0, 0],
+            scale: [1, 1, 1],
+          },
+          keys: [],
+          playClips: true,
+          triangleCount: 90_000,
+          remeshed: true,
+        },
+        remeshed,
+      )
+      expect(isRemeshPlaceholder(reloaded.root)).toBe(false)
+      expect(reloaded.remeshed).toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('falls back to the original high mesh when Tripo rejects auto-remesh', async () => {
+    const placeholder = makeRemeshPlaceholderRoot()
+    const live = makeObject('Boat', placeholder, {
+      id: 'boat-1',
+      bufferKey: 'boat-1',
+      triangleCount: 90_000,
+    })
+    useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    setFalTransportForTests({
+      upload: async () => 'https://up',
+      subscribe: async () => {
+        throw new Error('Tripo remesh rejected the mesh')
+      },
+    })
+    await remeshSceneObject('boat-1', {
+      sourceBuffer: encodeTriangleGlb(1),
+      placeholder: true,
+    })
+    const next = useSceneStore.getState().objects.find((item) => item.id === 'boat-1')
+    expect(next).toBeTruthy()
+    expect(isRemeshPlaceholder(next!.root)).toBe(false)
+    expect(next?.keepDenseMesh).toBe(true)
+    expect(useSceneStore.getState().notice).toBe(
+      'Tripo remesh rejected the mesh. Keeping high mesh.',
+    )
+  })
+
+  it('does not overwrite the original high mesh when a GLB-shaped result cannot be parsed', async () => {
+    const original = encodeTriangleGlb(1)
+    idbMemory.set('boat-1', original)
+    const placeholder = makeRemeshPlaceholderRoot()
+    const live = makeObject('Boat', placeholder, {
+      id: 'boat-1',
+      bufferKey: 'boat-1',
+      triangleCount: 90_000,
+    })
+    useSceneStore.setState({ objects: [live], pendingLifts: [], notice: null })
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    setFalTransportForTests({
+      upload: async () => 'https://up',
+      subscribe: async () => ({ model_mesh: { url: 'https://out.glb' } }),
+    })
+    const broken = new ArrayBuffer(12)
+    new DataView(broken).setUint32(0, 0x46546c67, true)
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () =>
+      ({
+        ok: true,
+        arrayBuffer: async () => broken,
+      }) as Response) as typeof fetch
+    try {
+      await remeshSceneObject('boat-1', { sourceBuffer: original, placeholder: true })
+      expect(idbMemory.get('boat-1')).toEqual(original)
+      const next = useSceneStore.getState().objects[0]
+      expect(isRemeshPlaceholder(next.root)).toBe(false)
+      expect(next.keepDenseMesh).toBe(true)
+      expect(next.remeshed).not.toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
   it('records undo after remesh of a shared-key duplicate', async () => {
     const original = encodeTriangleGlb(1)
     const remeshed = encodeTriangleGlb(2)
     idbMemory.set('car-1', original)
     const live = boxObject('car-1', 'Car')
+    live.displayMode = 'wireframe'
     const copy = boxObject('car-copy', 'Car copy')
     copy.bufferKey = 'car-1'
     useSceneStore.setState({ objects: [live, copy], pendingLifts: [], notice: null })
@@ -407,6 +655,7 @@ describe('remeshSceneObject', () => {
       expect(remeshedObject?.bufferKey).not.toBe('car-1')
       expect(sibling?.bufferKey).toBe('car-1')
       expect(isRemeshPlaceholder(remeshedObject!.root)).toBe(false)
+      expect(remeshedObject?.displayMode).toBe('wireframe')
       expect(remeshedObject?.triangleCount).toBe(2)
       expect(idbMemory.get(remeshedObject!.bufferKey!)?.byteLength).toBe(remeshed.byteLength)
       expect(undoLastMeshRevision('car-1')).toBe(true)
@@ -452,5 +701,268 @@ describe('generateObjectFromText', () => {
     } finally {
       globalThis.fetch = originalFetch
     }
+  })
+})
+
+describe('generateObjectFromImage', () => {
+  it('parks the Meshy GLB on Unplaced and opens My assets', async () => {
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    setFalTransportForTests({
+      subscribe: async () => ({ model_glb: { url: 'https://from-photo.glb' } }),
+      upload: async () => 'https://up',
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://from-photo.glb') {
+        return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${String(input)}`)
+    }) as typeof fetch
+    try {
+      await generateObjectFromImage(new File([new Uint8Array([1, 2, 3])], 'mug.jpg', { type: 'image/jpeg' }))
+      expect(useSceneStore.getState().objects).toHaveLength(0)
+      const shelf = useEnvironmentStore.getState().unplacedAssets
+      expect(shelf).toHaveLength(1)
+      expect(shelf[0]?.name).toBe('mug')
+      expect(useEditorStore.getState().addDrawerChip).toBe('assets')
+      expect(useSceneStore.getState().notice).toContain('Unplaced')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('starts Meshy when Settings has a Fal key even if configureFal was never called', async () => {
+    resetFalForTests()
+    useAgentStore.setState({ falKey: 'user-byok-key' })
+    syncFalSettings('', '3.1')
+    let called = false
+    setFalTransportForTests({
+      subscribe: async () => {
+        called = true
+        return { model_glb: { url: 'https://from-photo.glb' } }
+      },
+      upload: async () => 'https://up',
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://from-photo.glb') {
+        return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${String(input)}`)
+    }) as typeof fetch
+    try {
+      await generateObjectFromImage(new File([new Uint8Array([1])], 'cup.jpg', { type: 'image/jpeg' }))
+      expect(called).toBe(true)
+      expect(useEnvironmentStore.getState().unplacedAssets).toHaveLength(1)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('refuses WebP before calling Meshy', async () => {
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    let called = false
+    setFalTransportForTests({
+      subscribe: async () => {
+        called = true
+        return { model_glb: { url: 'https://from-photo.glb' } }
+      },
+      upload: async () => 'https://up',
+    })
+    await generateObjectFromImage(new File([new Uint8Array([1])], 'phone.webp', { type: 'image/webp' }))
+    expect(called).toBe(false)
+    expect(useSceneStore.getState().notice).toMatch(/JPEG or PNG/)
+    expect(useEnvironmentStore.getState().unplacedAssets).toHaveLength(0)
+  })
+})
+
+describe('generateSamBody', () => {
+  it('lifts 3d-body without a mask and parks a textured person', async () => {
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { model_glb: { url: 'https://body.glb' } }
+      },
+      upload: async () => 'https://photo.jpg',
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://body.glb') {
+        return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${String(input)}`)
+    }) as typeof fetch
+    try {
+      await generateSamBody(new File([new Uint8Array([1])], 'actor.jpg', { type: 'image/jpeg' }))
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.modelId).toBe(SAM_3D_BODY)
+      expect(calls[0]?.input).not.toHaveProperty('mask_url')
+      const shelf = useEnvironmentStore.getState().unplacedAssets
+      expect(shelf).toHaveLength(1)
+      expect(shelf[0]?.rigKind).toBe('sam-person')
+      expect(shelf[0]?.keepTexture).toBe(true)
+      expect(useEditorStore.getState().viewMode).toBe('look')
+      expect(useEditorStore.getState().addDrawerChip).toBe('assets')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('generateSamObject', () => {
+  it('asks 3d-objects for a textured GLB from the typed noun', async () => {
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { model_glb: { url: 'https://chair.glb' } }
+      },
+      upload: async () => 'https://photo.jpg',
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://chair.glb') {
+        return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${String(input)}`)
+    }) as typeof fetch
+    try {
+      await generateSamObject(
+        new File([new Uint8Array([1])], 'room.jpg', { type: 'image/jpeg' }),
+        'chair',
+      )
+      expect(calls[0]?.modelId).toBe(SAM_3D_OBJECTS)
+      expect(calls[0]?.input).toEqual({
+        image_url: 'https://photo.jpg',
+        prompt: 'chair',
+        export_textured_glb: true,
+      })
+      expect(useEnvironmentStore.getState().unplacedAssets[0]?.keepTexture).toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('refuses an empty noun before calling Fal', async () => {
+    let called = false
+    setFalTransportForTests({
+      subscribe: async () => {
+        called = true
+        return { model_glb: { url: 'https://chair.glb' } }
+      },
+    })
+    await generateSamObject(new File([new Uint8Array([1])], 'room.jpg', { type: 'image/jpeg' }), '  ')
+    expect(called).toBe(false)
+    expect(useSceneStore.getState().notice).toMatch(/noun/)
+  })
+})
+
+describe('generateSamAlign', () => {
+  it('lifts body then object then parks aligned GLB and scene_glb', async () => {
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    const calls: string[] = []
+    setFalTransportForTests({
+      subscribe: async (modelId) => {
+        calls.push(modelId)
+        if (modelId === SAM_3D_BODY) return { model_glb: { url: 'https://body.glb' } }
+        if (modelId === SAM_3D_OBJECTS) return { model_glb: { url: 'https://lamp.glb' } }
+        if (modelId === SAM_3D_ALIGN) {
+          return {
+            model_glb: { url: 'https://aligned.glb' },
+            scene_glb: { url: 'https://scene.glb' },
+          }
+        }
+        throw new Error(modelId)
+      },
+      upload: async () => 'https://photo.jpg',
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = String(input)
+      if (url.endsWith('.glb')) {
+        return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${url}`)
+    }) as typeof fetch
+    try {
+      await generateSamAlign(new File([new Uint8Array([1])], 'set.jpg', { type: 'image/jpeg' }), 'lamp')
+      expect(calls).toEqual([SAM_3D_BODY, SAM_3D_OBJECTS, SAM_3D_ALIGN])
+      const shelf = useEnvironmentStore.getState().unplacedAssets
+      expect(shelf).toHaveLength(2)
+      expect(shelf[0]?.rigKind).toBe('sam-person')
+      expect(shelf[0]?.keepTexture).toBe(true)
+      expect(shelf[1]?.name).toBe('lamp scene')
+      expect(shelf[1]?.keepTexture).toBe(true)
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+})
+
+describe('generatePointCloudFromViews', () => {
+  it('parks a coloured cloud on Unplaced and never instances a camera', async () => {
+    configureFal('key-test')
+    syncFalSettings('key-test', '3.1')
+    const calls: { modelId: string; input: Record<string, unknown> }[] = []
+    const uploaded: string[] = []
+    setFalTransportForTests({
+      subscribe: async (modelId, input) => {
+        calls.push({ modelId, input })
+        return { point_cloud: { url: 'https://cloud.glb' }, num_frames: 2 }
+      },
+      upload: async (file) => {
+        uploaded.push(file.name)
+        return `https://${file.name}`
+      },
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      if (String(input) === 'https://cloud.glb') {
+        return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
+      }
+      throw new Error(`unexpected fetch ${String(input)}`)
+    }) as typeof fetch
+    try {
+      await generatePointCloudFromViews([
+        new File([new Uint8Array([1])], 'desk-a.jpg', { type: 'image/jpeg' }),
+        new File([new Uint8Array([1])], 'desk-b.webp', { type: 'image/webp' }),
+      ])
+      expect(calls).toHaveLength(1)
+      expect(calls[0]?.modelId).toBe(VGGT_1B)
+      expect(calls[0]?.input.image_urls).toEqual(['https://desk-a.jpg', 'https://desk-b.webp'])
+      expect(calls[0]?.input).not.toHaveProperty('video_url')
+      expect(uploaded).toEqual(['desk-a.jpg', 'desk-b.webp'])
+      const shelf = useEnvironmentStore.getState().unplacedAssets
+      expect(shelf).toHaveLength(1)
+      expect(shelf[0]?.name).toBe('desk-a')
+      expect(shelf[0]?.rigKind).toBe('none')
+      expect(shelf[0]?.keepTexture).toBe(true)
+      expect(shelf[0]?.keepPoints).toBe(true)
+      expect(useSceneStore.getState().objects).toHaveLength(0)
+      expect(useEditorStore.getState().addDrawerChip).toBe('assets')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('refuses zero stills before calling Fal', async () => {
+    let called = false
+    setFalTransportForTests({
+      subscribe: async () => {
+        called = true
+        return { point_cloud: { url: 'https://cloud.glb' } }
+      },
+    })
+    await generatePointCloudFromViews([])
+    expect(called).toBe(false)
+    expect(useSceneStore.getState().notice).toMatch(/at least one/)
   })
 })

@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useCameraAnchorCount, useCameraFollowers } from '../state/cameraPathLink'
 import { useEditorStore, type SelectableId } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { openImportDialog, resetScene } from '../lib/sceneIO'
+import { isRemeshPlaceholder, keepHighMesh, openImportDialog, resetScene } from '../lib/sceneIO'
 import { cancelMeshJob } from '../lib/meshJobs'
 import { RemeshProgressBar } from './RemeshProgressBar'
 import { createProject, deleteProject, switchProject } from '../lib/projects'
@@ -107,10 +107,16 @@ function ObjectTreeItem({
   name: string
 }) {
   const selection = useEditorStore((s) => s.selection)
+  const selectionIds = useEditorStore((s) => s.selectionIds)
   const select = useEditorStore((s) => s.select)
   const remeshJob = useSceneStore((s) => s.pendingLifts.find((lift) => lift.objectId === id))
+  const canKeepHighMesh = useSceneStore((s) => {
+    const object = s.objects.find((item) => item.id === id)
+    return !remeshJob && Boolean(object?.bufferKey) && Boolean(object && isRemeshPlaceholder(object.root))
+  })
   const selectableId: SelectableId = `obj:${id}`
-  const selected = selection === selectableId
+  const selected = selectionIds.includes(selectableId)
+  const activeSingleton = selection === selectableId && selectionIds.length === 1
   const hidden = useEditorStore((s) => s.hiddenIds.includes(selectableId))
   const [confirming, setConfirming] = useState(false)
 
@@ -128,7 +134,7 @@ function ObjectTreeItem({
       }`}
     >
       <button
-        onClick={() => select(selected ? null : selectableId)}
+        onClick={() => select(activeSingleton ? null : selectableId)}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
       >
         {remeshJob ? (
@@ -144,7 +150,7 @@ function ObjectTreeItem({
       {remeshJob ? (
         <button
           type="button"
-          title="Cancel remesh"
+          title="Cancel remesh and keep the original high mesh"
           onClick={(e) => {
             e.stopPropagation()
             cancelMeshJob(remeshJob.id)
@@ -153,7 +159,7 @@ function ObjectTreeItem({
             selected ? 'text-white/80 hover:bg-white/10' : 'text-ink-dim hover:bg-panel-3 hover:text-ink'
           }`}
         >
-          Cancel
+          Keep high mesh
         </button>
       ) : confirming ? (
         <button
@@ -170,6 +176,50 @@ function ObjectTreeItem({
         >
           Delete?
         </button>
+      ) : canKeepHighMesh ? (
+        <>
+        <button
+          type="button"
+          title="Load the original high mesh"
+          onClick={(e) => {
+            e.stopPropagation()
+            void keepHighMesh(id)
+              .then(({ persisted }) =>
+                useSceneStore
+                  .getState()
+                  .showNotice(
+                    persisted
+                      ? `"${name}" kept as high mesh.`
+                      : `"${name}" kept as high mesh for this session — project storage is unavailable.`,
+                  ),
+              )
+              .catch((error) =>
+                useSceneStore
+                  .getState()
+                  .showNotice(error instanceof Error ? error.message : 'Could not load the high mesh.'),
+              )
+          }}
+          className={`shrink-0 rounded px-1.5 py-1 text-[10px] ${
+            selected ? 'text-white/80 hover:bg-white/10' : 'text-ink-dim hover:bg-panel-3 hover:text-ink'
+          }`}
+        >
+          Keep high mesh
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setConfirming(true)
+          }}
+          title="Delete object"
+          className={`shrink-0 rounded p-1 ${
+            selected
+              ? 'text-white/70 hover:bg-white/15 hover:text-white'
+              : 'text-ink-dim hover:bg-panel hover:text-red-400'
+          }`}
+        >
+          <TrashIcon size={12} />
+        </button>
+        </>
       ) : (
         <button
           onClick={(e) => {
@@ -189,7 +239,7 @@ function ObjectTreeItem({
     </div>
     {remeshJob && (
       <div className="px-2 pb-1">
-        <RemeshProgressBar progress={remeshJob.progress} />
+        <RemeshProgressBar progress={remeshJob.progress} startedAt={remeshJob.startedAt} />
       </div>
     )}
     </div>
@@ -199,10 +249,13 @@ function ObjectTreeItem({
 /** A motion path in the tree — selecting it makes it the active/editable path. */
 function PathTreeItem({ id, name }: { id: string; name: string }) {
   const selection = useEditorStore((s) => s.selection)
+  const selectionIds = useEditorStore((s) => s.selectionIds)
   const activePathId = usePathStore((s) => s.activePathId)
   const pathCount = usePathStore((s) => s.paths.length)
   const followedBy = useCameraFollowers(id)
-  const selected = selection === 'camera-path' && activePathId === id
+  const selected = selectionIds.includes(`path:${id}`)
+  const activeSingleton =
+    selection === 'camera-path' && activePathId === id && selectionIds.length === 1
   const hidden = useEditorStore((s) => s.hiddenIds.includes(`path:${id}`))
   const [confirming, setConfirming] = useState(false)
 
@@ -231,7 +284,7 @@ function PathTreeItem({ id, name }: { id: string; name: string }) {
     >
       <button
         onClick={() => {
-          if (selected) {
+          if (activeSingleton) {
             useEditorStore.getState().select(null)
             return
           }

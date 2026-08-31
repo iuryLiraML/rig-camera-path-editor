@@ -361,6 +361,7 @@ export function InactivePaths() {
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const cameraKind = useRigStore((s) => s.cameraKind)
   const hiddenIds = useEditorStore((s) => s.hiddenIds)
+  const selectionIds = useEditorStore((s) => s.selectionIds)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const rootRef = useRef<THREE.Group>(null)
   useEditorOnly(rootRef)
@@ -385,10 +386,10 @@ export function InactivePaths() {
         <ParentSpaceGroup key={l.id} pathId={l.id}>
           <Line
             points={l.points}
-            color={ACCENT}
-            lineWidth={1.5}
+            color={selectionIds.includes(`path:${l.id}`) ? '#ffffff' : ACCENT}
+            lineWidth={selectionIds.includes(`path:${l.id}`) ? 2.5 : 1.5}
             transparent
-            opacity={0.35}
+            opacity={selectionIds.includes(`path:${l.id}`) ? 0.9 : 0.35}
             depthTest={false}
             raycast={ignoreRaycast}
           />
@@ -405,6 +406,9 @@ export function PathEditor() {
   const rounding = active?.rounding ?? 0.8
   const selectedAnchorId = usePathStore((s) => s.selectedAnchorId)
   const tool = useEditorStore((s) => s.tool)
+  const pathSelected = useEditorStore((s) =>
+    active ? s.selectionIds.includes(`path:${active.id}`) : false,
+  )
   const playMode = useEditorStore((s) => s.playMode)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const cameraKind = useRigStore((s) => s.cameraKind)
@@ -462,8 +466,8 @@ export function PathEditor() {
         <group userData={{ pickKind: 'path-line', pickId: `path:${active!.id}` }}>
           <Line
             points={points}
-            color={ACCENT}
-            lineWidth={2}
+            color={pathSelected ? '#ffffff' : ACCENT}
+            lineWidth={pathSelected ? 2.75 : 2}
             depthTest={false}
             {...(isPathStrokeTool(tool) ? { raycast: ignoreRaycast } : {})}
             onDoubleClick={(e) => {

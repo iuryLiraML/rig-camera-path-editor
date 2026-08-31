@@ -478,4 +478,29 @@ describe('evaluateStaticPose', () => {
     )!
     expect(start.quaternion).not.toEqual(mid.quaternion)
   })
+
+  it('keeps a path camera on the path in Free and uses authored rotation', () => {
+    const anchors = lineAnchors([0, 1, 5], [0, 1, 1])
+    const path = { anchors, rounding: 0 }
+    const motion = evaluateCinemaPose(
+      0,
+      path,
+      channels({ ease: 'linear', lookAtMode: 'path-tangent' }),
+    )!
+    const free = evaluateCinemaPose(
+      0,
+      path,
+      channels({
+        ease: 'linear',
+        lookAtMode: 'free',
+        staticPose: { position: [99, 99, 99], rotation: [0, 90, 0] },
+      }),
+    )!
+    expect(free.position).toEqual(motion.position)
+    expect(free.quaternion).not.toEqual(motion.quaternion)
+    const q = new THREE.Quaternion(...free.quaternion)
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(q)
+    expect(forward.x).toBeLessThan(-0.9)
+    expect(Math.abs(forward.z)).toBeLessThan(0.15)
+  })
 })

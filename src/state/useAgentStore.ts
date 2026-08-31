@@ -13,6 +13,7 @@ import { encodeStillForAgent, userTurnImage, visionForTurn } from '../lib/agent/
 import { buildSceneContext, captureViewport } from '../lib/agent/tools'
 import { getLiftAttachment, isVideoFile, setLiftAttachment } from '../lib/fal/attachment'
 import { NO_SERVER_KEYS, type ServerKeys } from '../lib/agent/serverKeys'
+import { configureFal } from '../lib/fal/client'
 import { setFalAbortSignal, syncFalSettings } from '../lib/fal/settings'
 import type { SamImageVersion } from '../lib/fal/models'
 import { useProjectStore } from './useProjectStore'
@@ -140,6 +141,7 @@ export const useAgentStore = create<AgentState>()(
       setForcedSkill: (forcedSkill) => set({ forcedSkill }),
       setFalKey: (falKey) => {
         syncFalSettings(falKey, get().samImageVersion)
+        configureFal(falKey)
         set({ falKey })
       },
       setSamImageVersion: (samImageVersion) => {
@@ -385,7 +387,9 @@ export const useAgentStore = create<AgentState>()(
         }
       },
       onRehydrateStorage: () => (state) => {
-        if (state) syncFalSettings(state.falKey, state.samImageVersion)
+        if (!state) return
+        syncFalSettings(state.falKey, state.samImageVersion)
+        configureFal(state.falKey)
       },
     },
   ),

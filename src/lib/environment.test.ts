@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   IDENTITY_ENV_TRANSFORM,
+  SPLAT_INRIA_TO_Y_UP,
   assignEnvironmentId,
   collectProjectBufferKeys,
   environmentDeleteMessage,
@@ -57,10 +58,11 @@ describe('environmentFileKind', () => {
   it('splits dropped models from palco files', () => {
     const { models, environments } = partitionDroppedSceneFiles([
       new File([], 'prop.glb'),
+      new File([], 'boat.obj'),
       new File([], 'stage.ply'),
       new File([], 'notes.txt'),
     ])
-    expect(models.map((file) => file.name)).toEqual(['prop.glb'])
+    expect(models.map((file) => file.name)).toEqual(['prop.glb', 'boat.obj'])
     expect(environments.map((file) => file.name)).toEqual(['stage.ply'])
   })
 })
@@ -110,6 +112,14 @@ describe('showEnvironmentSplat', () => {
     expect(showEnvironmentSplat('clay', true)).toBe(false)
     expect(showEnvironmentSplat('depth', true)).toBe(false)
     expect(showEnvironmentSplat('outline', false)).toBe(false)
+  })
+})
+
+describe('SPLAT_INRIA_TO_Y_UP', () => {
+  it('flips INRIA Y-down into Rig Y-up without yaw', () => {
+    expect(SPLAT_INRIA_TO_Y_UP[0]).toBeCloseTo(Math.PI)
+    expect(SPLAT_INRIA_TO_Y_UP[1]).toBe(0)
+    expect(SPLAT_INRIA_TO_Y_UP[2]).toBe(0)
   })
 })
 

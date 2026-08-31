@@ -2,9 +2,11 @@
 
 import { countGltfTriangles } from './glbTriangleCount'
 import { idbGet, idbPut, STORES } from './idb'
+import { countObjTriangles } from './objTriangleCount'
+import type { ModelSourceFormat } from './readModelFile'
 
 type Request =
-  | { op?: 'read'; id: number; file?: Blob }
+  | { op?: 'read'; id: number; file?: Blob; format?: ModelSourceFormat }
   | { op: 'wrap'; id: number; buffer: ArrayBuffer; name: string; type: string }
   | { op: 'put'; id: number; key: string; buffer: ArrayBuffer }
   | { op: 'getWrap'; id: number; key: string; name: string; type: string }
@@ -35,7 +37,8 @@ self.onmessage = async (event: MessageEvent<Request>) => {
     }
     if (!data.file) throw new Error('No file')
     const buffer = await data.file.arrayBuffer()
-    const triangles = countGltfTriangles(buffer)
+    const triangles =
+      data.format === 'obj' ? countObjTriangles(buffer) : countGltfTriangles(buffer)
     self.postMessage({ id: data.id, buffer, triangles } satisfies Response, [buffer])
   } catch (error) {
     self.postMessage({

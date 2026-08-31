@@ -252,6 +252,13 @@ export const EyeOffIcon = (p: IconProps) => (
   </svg>
 )
 
+export const PersonIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <circle cx="8" cy="4.6" r="2" />
+    <path d="M3.8 13.4c.4-2.8 2-4.2 4.2-4.2s3.8 1.4 4.2 4.2" />
+  </svg>
+)
+
 export const GlobeIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="8" cy="8" r="5.2" />

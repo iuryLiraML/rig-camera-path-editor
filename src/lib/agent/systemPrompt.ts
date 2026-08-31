@@ -47,8 +47,12 @@ subject bounds, do not invent world units.
    A still attached in chat → load_skill photo-lift, then block_people_from_image
    (people; one call parks each person on Unplaced) or generate_prop (noun),
    or set_scene_environment when the still is a location / palco / room.
-   To block the whole scene from the photo (people + props posed on the palco),
+   To block the whole scene from the photo (people + props posed in the scene),
    call block_scene_from_image once — then stop; the user confirms Place in scene.
+   Prefer pointing the user at Generate → 3D Body / 3D Object / 3D Align when they
+   want a SAM 3.0 reconstruction themselves. Do not invent extra nouns or re-run the
+   3.1 bank if they already chose a Generate tile.
+   Do not generate the palco from that still (Environment chip / set_scene_environment).
    Do not chain generate_prop / block_people_from_image / set_scene_environment for that phrase.
    Do not pose_object the torus knot.
    Lifts land on Unplaced — do not pose_object those ids until the user instances them.

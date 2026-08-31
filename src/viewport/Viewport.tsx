@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid } from '@react-three/drei'
@@ -36,6 +36,10 @@ import {
   VIEWPORT_BG_DEFAULT_TOP,
 } from './viewportBackground'
 import { GRID_FADE_DISTANCE, GRID_FADE_STRENGTH } from './viewportLook'
+import { LassoOverlay, LassoSelection } from './LassoSelection'
+import type { ScreenPoint } from '../lib/lasso'
+import { shouldSuppressMissedClick } from '../lib/lassoGesture'
+import type { Rect } from '../state/useLayoutStore'
 
 /** Routes R3F pointer picking into the pane under the cursor. */
 function PointerRouting() {
@@ -157,6 +161,14 @@ export function Viewport() {
   const axisMargin = bottomLeftStack(insets).gizmoMargin
 
   const pointerDownAt = useRef<[number, number]>([0, 0])
+  const completedLasso = useRef(false)
+  const [lasso, setLasso] = useState<{ points: ScreenPoint[]; pane: Rect | null }>({
+    points: [],
+    pane: null,
+  })
+  const updateLasso = useCallback((points: ScreenPoint[], pane: Rect | null) => {
+    setLasso({ points, pane })
+  }, [])
 
   return (
     <div
@@ -175,6 +187,10 @@ export function Viewport() {
         pointerDownAt.current = [e.clientX, e.clientY]
       }}
       onPointerMissed={(e) => {
+        if (shouldSuppressMissedClick(completedLasso.current)) {
+          completedLasso.current = false
+          return
+        }
         // deselect on a true click on empty space, not after an orbit drag
         const [x, y] = pointerDownAt.current
         const moved = Math.hypot(e.clientX - x, e.clientY - y)
@@ -191,6 +207,7 @@ export function Viewport() {
       <ViewportBackground color={bgColor} />
 
       <EditorCamera />
+      <LassoSelection onPoints={updateLasso} completedRef={completedLasso} />
 
       <ambientLight intensity={0.55} />
       <directionalLight
@@ -252,6 +269,7 @@ export function Viewport() {
         </GizmoHelper>
       )}
     </Canvas>
+    <LassoOverlay points={lasso.points} pane={lasso.pane} />
     </div>
   )
 }

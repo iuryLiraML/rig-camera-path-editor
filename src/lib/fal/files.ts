@@ -18,6 +18,24 @@ export function falLooksLikeGaussian(file: FalFile | undefined): boolean {
   return /\.(ply|splat|spz)(\?|$)/i.test(url) || /\.(ply|splat|spz)$/i.test(name)
 }
 
+export function falSplatFile(data: {
+  model_mesh?: FalFile
+  gaussian_splat?: FalFile
+  splat?: FalFile
+  ply?: FalFile
+  model_urls?: { ply?: FalFile; splat?: FalFile }
+}): FalFile | undefined {
+  const candidates = [
+    data.model_mesh,
+    data.gaussian_splat,
+    data.splat,
+    data.ply,
+    data.model_urls?.ply,
+    data.model_urls?.splat,
+  ]
+  return candidates.find((file) => falLooksLikeGaussian(file)) ?? candidates.find((file) => falFileUrl(file))
+}
+
 export function falLooksLikeGlb(file: FalFile | undefined): boolean {
   if (!falFileUrl(file) || falLooksLikeGaussian(file)) return false
   const url = falFileUrl(file) ?? ''
@@ -40,15 +58,18 @@ export function requireModelGlb(
   },
   modelId: string,
 ): string {
-  const url =
-    falFileUrl(data.model_glb) ?? falFileUrl(data.model_mesh) ?? falFileUrl(data.model_urls?.glb)
-  if (!url) throw new Error(`${modelId} returned no GLB.`)
-  const mesh = data.model_glb ?? data.model_mesh ?? data.model_urls?.glb
-  if (falLooksLikeGaussian(mesh)) {
+  const candidates = [data.model_glb, data.model_urls?.glb, data.model_mesh]
+  const mesh = candidates.find((file) => falLooksLikeGlb(file))
+  const url = falFileUrl(mesh)
+  if (url) return url
+  if (candidates.some((file) => falLooksLikeGaussian(file))) {
     throw new Error(`${modelId} returned a Gaussian splat, not a GLB mesh.`)
   }
-  const name = falFileName(data.model_mesh)
-  const looksFbx = /\.fbx(\?|$)/i.test(url) || (name ? /\.fbx$/i.test(name) : false)
+  const fallback = candidates.find((file) => falFileUrl(file))
+  const fallbackUrl = falFileUrl(fallback) ?? ''
+  const name = falFileName(fallback)
+  const looksFbx =
+    /\.fbx(\?|$)/i.test(fallbackUrl) || (name ? /\.fbx$/i.test(name) : false)
   if (looksFbx) throw new Error(`${modelId} returned FBX. Retry without quad topology.`)
-  return url
+  throw new Error(`${modelId} returned no GLB.`)
 }

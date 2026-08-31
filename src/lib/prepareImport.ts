@@ -1,6 +1,9 @@
 import * as THREE from 'three'
 
-function isHelper(child: THREE.Object3D): boolean {
+export type PrepareImportOpts = { keepPoints?: boolean }
+
+function isHelper(child: THREE.Object3D, keepPoints: boolean): boolean {
+  if (keepPoints && child instanceof THREE.Points) return false
   return (
     child instanceof THREE.Camera ||
     child instanceof THREE.Light ||
@@ -12,25 +15,30 @@ function isHelper(child: THREE.Object3D): boolean {
   )
 }
 
+function unionGeometryBounds(box: THREE.Box3, child: THREE.Mesh | THREE.Points) {
+  if (child instanceof THREE.SkinnedMesh) {
+    child.computeBoundingBox()
+    const posed = child.boundingBox
+    if (posed && !posed.isEmpty()) box.union(posed.clone().applyMatrix4(child.matrixWorld))
+    return
+  }
+  const geometry = child.geometry
+  if (!geometry) return
+  if (!geometry.boundingBox) geometry.computeBoundingBox()
+  const local = geometry.boundingBox
+  if (!local || local.isEmpty()) return
+  box.union(local.clone().applyMatrix4(child.matrixWorld))
+}
+
 /** World AABB of real meshes only — cameras/keypoints must not drive scale. */
-export function meshWorldBounds(root: THREE.Object3D): THREE.Box3 {
+export function meshWorldBounds(root: THREE.Object3D, opts?: PrepareImportOpts): THREE.Box3 {
   const box = new THREE.Box3()
   root.updateWorldMatrix(true, true)
   root.traverse((child) => {
-    if (!(child instanceof THREE.Mesh) || !child.geometry) return
-    if (child instanceof THREE.SkinnedMesh) {
-      child.computeBoundingBox()
-      const posed = child.boundingBox
-      if (posed && !posed.isEmpty()) {
-        box.union(posed.clone().applyMatrix4(child.matrixWorld))
-      }
-      return
+    if (child instanceof THREE.Mesh && child.geometry) unionGeometryBounds(box, child)
+    else if (opts?.keepPoints && child instanceof THREE.Points && child.geometry) {
+      unionGeometryBounds(box, child)
     }
-    const geometry = child.geometry
-    if (!geometry.boundingBox) geometry.computeBoundingBox()
-    const local = geometry.boundingBox
-    if (!local || local.isEmpty()) return
-    box.union(local.clone().applyMatrix4(child.matrixWorld))
   })
   return box
 }
@@ -45,15 +53,27 @@ export function boundsAreUsable(box: THREE.Box3): boolean {
 /**
  * SAM 3D Body GLBs often ship without normals (clay then shades as a flat
  * slab) and with cameras / keypoint clouds that wreck the import scale.
+ * VGGT (`keepPoints`) keeps the coloured cloud and drops estimated-camera cones.
  */
-export function prepareImportedRoot(root: THREE.Object3D): THREE.Object3D {
+export function prepareImportedRoot(root: THREE.Object3D, opts?: PrepareImportOpts): THREE.Object3D {
+  const keepPoints = Boolean(opts?.keepPoints)
+  let hasPoints = false
+  root.traverse((child) => {
+    if (child instanceof THREE.Points) hasPoints = true
+  })
   const drop: THREE.Object3D[] = []
   root.traverse((child) => {
-    if (child !== root && isHelper(child)) drop.push(child)
+    if (child === root) return
+    if (keepPoints && hasPoints && child instanceof THREE.Mesh) {
+      drop.push(child)
+      return
+    }
+    if (isHelper(child, keepPoints)) drop.push(child)
   })
   for (const child of drop) child.parent?.remove(child)
 
   repairImportedShading(root)
+  if (keepPoints) repairImportedPoints(root)
   root.updateMatrixWorld(true)
   return root
 }
@@ -76,6 +96,14 @@ export function repairImportedShading(root: THREE.Object3D) {
       child.updateMatrixWorld(true)
       child.computeBoundingBox()
     }
+  })
+}
+
+function repairImportedPoints(root: THREE.Object3D) {
+  root.traverse((child) => {
+    if (!(child instanceof THREE.Points) || !child.geometry?.attributes.position) return
+    child.geometry.computeBoundingBox()
+    child.geometry.computeBoundingSphere()
   })
 }
 

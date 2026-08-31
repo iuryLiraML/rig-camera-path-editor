@@ -553,6 +553,7 @@ export function buildGraphChannels(input: {
   channelPlots: Record<'fov' | 'roll', ScalarPlot>
   tracking: boolean
   cameraKind: 'path' | 'static'
+  lookAtMode?: 'target' | 'path-tangent' | 'free'
   axisKeys: Partial<Record<(typeof CAMERA_AXIS_TRACKS)[number]['id'], ValueKey[]>>
   axisPlots: Partial<Record<(typeof CAMERA_AXIS_TRACKS)[number]['id'], ScalarPlot>>
 }): GraphChannel[] {
@@ -635,14 +636,17 @@ export function buildGraphChannels(input: {
       format: 'degrees',
     })
   }
+  const lookAtMode = input.lookAtMode ?? 'target'
   for (const track of CAMERA_AXIS_TRACKS) {
     if (track.when === 'static' && input.cameraKind !== 'static') continue
-    if (track.when === 'target' && input.tracking) continue
-    if (track.when === 'offset' && !input.tracking) continue
+    if (track.when === 'free' && lookAtMode !== 'free') continue
+    if (track.when === 'target' && (lookAtMode !== 'target' || input.tracking)) continue
+    if (track.when === 'offset' && (lookAtMode !== 'target' || !input.tracking)) continue
     const keys = input.axisKeys[track.id] ?? []
     const alwaysShow =
       track.when === 'target' ||
       track.when === 'offset' ||
+      track.when === 'free' ||
       (track.when === 'static' && track.id.startsWith('staticPos'))
     if (keys.length === 0 && !alwaysShow) continue
     const plot = input.axisPlots[track.id]

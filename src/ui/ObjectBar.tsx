@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { remeshSceneObject } from '../lib/meshJobs'
-import { objectNeedsRetopo } from '../lib/sceneIO'
+import {
+  formatTriangleCount,
+  isRemeshPlaceholder,
+  keepHighMesh,
+  objectNeedsRetopo,
+} from '../lib/sceneIO'
+import { hasMeshGeometry, type AssetDisplayMode } from '../lib/assetDisplay'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore, type ObjectBarPanel } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
@@ -46,8 +52,40 @@ export function ObjectBar() {
         </div>
       )}
       {panel === 'more' && objectId && <MoreMenu objectId={objectId} />}
+      {object && isRemeshPlaceholder(object.root) && (
+        <div className="panel flex items-center gap-2 px-2.5 py-1.5 text-[10px] text-ink-dim">
+          <span>The cube is only a placeholder; source topology is not rendered.</span>
+          <button
+            type="button"
+            className="rounded bg-panel-3 px-2 py-1 text-ink hover:bg-panel-2"
+            onClick={() => void keepHighMesh(object.id)}
+          >
+            Keep high mesh
+          </button>
+        </div>
+      )}
 
       <div className="panel flex items-center gap-0.5 px-1.5 py-1">
+        {object && hasMeshGeometry(object.root) && (
+          <>
+            <span className="px-1.5 text-[10px] tabular-nums text-ink-dim">
+              {isRemeshPlaceholder(object.root)
+                ? `Estimated source: ${formatTriangleCount(object.triangleCount ?? 0)}`
+                : formatTriangleCount(object.triangleCount ?? 0)}
+            </span>
+            {!isRemeshPlaceholder(object.root) && (
+              <div className="flex rounded-md bg-panel-2 p-0.5" aria-label="Asset display">
+                <DisplayButton objectId={object.id} mode="solid" active={object.displayMode === 'solid'} />
+                <DisplayButton
+                  objectId={object.id}
+                  mode="wireframe"
+                  active={object.displayMode === 'wireframe'}
+                />
+              </div>
+            )}
+            <span className="mx-1 h-4 w-px bg-line" />
+          </>
+        )}
         {!envSelected && (
           <IconBtn title="Shape" active={panel === 'name'} onClick={() => setPanel('name')}>
             <CubeIcon size={14} />
@@ -83,6 +121,31 @@ export function ObjectBar() {
         </IconBtn>
       </div>
     </div>
+  )
+}
+
+function DisplayButton({
+  objectId,
+  mode,
+  active,
+}: {
+  objectId: string
+  mode: AssetDisplayMode
+  active: boolean
+}) {
+  const label = mode === 'solid' ? 'Solid' : 'Wireframe'
+  return (
+    <button
+      type="button"
+      aria-label={`${label} display`}
+      aria-pressed={active}
+      onClick={() => useSceneStore.getState().setObjectDisplayMode(objectId, mode)}
+      className={`rounded px-1.5 py-1 text-[10px] ${
+        active ? 'bg-panel-3 text-ink' : 'text-ink-dim hover:text-ink'
+      }`}
+    >
+      {label}
+    </button>
   )
 }
 
@@ -152,7 +215,10 @@ function MoreMenu({ objectId }: { objectId: string }) {
   const serverFal = useAgentStore((s) => s.serverKeys.fal)
   const canFal = Boolean(falKey.trim()) || serverFal
   const remeshJob = useSceneStore((s) => s.pendingLifts.find((lift) => lift.objectId === objectId))
+  const object = useSceneStore((s) => s.objects.find((item) => item.id === objectId))
   const needsRetopo = !remeshJob && objectNeedsRetopo(objectId)
+  const canKeepHighMesh =
+    !remeshJob && Boolean(object?.bufferKey) && Boolean(object && isRemeshPlaceholder(object.root))
   const ref = useRef<HTMLDivElement>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
 
@@ -188,6 +254,32 @@ function MoreMenu({ objectId }: { objectId: string }) {
         Front
         <span className="ml-2 text-[10px] text-ink-dim">F</span>
       </button>
+      {canKeepHighMesh && (
+        <button
+          type="button"
+          className={item}
+          onClick={() => {
+            useEditorStore.getState().setObjectBarPanel('none')
+            void keepHighMesh(objectId)
+              .then(({ persisted }) =>
+                useSceneStore
+                  .getState()
+                  .showNotice(
+                    persisted
+                      ? `"${object?.name ?? 'Model'}" kept as high mesh.`
+                      : `"${object?.name ?? 'Model'}" kept as high mesh for this session — project storage is unavailable.`,
+                  ),
+              )
+              .catch((error) =>
+                useSceneStore
+                  .getState()
+                  .showNotice(error instanceof Error ? error.message : 'Could not load the high mesh.'),
+              )
+          }}
+        >
+          Keep high mesh
+        </button>
+      )}
       {needsRetopo &&
         (canFal ? (
           <button

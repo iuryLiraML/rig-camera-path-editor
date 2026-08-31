@@ -102,6 +102,7 @@ export const SHORTCUT_ROWS: { keys: string; action: string }[] = [
   { keys: 'Space', action: 'Play / pause' },
   { keys: 'P', action: 'Pen — place path points (Compose)' },
   { keys: 'D', action: 'Draw a new camera path (Compose)' },
+  { keys: 'Shift+drag', action: 'Lasso objects and curves from empty viewport space' },
   { keys: 'W E R', action: 'Move / rotate / scale (opens Transform)' },
   { keys: 'T', action: 'Focus Timeline (Compose)' },
   { keys: 'Shift+T', action: 'Toggle Graph Editor' },

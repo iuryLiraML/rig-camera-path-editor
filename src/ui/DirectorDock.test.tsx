@@ -77,7 +77,7 @@ describe('DirectorDock', () => {
   it('keeps Import and attach on the composer without an Add toggle', () => {
     const { getByTitle, queryByTitle } = render(<DirectorDock />)
     expect(queryByTitle('Add an object')).toBeNull()
-    expect(getByTitle('Import a .glb or .gltf')).toBeTruthy()
+    expect(getByTitle('Import a .glb, .gltf or .obj')).toBeTruthy()
     expect(getByTitle('Attach a reference photo')).toBeTruthy()
     expect(getByTitle('Send (Enter)')).toBeTruthy()
   })
@@ -86,7 +86,7 @@ describe('DirectorDock', () => {
     useEditorStore.setState({ workspaceMode: 'compose' })
     const { getByTitle, queryByTitle } = render(<DirectorDock />)
     expect(queryByTitle('Add an object')).toBeNull()
-    expect(getByTitle('Import a .glb or .gltf')).toBeTruthy()
+    expect(getByTitle('Import a .glb, .gltf or .obj')).toBeTruthy()
     expect(getByTitle('Attach a reference photo')).toBeTruthy()
   })
 
@@ -128,7 +128,7 @@ describe('DirectorDock', () => {
 
   it('opens the import modal from the composer', () => {
     const { getByTitle } = render(<DirectorDock />)
-    fireEvent.click(getByTitle('Import a .glb or .gltf'))
+    fireEvent.click(getByTitle('Import a .glb, .gltf or .obj'))
     expect(useEditorStore.getState().showImportModal).toBe(true)
   })
 })

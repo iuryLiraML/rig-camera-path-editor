@@ -1,7 +1,14 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { PRIMITIVE_DEFS, PRIMITIVE_KINDS, type PrimitiveKind } from '../lib/primitiveGeometry'
-import { generateObjectFromImage, generateObjectFromText } from '../lib/meshJobs'
-import { addDummyToScene } from '../lib/dummyCharacter'
+import {
+  generateObjectFromImage,
+  generateObjectFromText,
+  generateSamAlign,
+  generateSamBody,
+  generateSamObject,
+  generatePointCloudFromViews,
+} from '../lib/meshJobs'
+import { addDummyToSceneWhenReady, type FigureSex } from '../lib/dummyCharacter'
 import {
   assignStoredEnvironment,
   clearActiveEnvironment,
@@ -14,13 +21,21 @@ import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { CubeIcon, GlobeIcon, ImportIcon, SearchIcon, WandIcon } from './icons'
-import { PrimitivePreview } from './PrimitivePreview'
+import { ClapperIcon, CubeIcon, FrameIcon, GlobeIcon, ImportIcon, PersonIcon, SearchIcon, WandIcon } from './icons'
+import { FigurePreview, PrimitivePreview } from './PrimitivePreview'
 import { ADD_DRAWER_HEIGHT, GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
-import { approveFindRows, detectObjectRows, detectPeopleRows, makeFindRow, type FindRow } from '../lib/findObjects'
+import {
+  approveFindRows,
+  detectObjectRows,
+  detectPeopleRows,
+  makeFindRow,
+  takeFindSeedRows,
+  type FindRow,
+} from '../lib/findObjects'
 import { clearSceneBlockSession, commitSceneBlock, getSceneBlockSession } from '../lib/sceneBlock'
+import { VGGT_MAX_VIEWS } from '../lib/fal/vggt'
 
-type GenerateMode = 'pick' | 'text' | 'image'
+type GenerateMode = 'pick' | 'text' | 'image' | 'body' | 'object' | 'align' | 'views'
 
 function isStillImage(file: File) {
   if (file.type.startsWith('image/')) return true
@@ -40,7 +55,9 @@ export function AddObjectDrawer() {
   const chip = useEditorStore((s) => s.addDrawerChip)
   const [generateMode, setGenerateMode] = useState<GenerateMode>('pick')
   const [prompt, setPrompt] = useState('')
+  const [objectNoun, setObjectNoun] = useState('')
   const [image, setImage] = useState<File | null>(null)
+  const [views, setViews] = useState<File[]>([])
   const insets = useViewportInsets()
   const dock = directorDockSlot(insets)
   const q = query.trim().toLowerCase()
@@ -67,7 +84,7 @@ export function AddObjectDrawer() {
         <h2 className="shrink-0 text-[13px] font-semibold text-ink">Add an Object</h2>
         <button
           type="button"
-          title="Import a .glb or .gltf"
+          title="Import a .glb, .gltf, or .obj"
           onClick={() => useEditorStore.getState().setShowImportModal(true)}
           className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] text-ink-dim hover:bg-panel-2 hover:text-ink"
         >
@@ -111,11 +128,12 @@ export function AddObjectDrawer() {
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-3 py-3">
         {chip === 'primitives' ? (
           <div className="flex h-full gap-2">
-            {(!q || 'dummy'.includes(q)) && <DummyTile />}
+            {(!q || figureSearchHit(q, 'female')) && <FigureTile sex="female" />}
+            {(!q || figureSearchHit(q, 'male')) && <FigureTile sex="male" />}
             {primitives.map((kind) => (
               <PrimitiveTile key={kind} kind={kind} />
             ))}
-            {primitives.length === 0 && q && !'dummy'.includes(q) && (
+            {primitives.length === 0 && q && !figureSearchHit(q, 'female') && !figureSearchHit(q, 'male') && (
               <p className="self-center text-[12px] text-ink-dim">No primitives match that search.</p>
             )}
           </div>
@@ -128,10 +146,14 @@ export function AddObjectDrawer() {
             canFal={canFal}
             mode={generateMode}
             prompt={prompt}
+            objectNoun={objectNoun}
             image={image}
+            views={views}
             onMode={setGenerateMode}
             onPrompt={setPrompt}
+            onObjectNoun={setObjectNoun}
             onImage={setImage}
+            onViews={setViews}
           />
         )}
       </div>
@@ -145,21 +167,27 @@ function GeneratePane({
   canFal,
   mode,
   prompt,
+  objectNoun,
   image,
+  views,
   onMode,
   onPrompt,
+  onObjectNoun,
   onImage,
+  onViews,
 }: {
   canFal: boolean
   mode: GenerateMode
   prompt: string
+  objectNoun: string
   image: File | null
+  views: File[]
   onMode: (mode: GenerateMode) => void
   onPrompt: (value: string) => void
+  onObjectNoun: (value: string) => void
   onImage: (file: File | null) => void
+  onViews: (files: File[]) => void
 }) {
-  const imageRef = useRef<HTMLInputElement>(null)
-
   if (mode === 'text') {
     return (
       <div className="flex h-full flex-col gap-2">
@@ -199,51 +227,71 @@ function GeneratePane({
 
   if (mode === 'image') {
     return (
-      <div className="flex h-full flex-col gap-2">
-        <button
-          type="button"
-          onClick={() => onMode('pick')}
-          className="self-start text-[11px] text-ink-dim hover:text-ink"
-        >
-          ← Back
-        </button>
-        <p className="text-[10px] text-ink-dim">
-          Use a photo of the object alone. To lift one thing out of a scene, attach the photo in
-          Director.
-        </p>
-        <button
-          type="button"
-          onClick={() => imageRef.current?.click()}
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault()
-            const file = e.dataTransfer.files[0]
-            if (file && isStillImage(file)) onImage(file)
-          }}
-          className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-panel-2 text-[11px] text-ink-dim hover:bg-panel-3"
-        >
-          {image ? image.name : 'Drop or browse a photo'}
-        </button>
-        <input
-          ref={imageRef}
-          type="file"
-          accept="image/jpeg,image/png,image/webp"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0] ?? null
-            onImage(file && isStillImage(file) ? file : null)
-            e.target.value = ''
-          }}
-        />
-        <button
-          type="button"
-          disabled={!image}
-          onClick={() => image && void generateObjectFromImage(image)}
-          className="self-end rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent/85 disabled:opacity-40"
-        >
-          Generate
-        </button>
-      </div>
+      <GenerateStillPane
+        hint="JPEG or PNG of the object alone — not a room. Lands in Unplaced."
+        image={image}
+        onImage={onImage}
+        onBack={() => onMode('pick')}
+        submitLabel="Generate"
+        disabled={!image}
+        accept="image/jpeg,image/png,.jpg,.jpeg,.png"
+        onSubmit={() => image && void generateObjectFromImage(image)}
+      />
+    )
+  }
+
+  if (mode === 'body') {
+    return (
+      <GenerateStillPane
+        hint="Photo of a person. SAM 3.0 reconstructs a textured body. Switch Visualize to Clay to gray it."
+        image={image}
+        onImage={onImage}
+        onBack={() => onMode('pick')}
+        submitLabel="Generate body"
+        disabled={!image}
+        onSubmit={() => image && void generateSamBody(image)}
+      />
+    )
+  }
+
+  if (mode === 'object') {
+    return (
+      <GenerateStillPane
+        hint="Type the noun (chair, lamp). SAM 3.0 reconstructs a textured mesh. Clay mode grays it later."
+        image={image}
+        onImage={onImage}
+        onBack={() => onMode('pick')}
+        submitLabel="Generate object"
+        disabled={!image || !objectNoun.trim()}
+        extra={<ObjectNounField value={objectNoun} onChange={onObjectNoun} />}
+        onSubmit={() => image && void generateSamObject(image, objectNoun)}
+      />
+    )
+  }
+
+  if (mode === 'align') {
+    return (
+      <GenerateStillPane
+        hint="Photo of a person in a scene. Optional noun also lifts that prop and asks for scene_glb."
+        image={image}
+        onImage={onImage}
+        onBack={() => onMode('pick')}
+        submitLabel="Align in photo"
+        disabled={!image}
+        extra={<ObjectNounField value={objectNoun} onChange={onObjectNoun} />}
+        onSubmit={() => image && void generateSamAlign(image, objectNoun)}
+      />
+    )
+  }
+
+  if (mode === 'views') {
+    return (
+      <GenerateViewsPane
+        files={views}
+        onFiles={onViews}
+        onBack={() => onMode('pick')}
+        onSubmit={() => void generatePointCloudFromViews(views)}
+      />
     )
   }
 
@@ -288,23 +336,242 @@ function GeneratePane({
           <span className="truncate text-[11px] text-ink">Meshy v7</span>
           <span className="truncate text-[10px] text-ink-dim">Photo → Unplaced</span>
         </button>
+        <button
+          type="button"
+          disabled={!canFal}
+          onClick={() => onMode('body')}
+          className="flex h-full w-36 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <div className="flex flex-1 flex-col items-center justify-center gap-1 text-ink-dim">
+            <PersonIcon size={22} />
+            <span className="text-[11px]">3D Body</span>
+          </div>
+          <span className="truncate text-[11px] text-ink">SAM 3.0</span>
+          <span className="truncate text-[10px] text-ink-dim">Photo → Unplaced</span>
+        </button>
+        <button
+          type="button"
+          disabled={!canFal}
+          onClick={() => onMode('object')}
+          className="flex h-full w-36 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <div className="flex flex-1 flex-col items-center justify-center gap-1 text-ink-dim">
+            <CubeIcon size={22} />
+            <span className="text-[11px]">3D Object</span>
+          </div>
+          <span className="truncate text-[11px] text-ink">SAM 3.0</span>
+          <span className="truncate text-[10px] text-ink-dim">Name the object</span>
+        </button>
+        <button
+          type="button"
+          disabled={!canFal}
+          onClick={() => onMode('align')}
+          className="flex h-full w-36 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <div className="flex flex-1 flex-col items-center justify-center gap-1 text-ink-dim">
+            <ClapperIcon size={22} />
+            <span className="text-[11px]">3D Align</span>
+          </div>
+          <span className="truncate text-[11px] text-ink">SAM 3.0</span>
+          <span className="truncate text-[10px] text-ink-dim">Body + optional prop</span>
+        </button>
+        <button
+          type="button"
+          disabled={!canFal}
+          onClick={() => onMode('views')}
+          className="flex h-full w-36 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <div className="flex flex-1 flex-col items-center justify-center gap-1 text-ink-dim">
+            <FrameIcon size={22} />
+            <span className="text-[11px]">From views</span>
+          </div>
+          <span className="truncate text-[11px] text-ink">VGGT-1B</span>
+          <span className="truncate text-[10px] text-ink-dim">Cloud → Unplaced</span>
+        </button>
       </div>
     </div>
   )
 }
 
-function DummyTile() {
+function ObjectNounField({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  return (
+    <input
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      placeholder="chair, lamp, guitar…"
+      className="rounded-md bg-panel-2 px-2 py-1 text-[12px] text-ink outline-none placeholder:text-ink-dim"
+    />
+  )
+}
+
+function GenerateStillPane({
+  hint,
+  image,
+  onImage,
+  onBack,
+  submitLabel,
+  disabled,
+  onSubmit,
+  extra,
+  accept = 'image/jpeg,image/png,image/webp',
+}: {
+  hint: string
+  image: File | null
+  onImage: (file: File | null) => void
+  onBack: () => void
+  submitLabel: string
+  disabled: boolean
+  onSubmit: () => void
+  extra?: ReactNode
+  accept?: string
+}) {
+  const imageRef = useRef<HTMLInputElement>(null)
+  return (
+    <div className="flex h-full flex-col gap-2">
+      <button type="button" onClick={onBack} className="self-start text-[11px] text-ink-dim hover:text-ink">
+        ← Back
+      </button>
+      <p className="text-[10px] text-ink-dim">{hint}</p>
+      {extra}
+      <button
+        type="button"
+        onClick={() => imageRef.current?.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          const file = e.dataTransfer.files[0]
+          if (file && isStillImage(file)) onImage(file)
+        }}
+        className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-panel-2 text-[11px] text-ink-dim hover:bg-panel-3"
+      >
+        {image ? image.name : 'Drop or browse a photo'}
+      </button>
+      <input
+        ref={imageRef}
+        type="file"
+        accept={accept}
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0] ?? null
+          onImage(file && isStillImage(file) ? file : null)
+          e.target.value = ''
+        }}
+      />
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={onSubmit}
+        className="self-end rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent/85 disabled:opacity-40"
+      >
+        {submitLabel}
+      </button>
+    </div>
+  )
+}
+
+function GenerateViewsPane({
+  files,
+  onFiles,
+  onBack,
+  onSubmit,
+}: {
+  files: File[]
+  onFiles: (files: File[]) => void
+  onBack: () => void
+  onSubmit: () => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function takeStills(list: FileList | File[]) {
+    const next = [...files]
+    for (const file of Array.from(list)) {
+      if (!isStillImage(file)) continue
+      if (next.length >= VGGT_MAX_VIEWS) break
+      next.push(file)
+    }
+    onFiles(next)
+  }
+
+  const label =
+    files.length === 0
+      ? `Drop or browse overlapping photos (up to ${VGGT_MAX_VIEWS})`
+      : files.length === 1
+        ? files[0]!.name
+        : `${files.length} stills`
+
+  return (
+    <div className="flex h-full flex-col gap-2">
+      <button type="button" onClick={onBack} className="self-start text-[11px] text-ink-dim hover:text-ink">
+        ← Back
+      </button>
+      <p className="text-[10px] text-ink-dim">
+        Several overlapping photos of the same place. Parks a colored point cloud in Unplaced — not the palco,
+        not a camera path.
+      </p>
+      <button
+        type="button"
+        onClick={() => inputRef.current?.click()}
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault()
+          takeStills(e.dataTransfer.files)
+        }}
+        className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-xl border border-dashed border-line bg-panel-2 px-2 text-[11px] text-ink-dim hover:bg-panel-3"
+      >
+        {label}
+      </button>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        multiple
+        className="hidden"
+        onChange={(e) => {
+          if (e.target.files) takeStills(e.target.files)
+          e.target.value = ''
+        }}
+      />
+      <div className="flex items-center justify-between gap-2">
+        {files.length > 0 ? (
+          <button type="button" onClick={() => onFiles([])} className="text-[11px] text-ink-dim hover:text-ink">
+            Clear stills
+          </button>
+        ) : (
+          <span />
+        )}
+        <button
+          type="button"
+          disabled={files.length === 0}
+          onClick={onSubmit}
+          className="rounded-md bg-accent px-2.5 py-1 text-[11px] font-medium text-white hover:bg-accent/85 disabled:opacity-40"
+        >
+          Reconstruct
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function figureSearchHit(query: string, sex: FigureSex) {
+  const q = query.trim().toLowerCase()
+  if (!q) return true
+  const keys = ['dummy', 'figure', 'person', sex, sex === 'female' ? 'woman' : 'man']
+  return keys.some((key) => key.includes(q) || q.includes(key))
+}
+
+function FigureTile({ sex }: { sex: FigureSex }) {
+  const label = sex === 'female' ? 'Female' : 'Male'
   return (
     <button
       type="button"
-      data-primitive="dummy"
-      onClick={() => addDummyToScene()}
+      data-primitive={sex}
+      onClick={() => void addDummyToSceneWhenReady(sex)}
       className="group flex h-full w-28 shrink-0 flex-col items-center rounded-xl bg-panel-2 px-2 pb-2 pt-3 text-left hover:bg-panel-3"
     >
-      <div className="flex h-[4.75rem] w-[4.75rem] items-center justify-center overflow-hidden rounded-lg bg-black/25 text-[11px] text-ink-dim">
-        Dummy
+      <div className="flex h-[4.75rem] w-[4.75rem] items-center justify-center overflow-hidden rounded-lg bg-black/25 transition-transform duration-150 group-hover:scale-[1.03]">
+        <FigurePreview sex={sex} />
       </div>
-      <span className="mt-auto truncate text-[11px] text-ink">Dummy</span>
+      <span className="mt-auto truncate text-[11px] text-ink">{label}</span>
     </button>
   )
 }
@@ -497,8 +764,11 @@ function FindObjectsPanel() {
   const sourceImage = useEnvironmentStore((s) => s.sourceImage)
   const findPlaceMode = useEnvironmentStore((s) => s.findPlaceMode)
   const blocking = findPlaceMode === 'scene'
-  const [rows, setRows] = useState<FindRow[]>(() => (blocking ? (getSceneBlockSession()?.rows ?? []) : []))
+  const [rows, setRows] = useState<FindRow[]>(() =>
+    blocking ? (getSceneBlockSession()?.rows ?? []) : takeFindSeedRows(),
+  )
   const [busy, setBusy] = useState(false)
+  const [objectNoun, setObjectNoun] = useState('')
 
   return (
     <div className="panel absolute z-40 flex max-h-64 flex-col gap-2 p-3" style={{ right: 24, bottom: 220, width: 280 }}>
@@ -517,13 +787,13 @@ function FindObjectsPanel() {
       </div>
       <p className="text-[10px] text-ink-dim">
         {blocking
-          ? 'Confirm uses these masks. Floor and walls stay in the splat.'
+          ? 'Confirm uses these masks. Location stays on the Environment chip.'
           : 'People and props only. Floor and walls stay in the splat.'}
       </p>
       <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
         {rows.map((row) => (
           <div key={row.id} className="flex items-center gap-1">
-            <span className="w-14 shrink-0 text-[10px] uppercase text-ink-dim">{row.kind}</span>
+            <span className="w-16 shrink-0 text-[10px] uppercase text-ink-dim">{row.kind}</span>
             <input
               value={row.name}
               onChange={(e) =>
@@ -568,6 +838,12 @@ function FindObjectsPanel() {
             >
               Detect people
             </button>
+            <input
+              value={objectNoun}
+              onChange={(e) => setObjectNoun(e.target.value)}
+              placeholder="noun"
+              className="w-16 rounded bg-panel-2 px-1 py-1 text-[10px] text-ink outline-none placeholder:text-ink-dim"
+            />
             <button
               type="button"
               disabled={!sourceImage || busy}
@@ -575,7 +851,7 @@ function FindObjectsPanel() {
               onClick={() => {
                 if (!sourceImage) return
                 setBusy(true)
-                void detectObjectRows(sourceImage)
+                void detectObjectRows(sourceImage, { prompt: objectNoun || undefined })
                   .then((objects) => setRows((current) => [...current, ...objects]))
                   .finally(() => setBusy(false))
               }}
