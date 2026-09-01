@@ -210,20 +210,24 @@ export function XYZInput({
 export function ColorField({
   value,
   onChange,
+  ariaLabel,
 }: {
   value: string
   onChange: (hex: string) => void
+  ariaLabel?: string
 }) {
   return (
     <div className="flex flex-1 items-center gap-1.5 rounded-md bg-panel-2 px-1.5 py-1">
       <input
         type="color"
+        aria-label={ariaLabel}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         className="h-4 w-5 shrink-0"
       />
       <input
         type="text"
+        aria-label={ariaLabel ? `${ariaLabel} hex` : undefined}
         value={value.replace('#', '').toUpperCase()}
         onChange={(e) => {
           const hex = e.target.value.trim().replace(/^#/, '')

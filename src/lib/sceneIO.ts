@@ -683,6 +683,7 @@ export interface ObjectMeta {
   id: string
   name: string
   shade: number
+  clayColor?: string
   bufferKey: string | null
   sourceFormat?: ModelSourceFormat
   primitive?: PrimitiveSpec
@@ -709,6 +710,7 @@ export function toMeta(o: SceneObject): ObjectMeta {
     id: o.id,
     name: o.name,
     shade: o.shade,
+    clayColor: o.clayColor,
     bufferKey: o.bufferKey,
     sourceFormat: o.sourceFormat,
     primitive: o.primitive,
@@ -806,6 +808,7 @@ export async function loadSceneFromMetas(metas: ObjectMeta[], seedIfEmpty = true
           id: meta.id,
           name: meta.name,
           shade: meta.shade,
+          clayColor: meta.clayColor,
           transform: meta.transform,
           keys: meta.keys,
           playClips: meta.playClips,

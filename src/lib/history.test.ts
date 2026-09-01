@@ -1,7 +1,8 @@
+import * as THREE from 'three'
 import { afterEach, describe, expect, it } from 'vitest'
 import { VIEWPORT_BG_DEFAULT_TOP } from '../viewport/viewportBackground'
 import { addDummyToScene, setDummyBoneAxis } from './dummyCharacter'
-import { useSceneStore } from '../state/useSceneStore'
+import { makeObject, useSceneStore } from '../state/useSceneStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { IDENTITY_ENV_TRANSFORM } from './environment'
@@ -66,6 +67,28 @@ describe('history vs dummy FK', () => {
     expect(useSceneStore.getState().objects.find((item) => item.id === id)?.bonePose?.LeftArm?.[2]).toBe(40)
     expect(undo()).toBe(true)
     expect(useSceneStore.getState().objects.find((item) => item.id === id)?.bonePose).toBeUndefined()
+  })
+})
+
+describe('history vs per-object clay color', () => {
+  it('restores the authored clay color and both display materials', () => {
+    const root = new THREE.Group()
+    root.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))
+    const object = makeObject('Car', root, {
+      id: 'car',
+      shade: 0.5,
+      clayColor: '#2563eb',
+    })
+    useSceneStore.setState({ objects: [object] })
+    resetHistory()
+
+    useSceneStore.getState().setObjectColor('car', '#dc2626')
+    expect(undo()).toBe(true)
+
+    const restored = useSceneStore.getState().objects[0]!
+    expect(restored.clayColor).toBe('#2563eb')
+    expect(`#${restored.material.color.getHexString()}`).toBe('#2563eb')
+    expect(`#${restored.wireframeMaterial.color.getHexString()}`).toBe('#2563eb')
   })
 })
 

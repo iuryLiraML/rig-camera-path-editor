@@ -76,4 +76,26 @@ describe('ObjectBar asset display controls', () => {
     expect(queryByRole('button', { name: 'Keep high mesh' })).toBeTruthy()
     expect(queryByRole('button', { name: 'Wireframe display' })).toBeNull()
   })
+
+  it('exposes an accessible clay color input and Reset gray action in Shape', () => {
+    const object = makeObject('Car', meshRoot(), {
+      id: 'car',
+      shade: 0.5,
+      clayColor: '#2563eb',
+    })
+    useSceneStore.setState({ objects: [object] })
+    useEditorStore.setState({ selection: 'obj:car', objectBarPanel: 'name' })
+
+    const { getByLabelText, getByRole } = render(<ObjectBar />)
+    const color = getByLabelText('Clay color') as HTMLInputElement
+    expect(color.type).toBe('color')
+    expect(color.value).toBe('#2563eb')
+
+    fireEvent.change(color, { target: { value: '#dc2626' } })
+    expect(useSceneStore.getState().objects[0]?.clayColor).toBe('#dc2626')
+
+    fireEvent.click(getByRole('button', { name: 'Reset gray' }))
+    expect(useSceneStore.getState().objects[0]?.clayColor).toBe('#bcbcbc')
+    expect(color.value).toBe('#bcbcbc')
+  })
 })

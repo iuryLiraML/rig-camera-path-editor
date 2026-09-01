@@ -94,6 +94,29 @@ function PanelButton({
   )
 }
 
+export function ClayColorControl({ objectId }: { objectId: string }) {
+  const object = useSceneStore((s) => s.objects.find((item) => item.id === objectId))
+  if (!object) return null
+  return (
+    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+      <ColorField
+        value={object.clayColor}
+        ariaLabel="Clay color"
+        onChange={(hex) => useSceneStore.getState().setObjectColor(objectId, hex)}
+      />
+      <button
+        type="button"
+        aria-label="Reset gray"
+        title="Reset clay color to the current shade"
+        onClick={() => useSceneStore.getState().setObjectShade(objectId, object.shade)}
+        className="shrink-0 rounded-md bg-panel-2 px-2 py-1.5 text-[10px] text-ink hover:bg-panel-3"
+      >
+        Reset gray
+      </button>
+    </div>
+  )
+}
+
 function KeyList({
   items,
   onRemove,
@@ -558,6 +581,9 @@ function ObjectSections({ objectId }: { objectId: string }) {
         </Row>
       </Section>
       <Section title="Material · Clay">
+        <Row label="Color">
+          <ClayColorControl objectId={object.id} />
+        </Row>
         <Row label="Shade">
           <Slider
             value={object.shade}

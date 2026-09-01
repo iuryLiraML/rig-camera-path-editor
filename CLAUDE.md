@@ -50,8 +50,10 @@ npm run build        # web + the Node backend (needs server/tsconfig.json)
   `origin` — see the publish procedure in `docs/STATUS.md`.
 - **No secrets in the repo, ever**, and remember `VITE_*` values are inlined
   into the public bundle, so a secret there is a published secret.
-- **Objects are differentiated by grayscale only.** Do not touch lights or
-  materials unless asked.
+- **Objects default to grayscale derived from Shade.** Users may explicitly set
+  a per-asset clay color; it applies to Solid and Wireframe while Look preserves
+  source textures. Do not make incidental light, environment, or global material
+  changes.
 - **The animation must be a pure function of `t`.** The MP4 exporter renders
   frame by frame offline and scrubbing jumps around, so anything that carries
   state from the previous frame makes the preview disagree with the export. This

@@ -34,6 +34,8 @@ import {
   captureSourceMaterials,
   createAssetDisplayResources,
   disposeAssetDisplayResources,
+  normalizeHexColor,
+  shadeToHex,
   sourceMaterialsForClone,
   type AssetDisplayMode,
   type SourceMaterialMap,
@@ -45,10 +47,7 @@ export type { ModelFormat } from '../lib/modelCodec'
 
 export type Vec3 = [number, number, number]
 
-/**
- * Objects are told apart by grayscale clay shades (per user direction: no
- * colors, tone variation only). New objects cycle through this ramp.
- */
+/** New objects cycle through grayscale defaults until the user chooses a color. */
 export const SHADE_RAMP = [0.79, 0.55, 0.92, 0.44, 0.68, 0.33, 0.85, 0.6]
 let shadeCursor = 0
 export const nextShade = () => SHADE_RAMP[shadeCursor++ % SHADE_RAMP.length]
@@ -145,6 +144,8 @@ export interface SceneObject {
   displayMode: AssetDisplayMode
   /** grayscale tone 0..1 */
   shade: number
+  /** Serializable per-object clay color used by Solid and Wireframe. */
+  clayColor: string
   /** IndexedDB key of the source model buffer; null for primitives / built-in shape */
   bufferKey: string | null
   /** Raw source bytes stored under bufferKey. Remesh output always becomes glb. */
@@ -235,13 +236,14 @@ export function makeObject(
   options: Partial<
     Pick<
       SceneObject,
-      'id' | 'shade' | 'bufferKey' | 'sourceFormat' | 'modelFormat' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'remeshed' | 'rigKind' | 'keepDenseMesh' | 'keepTexture' | 'keepPoints' | 'bonePose' | 'boneTranslate' | 'figureSex' | 'displayMode'
+      'id' | 'shade' | 'clayColor' | 'bufferKey' | 'sourceFormat' | 'modelFormat' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'remeshed' | 'rigKind' | 'keepDenseMesh' | 'keepTexture' | 'keepPoints' | 'bonePose' | 'boneTranslate' | 'figureSex' | 'displayMode'
     >
   > = {},
 ): SceneObject {
   const shade = options.shade ?? nextShade()
+  const clayColor = normalizeHexColor(options.clayColor ?? shadeToHex(shade), shadeToHex(shade))
   if (options.keepTexture) stashImportedMaterials(root)
-  const displayResources = createAssetDisplayResources(root, shade)
+  const displayResources = createAssetDisplayResources(root, shade, clayColor)
   const object: SceneObject = {
     id: options.id ?? makeSceneId('obj'),
     name,
@@ -249,6 +251,7 @@ export function makeObject(
     ...displayResources,
     displayMode: options.displayMode ?? 'solid',
     shade,
+    clayColor,
     bufferKey: options.bufferKey ?? null,
     sourceFormat: options.sourceFormat,
     modelFormat: options.modelFormat,
@@ -340,6 +343,7 @@ interface SceneState {
   renameObject: (id: string, name: string) => void
   duplicateObject: (id: string) => void
   setObjectShade: (id: string, shade: number) => void
+  setObjectColor: (id: string, clayColor: string) => void
   setObjectDisplayMode: (id: string, displayMode: AssetDisplayMode) => void
   setImporting: (delta: number) => void
   setTransform: (id: string, part: keyof Transform, axis: 0 | 1 | 2, value: number) => void
@@ -387,6 +391,7 @@ interface SceneState {
       transform: Transform
       keys: ModelKey[]
       shade: number
+      clayColor?: string
       name: string
       primitive?: PrimitiveSpec
       follow?: FollowConfig
@@ -511,6 +516,7 @@ export const useSceneStore = create<SceneState>()(
               playClips: src.playClips,
               activeClip: src.activeClip,
               shade: src.shade,
+              clayColor: src.clayColor,
               sourceFormat: src.sourceFormat,
               follow: src.follow ? { ...src.follow } : undefined,
               rigKind: src.rigKind,
@@ -544,9 +550,18 @@ export const useSceneStore = create<SceneState>()(
 
         setObjectShade: (id, shade) =>
           updateObject(id, (o) => {
-            o.material.color.setScalar(shade)
-            o.wireframeMaterial.color.setScalar(shade)
-            return { shade }
+            const clayColor = shadeToHex(shade)
+            o.material.color.set(clayColor)
+            o.wireframeMaterial.color.set(clayColor)
+            return { shade, clayColor }
+          }),
+
+        setObjectColor: (id, value) =>
+          updateObject(id, (o) => {
+            const clayColor = normalizeHexColor(value, o.clayColor)
+            o.material.color.set(clayColor)
+            o.wireframeMaterial.color.set(clayColor)
+            return { clayColor }
           }),
 
         setObjectDisplayMode: (id, displayMode) =>
@@ -708,8 +723,12 @@ export const useSceneStore = create<SceneState>()(
             for (const snap of snaps) {
               const base = live.get(snap.id) ?? objectGraveyard.get(snap.id)
               if (!base) continue // root lost (graveyard cap) — cannot resurrect
-              base.material.color.setScalar(snap.shade)
-              base.wireframeMaterial.color.setScalar(snap.shade)
+              const clayColor = normalizeHexColor(
+                snap.clayColor ?? shadeToHex(snap.shade),
+                shadeToHex(snap.shade),
+              )
+              base.material.color.set(clayColor)
+              base.wireframeMaterial.color.set(clayColor)
               objectGraveyard.delete(snap.id)
               // rebuild the primitive geometry if its params changed
               let primitive = base.primitive
@@ -727,6 +746,7 @@ export const useSceneStore = create<SceneState>()(
                 transform: snap.transform,
                 keys: snap.keys,
                 shade: snap.shade,
+                clayColor,
                 name: snap.name,
                 primitive,
                 follow: snap.follow,

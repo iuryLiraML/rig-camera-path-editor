@@ -12,6 +12,21 @@ export type AssetDisplayResources = {
   wireframeMaterial: THREE.MeshStandardMaterial
 }
 
+export function shadeToHex(shade: number): string {
+  const clamped = Math.min(1, Math.max(0, Number.isFinite(shade) ? shade : 0))
+  return `#${new THREE.Color().setScalar(clamped).getHexString()}`
+}
+
+export function normalizeHexColor(value: string, fallback = '#ffffff'): string {
+  const raw = value.trim().replace(/^#/, '').toLowerCase()
+  if (/^[0-9a-f]{6}$/.test(raw)) return `#${raw}`
+  if (/^[0-9a-f]{3}$/.test(raw)) {
+    return `#${raw.split('').map((digit) => digit.repeat(2)).join('')}`
+  }
+  const normalizedFallback = fallback.trim().replace(/^#/, '').toLowerCase()
+  return /^[0-9a-f]{6}$/.test(normalizedFallback) ? `#${normalizedFallback}` : '#ffffff'
+}
+
 export function captureSourceMaterials(root: THREE.Object3D): SourceMaterialMap {
   const materials: SourceMaterialMap = new Map()
   root.traverse((child) => {
@@ -28,9 +43,9 @@ export function hasMeshGeometry(root: THREE.Object3D): boolean {
   return found
 }
 
-export function makeWireframeMaterial(shade: number): THREE.MeshStandardMaterial {
+export function makeWireframeMaterial(clayColor: string): THREE.MeshStandardMaterial {
   return new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setScalar(shade),
+    color: clayColor,
     roughness: 0.9,
     metalness: 0,
     side: THREE.DoubleSide,
@@ -41,16 +56,18 @@ export function makeWireframeMaterial(shade: number): THREE.MeshStandardMaterial
 export function createAssetDisplayResources(
   root: THREE.Object3D,
   shade: number,
+  clayColor = shadeToHex(shade),
 ): AssetDisplayResources {
+  const color = normalizeHexColor(clayColor, shadeToHex(shade))
   return {
     material: new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setScalar(shade),
+      color,
       roughness: 0.9,
       metalness: 0,
       side: THREE.DoubleSide,
     }),
     sourceMaterials: captureSourceMaterials(root),
-    wireframeMaterial: makeWireframeMaterial(shade),
+    wireframeMaterial: makeWireframeMaterial(color),
   }
 }
 

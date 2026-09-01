@@ -71,6 +71,7 @@ function capture() {
         transform: o.transform,
         keys: o.keys,
         shade: o.shade,
+        clayColor: o.clayColor,
         name: o.name,
         primitive: o.primitive,
         follow: o.follow,

@@ -18,7 +18,7 @@ import {
   MoveIcon,
   SlidersIcon,
 } from './icons'
-import { DesignInspector } from './RightPanel'
+import { ClayColorControl, DesignInspector } from './RightPanel'
 import { EnvironmentTransformPopover, TransformPopover } from './TransformPopover'
 import { useViewportInsets } from './viewportInsets'
 
@@ -205,6 +205,10 @@ function NamePopover({ objectId }: { objectId: string }) {
         onChange={(e) => useSceneStore.getState().setObjectShade(objectId, Number(e.target.value))}
         className="mt-1 w-full"
       />
+      <label className="mt-3 block text-[10px] uppercase tracking-wide text-ink-dim">Clay color</label>
+      <div className="mt-1">
+        <ClayColorControl objectId={objectId} />
+      </div>
     </div>
   )
 }

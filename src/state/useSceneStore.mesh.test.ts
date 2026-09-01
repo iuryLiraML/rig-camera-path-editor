@@ -36,6 +36,28 @@ describe('replaceImportedRoot', () => {
     expect(mesh.material).toBe(live?.material)
   })
 
+  it('preserves authored clay color through root replacement and remesh-style swaps', () => {
+    const first = new THREE.Group()
+    first.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))
+    const object = makeObject('Import', first, {
+      bufferKey: 'buf-1',
+      id: 'obj-1',
+      clayColor: '#7c3aed',
+    })
+    useSceneStore.setState({ objects: [object] })
+
+    const replacement = new THREE.Group()
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 8))
+    replacement.add(mesh)
+    useSceneStore.getState().replaceImportedRoot('obj-1', replacement, [])
+
+    const live = useSceneStore.getState().objects[0]!
+    expect(live.clayColor).toBe('#7c3aed')
+    expect(mesh.material).toBe(live.material)
+    expect(`#${live.material.color.getHexString()}`).toBe('#7c3aed')
+    expect(`#${live.wireframeMaterial.color.getHexString()}`).toBe('#7c3aed')
+  })
+
   it('keeps the cached triangle count when swapping in a remesh placeholder', () => {
     const first = new THREE.Group()
     first.add(new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)))

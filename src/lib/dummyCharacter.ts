@@ -639,6 +639,7 @@ export function makeDummyObject(
     activeClip?: string
     id?: string
     shade?: number
+    clayColor?: string
     bonePose?: Record<string, Vec3>
     boneTranslate?: Record<string, Vec3>
     figureSex?: FigureSex
@@ -657,6 +658,7 @@ export function makeDummyObject(
   return makeObject(options.name ?? label, root, {
     id: options.id,
     shade: options.shade,
+    clayColor: options.clayColor,
     clips: gltf ? gltf.clips : dummyClips(),
     playClips: options.playClips ?? false,
     activeClip: options.activeClip ?? 'Idle',
