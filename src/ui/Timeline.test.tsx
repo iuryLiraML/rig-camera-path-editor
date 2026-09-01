@@ -80,6 +80,10 @@ describe('Timeline', () => {
   it('shows the empty state with no camera path', () => {
     const { container } = render(<Timeline />)
     expect(container.textContent).toContain('No camera path yet')
+    for (const choice of ['Orbit', 'Half Arc', 'Flyover', 'Push In', 'Crane', 'Pan', 'Tilt', 'Zoom', 'Draw path (P)']) {
+      expect(container.textContent).toContain(choice)
+    }
+    expect(container.textContent).not.toContain('Add key')
   })
 
   it('survives a path appearing after it mounted', () => {

@@ -5,8 +5,13 @@ import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { useSaveStatusStore } from './saveStatus'
+import { CAMERA_PATH_ID, makeAnchor, usePathStore } from '../state/usePathStore'
+import { useRigStore } from '../state/useRigStore'
+import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
+import { useSceneStore } from '../state/useSceneStore'
+import { LEGACY_META_KEY } from './sceneIO'
 
-const memory = new Map<string, { id: string; name: string }>()
+const memory = new Map<string, { id: string; name: string; [key: string]: unknown }>()
 
 vi.mock('./idb', () => ({
   STORES: { buffers: 'model-buffers', projects: 'projects', folders: 'folders' },
@@ -15,6 +20,7 @@ vi.mock('./idb', () => ({
   }),
   idbGet: vi.fn(async (_store: string, key: string) => memory.get(key)),
   idbGetAll: vi.fn(async () => [...memory.values()]),
+  idbKeys: vi.fn(async () => []),
   idbDelete: vi.fn(async (_store: string, key: string) => {
     memory.delete(key)
   }),
@@ -36,6 +42,7 @@ vi.mock('./cloud/client', async (importOriginal) => {
 
 import {
   AUTOSAVE_MS,
+  bootProjects,
   flushActiveProject,
   installPersistFlush,
   liveBufferKeys,
@@ -50,6 +57,7 @@ import { makeEmptyRigSnapshot } from '../state/useCameraOptionsStore'
 
 beforeEach(() => {
   memory.clear()
+  localStorage.clear()
   vi.mocked(idbPut).mockClear()
   useSaveStatusStore.setState({ status: 'saved' })
   useEditorStore.setState({ appView: 'editor' })
@@ -70,6 +78,19 @@ beforeEach(() => {
     projectList: [],
   })
   useEnvironmentStore.getState().hydrate({ environments: [], unplacedAssets: [] })
+  const emptyRig = makeEmptyRigSnapshot()
+  usePathStore.setState({
+    paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
+    activePathId: CAMERA_PATH_ID,
+    selectedAnchorRefs: [],
+    primaryAnchorRef: null,
+    selectedAnchorId: null,
+    selectedAnchorIds: [],
+    selectedHandle: 'none',
+    drawPlaneY: 1.2,
+  })
+  useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
+  useRigStore.setState({ playing: false, t: 0 })
 })
 
 afterEach(() => {
@@ -345,5 +366,122 @@ describe('switchScene', () => {
     await switchScene('scene-a')
     expect(useProjectStore.getState().activeSceneId).toBe('scene-a')
     expect(useProjectStore.getState().sceneName).toBe('Scene A')
+  })
+})
+
+describe('non-cloud boot', () => {
+  const keyFields = [
+    'progressKeys',
+    'fovKeys',
+    'rollKeys',
+    'intensityKeys',
+    'fadeInKeys',
+    'fadeOutKeys',
+    'ampPosKeys',
+    'ampRotKeys',
+    'freqKeys',
+    'staticPosXKeys',
+    'staticPosYKeys',
+    'staticPosZKeys',
+    'staticRotXKeys',
+    'staticRotYKeys',
+    'staticRotZKeys',
+    'lookOffsetXKeys',
+    'lookOffsetYKeys',
+    'lookOffsetZKeys',
+    'targetXKeys',
+    'targetYKeys',
+    'targetZKeys',
+  ] as const
+
+  it('preserves saved records but opens a blank unsaved editor session', async () => {
+    const savedRig = {
+      ...makeEmptyRigSnapshot(),
+      anchors: [makeAnchor([0, 1, 0]), makeAnchor([2, 1, 2])],
+      progressKeys: [{ id: 'progress-1', time: 0, progress: 0 }],
+      fovKeys: [{ id: 'fov-1', time: 0.5, value: 70 }],
+    }
+    memory.set('proj-saved', {
+      id: 'proj-saved',
+      name: 'Saved work',
+      createdAt: 1,
+      updatedAt: 2,
+      guidelines: '',
+      savedPrompts: [],
+      skills: [],
+      activeSceneId: 'scene-saved',
+      scenes: [{
+        id: 'scene-saved',
+        name: 'Saved scene',
+        order: 0,
+        createdAt: 1,
+        sceneMeta: [],
+        rig: savedRig,
+        paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: savedRig.anchors, closed: false, rounding: 0.8 }],
+        shots: [],
+      }],
+    })
+    localStorage.setItem('rig-active-project', 'proj-saved')
+    useRigStore.setState({
+      playing: true,
+      t: 0.75,
+      progressKeys: savedRig.progressKeys,
+      fovKeys: savedRig.fovKeys,
+    })
+
+    await bootProjects()
+
+    expect(memory.get('proj-saved')?.name).toBe('Saved work')
+    expect(memory.size).toBe(1)
+    expect(idbPut).not.toHaveBeenCalled()
+    expect(useProjectStore.getState().projectList.map((project) => project.id)).toEqual(['proj-saved'])
+    expect(useProjectStore.getState().projectId).toBe('')
+    expect(localStorage.getItem('rig-active-project')).toBeNull()
+    expect(useProjectStore.getState().shots).toEqual([])
+    expect(useEditorStore.getState().appView).toBe('editor')
+    expect(usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors).toEqual([])
+    expect(useRigStore.getState().t).toBe(0)
+    expect(useRigStore.getState().playing).toBe(false)
+    for (const field of keyFields) expect(useRigStore.getState()[field]).toEqual([])
+    expect(useCameraOptionsStore.getState().options).toHaveLength(1)
+    expect(useCameraOptionsStore.getState().options[0].pristine).toBe(true)
+  })
+
+  it('opens a blank unsaved editor on first run without creating a project', async () => {
+    await bootProjects()
+
+    expect(memory.size).toBe(0)
+    expect(idbPut).not.toHaveBeenCalled()
+    expect(useProjectStore.getState().projectId).toBe('')
+    expect(useProjectStore.getState().projectList).toEqual([])
+    expect(useEditorStore.getState().appView).toBe('editor')
+    expect(usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors).toEqual([])
+    expect(useSceneStore.getState().objects).toHaveLength(1)
+
+    window.dispatchEvent(new Event('pagehide'))
+    await vi.waitFor(() => expect(useSaveStatusStore.getState().status).toBe('saved'))
+    expect(memory.size).toBe(0)
+    expect(idbPut).not.toHaveBeenCalled()
+  })
+
+  it('preserves actual legacy scene metadata in a project before opening blank', async () => {
+    localStorage.setItem(LEGACY_META_KEY, JSON.stringify([{
+      id: 'legacy-object',
+      name: 'Legacy object',
+      shade: 0.4,
+      bufferKey: null,
+      transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      keys: [],
+      playClips: false,
+    }]))
+
+    await bootProjects()
+
+    expect(memory.size).toBe(1)
+    const preserved = [...memory.values()][0] as unknown as ProjectRecord
+    expect(preserved.scenes[0].sceneMeta.map((meta) => meta.name)).toContain('Legacy object')
+    expect(useProjectStore.getState().projectList).toHaveLength(1)
+    expect(useProjectStore.getState().projectId).toBe('')
+    expect(useSceneStore.getState().objects).toHaveLength(1)
   })
 })

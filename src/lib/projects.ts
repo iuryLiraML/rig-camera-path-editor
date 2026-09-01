@@ -517,7 +517,9 @@ export function scheduleAutosave() {
 }
 
 function flushNow() {
-  void flushActiveProject().catch((error) => console.error('Failed to flush project', error))
+  const createIfMissing = useSaveStatusStore.getState().status === 'dirty'
+  if (!createIfMissing && !useProjectStore.getState().projectId) return
+  void flushActiveProject({ createIfMissing }).catch((error) => console.error('Failed to flush project', error))
 }
 
 /** Tab hide only — `beforeunload` still fires while visibility is `visible`. */
@@ -539,7 +541,9 @@ function watchForAutosave() {
   if (watching) return
   watching = true
   setPersistFlusher(() => {
-    void flushActiveProject().catch((error) => console.error('Failed to flush project', error))
+    const createIfMissing = useSaveStatusStore.getState().status === 'dirty'
+    if (!createIfMissing && !useProjectStore.getState().projectId) return
+    void flushActiveProject({ createIfMissing }).catch((error) => console.error('Failed to flush project', error))
   })
   installPersistFlush()
   useSceneStore.subscribe(scheduleAutosave)
@@ -581,7 +585,60 @@ function resetEditorChrome() {
   useRigStore.getState().setPlaying(false)
 }
 
-/** Boot: load the active project, or migrate the pre-projects world into one. */
+/**
+ * Replaces the live workspace with the pristine, unsaved launch scene.
+ * Stored project records are deliberately outside this boundary.
+ */
+export async function initializeBlankProjectSession() {
+  clearTimeout(saveTimer)
+  const wasAutosaveSuspended = autosaveSuspended
+  autosaveSuspended = true
+  try {
+    const emptyRig = makeEmptyRigSnapshot()
+    useProjectStore.getState().loadProject({
+      projectId: '',
+      name: 'Untitled',
+      workflow: createLegacyProjectWorkflow('Untitled'),
+      guidelines: '',
+      savedPrompts: [],
+      skills: [],
+      activeSceneId: '',
+      sceneName: 'Scene 1',
+      scenes: [],
+      shots: [],
+      directorChat: [],
+      directorLessons: [],
+      folderId: null,
+    })
+    hydrateEnvironmentFromRecord({})
+    usePathStore.setState({
+      paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
+      activePathId: CAMERA_PATH_ID,
+      selectedAnchorRefs: [],
+      primaryAnchorRef: null,
+      selectedAnchorId: null,
+      selectedAnchorIds: [],
+      selectedHandle: 'none',
+      drawPlaneY: emptyRig.drawPlaneY,
+    })
+    useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
+    await loadSceneFromMetas([], true)
+    restoreDirectorChat()
+    resetEditorChrome()
+    const editor = useEditorStore.getState()
+    editor.setTool('select')
+    editor.setActiveShotId(null)
+    editor.selectKeyframe(null)
+    editor.setAppView('editor')
+    localStorage.removeItem(ACTIVE_KEY)
+    useSaveStatusStore.getState().setStatus('saved')
+    resetHistory()
+  } finally {
+    autosaveSuspended = wasAutosaveSuspended
+  }
+}
+
+/** Boot saved-project discovery, then open a pristine local editor session. */
 export async function bootProjects() {
   if (isTeamCloudApp() && !isCloudFirst()) {
     useProjectStore.getState().setProjectList([])
@@ -612,36 +669,35 @@ export async function bootProjects() {
   const records = await refreshProjectList()
 
   if (records.length === 0) {
-    // first run (or migration from v0.1): adopt whatever local state exists
+    // Preserve an actual pre-projects scene before replacing the live workspace.
     const legacyMetas = readLegacyMetas() ?? []
-    await loadSceneFromMetas(legacyMetas, true)
-    const id = makeSceneId('proj')
-    const sceneId = makeSceneId('scene')
-    createdAtById.set(id, Date.now())
-    useProjectStore.getState().loadProject({
-      projectId: id,
-      name: 'Untitled',
-      workflow: createLegacyProjectWorkflow('Untitled'),
-      guidelines: useAgentStore.getState().guidelines, // legacy location
-      savedPrompts: [],
-      skills: [],
-      activeSceneId: sceneId,
-      sceneName: 'Scene 1',
-      scenes: [{ id: sceneId, name: 'Scene 1' }],
-      shots: [],
-    })
-    hydrateEnvironmentFromRecord({})
-    localStorage.setItem(ACTIVE_KEY, id)
-    await saveActiveProject()
-    await refreshProjectList()
-  } else {
-    const activeId = localStorage.getItem(ACTIVE_KEY)
-    const record = records.find((r) => r.id === activeId) ?? records[0]
-    await openHydratedRecord(record)
+    if (legacyMetas.length > 0) {
+      await loadSceneFromMetas(legacyMetas, false)
+      const id = makeSceneId('proj')
+      const sceneId = makeSceneId('scene')
+      createdAtById.set(id, Date.now())
+      useProjectStore.getState().loadProject({
+        projectId: id,
+        name: 'Untitled',
+        workflow: createLegacyProjectWorkflow('Untitled'),
+        guidelines: useAgentStore.getState().guidelines,
+        savedPrompts: [],
+        skills: [],
+        activeSceneId: sceneId,
+        sceneName: 'Scene 1',
+        scenes: [{ id: sceneId, name: 'Scene 1' }],
+        shots: [],
+      })
+      hydrateEnvironmentFromRecord({})
+      localStorage.setItem(ACTIVE_KEY, id)
+      await saveActiveProject()
+      await refreshProjectList()
+    }
   }
 
-  watchForAutosave()
   useProjectStore.getState().setBooted(true)
+  await initializeBlankProjectSession()
+  watchForAutosave()
 
   // sweep buffers no scene, in any project, references anymore
   void sweepOrphanBuffers(liveBufferKeys(await getAllProjectRecords(), liveSceneMetas()))
