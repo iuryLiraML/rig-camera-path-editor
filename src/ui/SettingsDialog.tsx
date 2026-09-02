@@ -12,6 +12,7 @@ import {
 } from '../lib/agent/providers'
 import type { VisionMode } from '../state/useAgentStore'
 import type { SamImageVersion } from '../lib/fal/models'
+import { fetchSessionEmail } from '../lib/siteSession'
 import { Row, Section, Segmented } from './primitives'
 
 const PROVIDER_OPTIONS = (Object.keys(PROVIDERS) as ProviderKind[]).map((k) => ({
@@ -38,6 +39,19 @@ export function SettingsDialog() {
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
   const cloudStatus = useCloudAuthStore((s) => s.status)
   const credentialId = useCloudAuthStore((s) => s.credentialIds?.[provider])
+  // site-access session (the Google login gate) — null when there is no gate
+  const [siteEmail, setSiteEmail] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    void fetchSessionEmail().then((email) => {
+      if (live) setSiteEmail(email)
+    })
+    return () => {
+      live = false
+    }
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -100,6 +114,27 @@ export function SettingsDialog() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
+        {siteEmail && (
+          <Section title="Site access">
+            <div className="flex items-center justify-between gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-[11px] text-ink" title={siteEmail}>
+                  {siteEmail}
+                </div>
+                <div className="text-[10px] text-ink-dim">Signed in to this site with Google</div>
+              </div>
+              {/* a real navigation, not fetch(): the server clears the cookie and
+                  serves the signed-out page, which lives outside the gate */}
+              <a
+                href="/api/auth/logout"
+                className="shrink-0 rounded-md bg-panel-2 px-2.5 py-1.5 text-[11px] text-ink hover:bg-panel-3"
+              >
+                Sign out of Rig
+              </a>
+            </div>
+          </Section>
+        )}
+
         <Section title={cloudStatus === 'signed-in' ? 'AI provider (session only; store in your vault)' : 'AI provider (stored locally in this browser)'}>
           <Row label="Provider">
             <Segmented<ProviderKind>

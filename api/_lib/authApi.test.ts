@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { handleAuthApi } from './authApi'
-import { createStateCookie } from './session'
+import { createSessionCookie, createStateCookie, signValue } from './session'
 
 const ENV = {
   GOOGLE_CLIENT_ID: 'client-id.apps.googleusercontent.com',
@@ -169,11 +169,86 @@ describe('handleAuthApi', () => {
   })
 
   describe('/api/auth/logout', () => {
-    it('clears the session cookie and redirects home', async () => {
+    // a page, not a redirect: "/" would bounce back through the gate to Google,
+    // which — with the Google session still alive — lands the user in the app
+    // again and makes sign-out look broken
+    it('clears the session cookie and renders a signed-out page', async () => {
       const res = await handleAuthApi(new Request('http://localhost/api/auth/logout'), ENV)
-      expect(res?.status).toBe(302)
-      expect(res?.headers.get('location')).toBe('/')
+      expect(res?.status).toBe(200)
+      expect(res?.headers.get('location')).toBeNull()
+      expect(res?.headers.get('content-type')).toContain('text/html')
+      expect(res?.headers.get('cache-control')).toBe('no-store')
       expect(res?.headers.get('set-cookie')).toContain('Max-Age=0')
+
+      const html = await res!.text()
+      expect(html).toContain('signed out')
+      expect(html).toContain('/api/auth/login')
+    })
+
+    it('works with nothing configured — the page must be reachable to fix a broken gate', async () => {
+      const res = await handleAuthApi(new Request('http://localhost/api/auth/logout'), {})
+      expect(res?.status).toBe(200)
+      expect(res?.headers.get('set-cookie')).toContain('Max-Age=0')
+    })
+  })
+
+  describe('/api/auth/me', () => {
+    const cookieFor = async (email: string, secret: string) =>
+      (await createSessionCookie(email, secret)).split(';')[0]
+
+    const me = (cookie?: string, env: typeof ENV | Record<string, string> = ENV) =>
+      handleAuthApi(
+        new Request('http://localhost/api/auth/me', { headers: cookie ? { cookie } : {} }),
+        env,
+      )
+
+    it('returns the email for a valid session cookie', async () => {
+      const res = await me(await cookieFor('tim@silverside.ai', ENV.SESSION_SECRET))
+      expect(res?.status).toBe(200)
+      expect(await res!.json()).toEqual({ email: 'tim@silverside.ai' })
+    })
+
+    it('never caches — a stale "signed in" answer would outlive the session', async () => {
+      const res = await me(await cookieFor('tim@silverside.ai', ENV.SESSION_SECRET))
+      expect(res?.headers.get('cache-control')).toBe('no-store')
+      expect(res?.headers.get('content-type')).toContain('application/json')
+    })
+
+    it('returns null with no cookie at all', async () => {
+      expect(await (await me())!.json()).toEqual({ email: null })
+    })
+
+    it('returns null for a cookie signed with a different secret', async () => {
+      const res = await me(await cookieFor('tim@silverside.ai', 'some-other-secret'))
+      expect(await res!.json()).toEqual({ email: null })
+    })
+
+    // the payload is base64url JSON, so swap the whole segment and keep the
+    // original signature — that's the attack the HMAC exists to stop
+    it('returns null when the payload is swapped but the signature is kept', async () => {
+      const cookie = await cookieFor('tim@silverside.ai', ENV.SESSION_SECRET)
+      const signature = cookie.slice(cookie.indexOf('.') + 1)
+      const forged = Buffer.from(
+        JSON.stringify({ email: 'attacker@example.com', exp: Math.floor(Date.now() / 1000) + 999 }),
+      ).toString('base64url')
+      const res = await me(`rig_session=${forged}.${signature}`)
+      expect(await res!.json()).toEqual({ email: null })
+    })
+
+    it('returns null for a correctly signed but expired session', async () => {
+      const token = await signValue(
+        { email: 'tim@silverside.ai', exp: Math.floor(Date.now() / 1000) - 1 },
+        ENV.SESSION_SECRET,
+      )
+      expect(await (await me(`rig_session=${token}`))!.json()).toEqual({ email: null })
+    })
+
+    // "no gate configured" and "not signed in" are the same answer on purpose:
+    // the client shows no sign-out control either way, so ungated local dev stays clean
+    it('returns null rather than 503 when SESSION_SECRET is missing', async () => {
+      const res = await me(await cookieFor('tim@silverside.ai', ENV.SESSION_SECRET), {})
+      expect(res?.status).toBe(200)
+      expect(await res!.json()).toEqual({ email: null })
     })
   })
 })
