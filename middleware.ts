@@ -1,47 +1,74 @@
-// Vercel Edge Middleware — HTTP Basic Auth gate for the whole site.
+// Vercel Edge Middleware — gate for the whole site. Two independent ways in:
 //
-// The password is NEVER stored in this file or the repo. It is read at the
-// edge from Vercel Environment Variables:
-//   SITE_USER      — the username (e.g. "silverside")
-//   SITE_PASSWORD  — the shared password
+//   1. A verified Google login, restricted to ALLOWED_EMAIL_DOMAIN
+//      (see api/_lib/authApi.ts) — the primary path.
+//   2. HTTP Basic Auth via SITE_USER / SITE_PASSWORD — a break-glass
+//      fallback that still works if Google OAuth is ever misconfigured.
 //
-// Safe default: if either variable is missing, the gate is disabled and the
-// site stays open (so a missing env var can never lock everyone out).
+// Neither credential is stored in this file or the repo. Both are read at
+// the edge from Vercel Environment Variables:
+//   SITE_USER, SITE_PASSWORD   — the Basic Auth fallback
+//   GOOGLE_CLIENT_ID           — presence gates whether Google login applies
+//   SESSION_SECRET             — signs/verifies the session cookie
 //
-// Runs before every static asset is served, so once the browser has
-// authenticated it sends the credentials automatically for the whole origin.
+// Safe default: if nothing is configured at all, the gate is disabled and
+// the site stays open (so a missing env var can never lock everyone out).
+
+import { readSessionEmail } from './api/_lib/session'
 
 export const config = { matcher: '/:path*' }
 
-export default function middleware(request: Request): Response | undefined {
-  const user = process.env.SITE_USER
-  const password = process.env.SITE_PASSWORD
-
-  // no credentials configured -> do not lock anyone out
-  if (!user || !password) return undefined
-
+function checkBasicAuth(request: Request, user: string, password: string): boolean {
   const header = request.headers.get('authorization') ?? ''
   const [scheme, encoded] = header.split(' ')
+  if (scheme !== 'Basic' || !encoded) return false
 
-  if (scheme === 'Basic' && encoded) {
-    let decoded = ''
-    try {
-      decoded = atob(encoded)
-    } catch {
-      decoded = ''
-    }
-    const sep = decoded.indexOf(':')
-    const givenUser = decoded.slice(0, sep)
-    const givenPass = decoded.slice(sep + 1)
-    if (givenUser === user && givenPass === password) {
-      return undefined // credentials match -> continue to the site
-    }
+  let decoded = ''
+  try {
+    decoded = atob(encoded)
+  } catch {
+    return false
+  }
+  const sep = decoded.indexOf(':')
+  return decoded.slice(0, sep) === user && decoded.slice(sep + 1) === password
+}
+
+export default async function middleware(request: Request): Promise<Response | undefined> {
+  const url = new URL(request.url)
+
+  // never gate the auth routes themselves — that would either lock the
+  // login flow behind Basic Auth, or create a redirect loop against itself
+  if (url.pathname.startsWith('/api/auth/')) return undefined
+
+  const siteUser = process.env.SITE_USER
+  const sitePassword = process.env.SITE_PASSWORD
+  const basicAuthConfigured = Boolean(siteUser && sitePassword)
+
+  const googleClientId = process.env.GOOGLE_CLIENT_ID
+  const sessionSecret = process.env.SESSION_SECRET
+  const googleConfigured = Boolean(googleClientId && sessionSecret)
+
+  // nothing set up -> do not lock anyone out
+  if (!basicAuthConfigured && !googleConfigured) return undefined
+
+  if (basicAuthConfigured && checkBasicAuth(request, siteUser!, sitePassword!)) return undefined
+
+  if (googleConfigured) {
+    const email = await readSessionEmail(request.headers.get('cookie'), sessionSecret!)
+    if (email) return undefined
+  }
+
+  // only send navigations to Google when it's actually configured — otherwise
+  // /api/auth/login itself has nothing to redirect to and would just 503
+  if (googleConfigured && request.headers.get('sec-fetch-mode') === 'navigate') {
+    const returnTo = url.pathname + url.search
+    return Response.redirect(`${url.origin}/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`, 302)
   }
 
   return new Response('Authentication required.', {
     status: 401,
-    headers: {
-      'WWW-Authenticate': 'Basic realm="Rig — Silverside", charset="UTF-8"',
-    },
+    headers: basicAuthConfigured
+      ? { 'WWW-Authenticate': 'Basic realm="Rig - Silverside", charset="UTF-8"' }
+      : {},
   })
 }
