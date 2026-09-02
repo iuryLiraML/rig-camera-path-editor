@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin } from 'vite'
 import { handleAgentApi, type ProxyEnv } from './agentApi'
+import { handleAuthApi, type AuthEnv } from './authApi'
 
 async function toWebRequest(req: IncomingMessage): Promise<Request> {
   const headers = new Headers()
@@ -55,6 +56,35 @@ export function agentApiDevPlugin(env: ProxyEnv): Plugin {
         })().catch((error) => {
           res.statusCode = 500
           res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Proxy error' }))
+        })
+      })
+    },
+  }
+}
+
+/**
+ * Serves /api/auth/* locally the same way Vercel serves api/auth/[...path].ts
+ * in production. The full Google round trip only works once localhost is
+ * also registered as an authorized origin/redirect in Google Cloud Console —
+ * today that's only done for the production URL — but the routing, cookie
+ * signing and domain check all run identically either way.
+ */
+export function authApiDevPlugin(env: AuthEnv): Plugin {
+  return {
+    name: 'rig-auth-api-dev',
+    configureServer(server) {
+      server.middlewares.use((req, res, next) => {
+        void (async () => {
+          const request = await toWebRequest(req)
+          const response = await handleAuthApi(request, env)
+          if (!response) {
+            next()
+            return
+          }
+          await writeWebResponse(res, response)
+        })().catch((error) => {
+          res.statusCode = 500
+          res.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Auth error' }))
         })
       })
     },

@@ -1,11 +1,16 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
-import { agentApiDevPlugin } from './api/_lib/vitePlugin'
+import { agentApiDevPlugin, authApiDevPlugin } from './api/_lib/vitePlugin'
 
 export default defineConfig(({ mode }) => ({
   // site keys for the agent proxy come from .env.local (never VITE_-prefixed)
-  plugins: [react(), tailwindcss(), agentApiDevPlugin({ ...process.env, ...loadEnv(mode, process.cwd(), '') })],
+  plugins: [
+    react(),
+    tailwindcss(),
+    agentApiDevPlugin({ ...process.env, ...loadEnv(mode, process.cwd(), '') }),
+    authApiDevPlugin({ ...process.env, ...loadEnv(mode, process.cwd(), '') }),
+  ],
   server: {
     /*
      * Vite does not read PORT on its own: it would try 5173, find it busy and
