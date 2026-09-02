@@ -93,6 +93,35 @@ describe('middleware — Google session only', () => {
     expect(res?.status).toBe(401)
     expect(res?.headers.get('location')).toBeNull()
   })
+
+  it('redirects an iframed preview too — Sec-Fetch-Mode: nested-navigate, not just "navigate"', async () => {
+    vi.stubEnv('GOOGLE_CLIENT_ID', 'client-id')
+    vi.stubEnv('SESSION_SECRET', 'secret')
+    const res = await middleware(
+      new Request('http://localhost/', { headers: { 'sec-fetch-mode': 'nested-navigate' } }),
+    )
+    expect(res?.status).toBe(302)
+  })
+
+  it('falls back to the Accept header when a browser sends no Sec-Fetch-Mode at all', async () => {
+    vi.stubEnv('GOOGLE_CLIENT_ID', 'client-id')
+    vi.stubEnv('SESSION_SECRET', 'secret')
+    const res = await middleware(
+      new Request('http://localhost/', { headers: { accept: 'text/html,application/xhtml+xml' } }),
+    )
+    expect(res?.status).toBe(302)
+  })
+
+  it('does not redirect a same-origin fetch() just because Accept happens to include */*', async () => {
+    vi.stubEnv('GOOGLE_CLIENT_ID', 'client-id')
+    vi.stubEnv('SESSION_SECRET', 'secret')
+    const res = await middleware(
+      new Request('http://localhost/api/agent-config', {
+        headers: { 'sec-fetch-mode': 'cors', accept: '*/*' },
+      }),
+    )
+    expect(res?.status).toBe(401)
+  })
 })
 
 describe('middleware — both configured (break-glass fallback)', () => {

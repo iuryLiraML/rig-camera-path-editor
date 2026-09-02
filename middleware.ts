@@ -18,6 +18,21 @@ import { readSessionEmail } from './api/_lib/session'
 
 export const config = { matcher: '/:path*' }
 
+/**
+ * Is this a real page load (deserves a redirect to Google) rather than a
+ * fetch()/XHR/asset request (which can't usefully follow one)? Sec-Fetch-Mode
+ * is the reliable signal when present, but it isn't sent by every browser and
+ * an iframed preview reports `nested-navigate`, not `navigate` — checking for
+ * exactly 'navigate' alone was missing both of those. Falls back to the
+ * Accept header, which every browser has sent for decades.
+ */
+function wantsHtml(request: Request): boolean {
+  const mode = request.headers.get('sec-fetch-mode')
+  if (mode === 'navigate' || mode === 'nested-navigate') return true
+  if (mode) return false // an explicit non-navigate mode -> definitely not a page load
+  return (request.headers.get('accept') ?? '').includes('text/html')
+}
+
 function checkBasicAuth(request: Request, user: string, password: string): boolean {
   const header = request.headers.get('authorization') ?? ''
   const [scheme, encoded] = header.split(' ')
@@ -60,7 +75,7 @@ export default async function middleware(request: Request): Promise<Response | u
 
   // only send navigations to Google when it's actually configured — otherwise
   // /api/auth/login itself has nothing to redirect to and would just 503
-  if (googleConfigured && request.headers.get('sec-fetch-mode') === 'navigate') {
+  if (googleConfigured && wantsHtml(request)) {
     const returnTo = url.pathname + url.search
     return Response.redirect(`${url.origin}/api/auth/login?returnTo=${encodeURIComponent(returnTo)}`, 302)
   }
