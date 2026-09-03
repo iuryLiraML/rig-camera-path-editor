@@ -3,15 +3,14 @@ import { agentConfig, falUpstream, handleAgentApi, llmUpstream } from './agentAp
 
 const ENV = {
   ANTHROPIC_API_KEY: 'sk-ant-site',
-  KIMI_API_KEY: 'moonshot-site',
   FAL_KEY: 'fal-site',
 }
 
 describe('agentConfig', () => {
   it('reports which vendors have a site key, never the keys themselves', () => {
-    expect(agentConfig(ENV)).toEqual({ anthropic: true, kimi: true, fal: true })
-    expect(agentConfig({})).toEqual({ anthropic: false, kimi: false, fal: false })
-    expect(agentConfig({ FAL_KEY: '  ' })).toEqual({ anthropic: false, kimi: false, fal: false })
+    expect(agentConfig(ENV)).toEqual({ anthropic: true, fal: true })
+    expect(agentConfig({})).toEqual({ anthropic: false, fal: false })
+    expect(agentConfig({ FAL_KEY: '  ' })).toEqual({ anthropic: false, fal: false })
   })
 })
 
@@ -25,12 +24,19 @@ describe('llmUpstream', () => {
     })
   })
 
-  it('keeps the query string and uses Bearer auth for kimi', () => {
-    const plan = llmUpstream('kimi', 'v1/models', '?limit=5', ENV)
+  it('keeps the query string when forwarding', () => {
+    const plan = llmUpstream('anthropic', 'v1/models', '?limit=5', ENV)
     expect(plan).toEqual({
       ok: true,
-      url: 'https://api.moonshot.ai/v1/models?limit=5',
-      headers: { authorization: 'Bearer moonshot-site' },
+      url: 'https://api.anthropic.com/v1/models?limit=5',
+      headers: { 'x-api-key': 'sk-ant-site', 'anthropic-version': '2023-06-01' },
+    })
+  })
+
+  it('503s when the deployment has no Anthropic key, since there is no fallback', () => {
+    expect(llmUpstream('anthropic', 'v1/messages', '', { FAL_KEY: 'fal-site' })).toMatchObject({
+      ok: false,
+      status: 503,
     })
   })
 
@@ -82,7 +88,7 @@ describe('handleAgentApi', () => {
     const res = await handleAgentApi(new Request('http://localhost/api/agent-config'), ENV)
     expect(res?.status).toBe(200)
     expect(res?.headers.get('cache-control')).toBe('no-store')
-    expect(await res?.json()).toEqual({ anthropic: true, kimi: true, fal: true })
+    expect(await res?.json()).toEqual({ anthropic: true, fal: true })
   })
 
   it('forwards an anthropic call with the injected key and streams the body back', async () => {

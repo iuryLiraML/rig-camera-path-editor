@@ -8,22 +8,15 @@ import {
   modelSupportsVision,
   PROVIDERS,
   type ModelOption,
-  type ProviderKind,
 } from '../lib/agent/providers'
 import type { VisionMode } from '../state/useAgentStore'
 import type { SamImageVersion } from '../lib/fal/models'
 import { fetchSessionEmail } from '../lib/siteSession'
 import { Row, Section, Segmented } from './primitives'
 
-const PROVIDER_OPTIONS = (Object.keys(PROVIDERS) as ProviderKind[]).map((k) => ({
-  value: k,
-  label: PROVIDERS[k].label,
-}))
-
 export function SettingsDialog() {
   const open = useEditorStore((s) => s.showSettings)
   const provider = useAgentStore((s) => s.provider)
-  const keys = useAgentStore((s) => s.keys)
   const models = useAgentStore((s) => s.models)
   const visionMode = useAgentStore((s) => s.visionMode)
   const falKey = useAgentStore((s) => s.falKey)
@@ -38,7 +31,6 @@ export function SettingsDialog() {
   const [vaultBusy, setVaultBusy] = useState(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
   const cloudStatus = useCloudAuthStore((s) => s.status)
-  const credentialId = useCloudAuthStore((s) => s.credentialIds?.[provider])
   // site-access session (the Google login gate) — null when there is no gate
   const [siteEmail, setSiteEmail] = useState<string | null>(null)
 
@@ -55,10 +47,9 @@ export function SettingsDialog() {
 
   useEffect(() => {
     if (!open) return
-    const apiKey = keys[provider]
-    // no personal key needed when the deployment has a site key — the model
-    // list then loads through the same-origin /api proxy
-    if (!apiKey && !serverKeys[provider]) {
+    // the model list loads through the same-origin /api proxy, so it needs the
+    // deployment's site key and nothing else
+    if (!serverKeys[provider]) {
       setModelOptions([])
       setModelsError(null)
       setModelsLoading(false)
@@ -70,7 +61,7 @@ export function SettingsDialog() {
       setModelsLoading(true)
       setModelsError(null)
       try {
-        const options = await listProviderModels(provider, apiKey, controller.signal)
+        const options = await listProviderModels(provider, controller.signal)
         setModelOptions(options)
         const selected = models[provider]
         if (options.length > 0 && !options.some((option) => option.id === selected)) {
@@ -90,7 +81,7 @@ export function SettingsDialog() {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [agent, keys, models, open, provider, serverKeys])
+  }, [agent, models, open, provider, serverKeys])
 
   if (!open) return null
 
@@ -135,28 +126,17 @@ export function SettingsDialog() {
           </Section>
         )}
 
-        <Section title={cloudStatus === 'signed-in' ? 'AI provider (session only; store in your vault)' : 'AI provider (stored locally in this browser)'}>
-          <Row label="Provider">
-            <Segmented<ProviderKind>
-              options={PROVIDER_OPTIONS}
-              value={provider}
-              onChange={(v) => agent.setProvider(v)}
-            />
-          </Row>
-          <Row label="API key">
-            <input
-              type="password"
-              value={keys[provider]}
-              onChange={(e) => agent.setKey(provider, e.target.value.trim())}
-              placeholder={serverKeys[provider] ? 'Using the site key — optional override' : PROVIDERS[provider].keyHint}
-              className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
-            />
-          </Row>
-          {serverKeys[provider] && !keys[provider].trim() && (
+        <Section title="Director model">
+          {!serverKeys[provider] ? (
+            <div className="rounded-md bg-red-500/10 px-2 py-1.5 text-[10px] leading-relaxed text-red-300">
+              No {PROVIDERS[provider].label} key is configured on this deployment, so the
+              Director cannot run. Set <span className="font-mono">ANTHROPIC_API_KEY</span> in
+              the Vercel project and redeploy.
+            </div>
+          ) : (
             <div className="text-[10px] leading-relaxed text-ink-dim">
-              This deployment has a shared {PROVIDERS[provider].label} key — requests go
-              through the site, and the key never reaches the browser. Paste your own key
-              to use it instead.
+              The Director runs on this deployment's shared {PROVIDERS[provider].label} key.
+              Requests go through the site and the key never reaches the browser.
             </div>
           )}
           <Row label="Model">
@@ -168,9 +148,7 @@ export function SettingsDialog() {
             >
               {modelsLoading && <option value={models[provider]}>Loading models…</option>}
               {!modelsLoading && modelOptions.length === 0 && (
-                <option value={models[provider]}>
-                  {modelsError ? 'Models unavailable' : 'Add an API key to load models'}
-                </option>
+                <option value={models[provider]}>Models unavailable</option>
               )}
               {!modelsLoading &&
                 modelOptions.map((model) => (
@@ -180,36 +158,9 @@ export function SettingsDialog() {
                 ))}
             </select>
           </Row>
-          {modelsError && <div className="text-[10px] text-red-400">{modelsError}. Check the API key.</div>}
-          {cloudStatus === 'signed-in' && (
-            <div className="space-y-1.5">
-              <button
-                type="button"
-                disabled={vaultBusy || !keys[provider].trim()}
-                onClick={() => {
-                  setVaultBusy(true)
-                  setVaultMessage(null)
-                  void useCloudAuthStore
-                    .getState()
-                    .storeCredential(provider, keys[provider].trim())
-                    .then((id) => {
-                      setVaultMessage(`Stored in vault (${id.slice(0, 8)}…) — secret not returned.`)
-                    })
-                    .catch((error) => {
-                      setVaultMessage(error instanceof Error ? error.message : 'Vault store failed')
-                    })
-                    .finally(() => setVaultBusy(false))
-                }}
-                className="rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink hover:bg-panel-3 disabled:opacity-50"
-              >
-                {vaultBusy ? 'Storing…' : 'Store key in encrypted cloud vault'}
-              </button>
-              {credentialId && (
-                <div className="text-[10px] text-ink-dim">
-                  Vault credential: <span className="font-mono">{credentialId.slice(0, 8)}…</span>
-                </div>
-              )}
-              {vaultMessage && <div className="text-[10px] text-ink-dim">{vaultMessage}</div>}
+          {modelsError && (
+            <div className="text-[10px] text-red-400">
+              {modelsError}. The deployment's key may be invalid.
             </div>
           )}
           <Row label="Screenshot">
@@ -277,6 +228,7 @@ export function SettingsDialog() {
               {vaultBusy ? 'Storing…' : 'Store Fal key in encrypted cloud vault'}
             </button>
           )}
+          {vaultMessage && <div className="text-[10px] text-ink-dim">{vaultMessage}</div>}
           <Row label="Mask model">
             <Segmented<SamImageVersion>
               options={[
