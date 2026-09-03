@@ -32,11 +32,17 @@ interface LlmVendor {
   authHeaders: (key: string) => Record<string, string>
 }
 
+/**
+ * The vendor paths the shared key may reach. Each one needs a matching static
+ * route file under api/anthropic/ — see api/routes.test.ts, which enforces it.
+ */
+export const ALLOWED_LLM_PATHS = ['v1/models', 'v1/messages'] as const
+
 const LLM_VENDORS: Record<LlmProvider, LlmVendor> = {
   anthropic: {
     base: 'https://api.anthropic.com',
     envVar: ENV_VARS.anthropic,
-    allowedPaths: ['v1/models', 'v1/messages'],
+    allowedPaths: ALLOWED_LLM_PATHS,
     authHeaders: (key) => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01' }),
   },
 }

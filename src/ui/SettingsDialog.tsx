@@ -158,11 +158,7 @@ export function SettingsDialog() {
                 ))}
             </select>
           </Row>
-          {modelsError && (
-            <div className="text-[10px] text-red-400">
-              {modelsError}. The deployment's key may be invalid.
-            </div>
-          )}
+          {modelsError && <div className="text-[10px] text-red-400">{modelsError}.</div>}
           <Row label="Screenshot">
             <Segmented<VisionMode>
               options={[

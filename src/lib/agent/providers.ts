@@ -67,13 +67,26 @@ export function providerUsable(kind: ProviderKind): boolean {
   return serverHasKey(kind)
 }
 
+/**
+ * Why the model list failed, when the status makes it knowable. A 404 is not a
+ * credential problem — it means the /api proxy route did not match, which is
+ * exactly the failure a `[...path]` catch-all produced for multi-segment
+ * vendor paths — so blaming the key there sends people to the wrong place.
+ */
+function modelsErrorHint(status: number): string {
+  if (status === 401 || status === 403) return " — the deployment's key was rejected"
+  if (status === 404) return ' — the /api proxy route is missing on this deployment'
+  if (status === 503) return ' — no key is configured on this deployment'
+  return ''
+}
+
 /** The models the deployment's key is entitled to use. Empty without a site key. */
 export async function listProviderModels(kind: ProviderKind, signal?: AbortSignal): Promise<ModelOption[]> {
   if (!providerUsable(kind)) return []
 
   const req = providerRequest(kind, 'v1/models?limit=100')
   const res = await fetch(req.url, { signal })
-  if (!res.ok) throw new Error(`Unable to load Anthropic models (${res.status})`)
+  if (!res.ok) throw new Error(`Unable to load Anthropic models (${res.status})${modelsErrorHint(res.status)}`)
   const body = (await res.json()) as { data?: { id?: string; display_name?: string }[] }
   return (body.data ?? [])
     .filter((model): model is { id: string; display_name?: string } => Boolean(model.id))
