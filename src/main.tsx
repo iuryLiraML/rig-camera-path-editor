@@ -15,6 +15,7 @@ import { initHistory } from './lib/history'
 import { loadServerKeys } from './lib/agent/serverKeys'
 import { generateRacingDroneCameras } from './lib/cameraBatch/generateRacingDroneCameras'
 import { bootProjects } from './lib/projects'
+import { installRouter } from './lib/router'
 import { useCloudAuthStore } from './state/useCloudAuthStore'
 
 /**
@@ -52,6 +53,8 @@ if (runtime === 'clay') {
     .bootstrap()
     .then(() => bootProjects())
     .then(initHistory)
+    // after boot: boot decides which project is open, and the URL overrides it
+    .then(installRouter)
     .then(maybeGenerateRacingDroneCamerasFromQuery)
     .catch((error) => {
       console.error('Project storage failed to initialize', error)
