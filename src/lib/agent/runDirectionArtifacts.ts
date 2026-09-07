@@ -21,12 +21,14 @@ import {
 
 export interface DirectionGenerationConfig {
   provider: ProviderKind
+  apiKey: string
   model: string
 }
 
 function toProvider(config: DirectionGenerationConfig): ProviderConfig {
   return {
     kind: config.provider,
+    apiKey: config.apiKey,
     model: config.model.trim() || PROVIDERS[config.provider].defaultModel,
     vision: false,
   }

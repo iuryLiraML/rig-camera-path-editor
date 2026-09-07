@@ -8,6 +8,7 @@ import {
   moveProjectToFolder,
   removeFolder,
   renameProject,
+  renameScene,
   switchProject,
   switchScene,
 } from '../lib/projects'
@@ -15,6 +16,7 @@ import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { GoogleSignInButton } from './GoogleSignInButton'
+import { AccountMenu } from './AccountMenu'
 import { PlusIcon, SearchIcon } from './icons'
 import { ProjectCard } from './ProjectCard'
 
@@ -180,28 +182,7 @@ export function ProjectsWorkspace() {
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {signedIn && cloudSession ? (
-                <div className="mr-1 flex items-center gap-2">
-                  {cloudSession.picture ? (
-                    <img
-                      src={cloudSession.picture}
-                      alt=""
-                      className="h-8 w-8 rounded-full"
-                      referrerPolicy="no-referrer"
-                    />
-                  ) : null}
-                  <span className="max-w-[12rem] truncate text-xs text-ink-dim">
-                    {cloudSession.email ?? cloudSession.name ?? cloudSession.userId}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => void useCloudAuthStore.getState().signOut()}
-                    className="rounded-lg border border-line bg-panel-2 px-3 py-1.5 text-xs text-ink hover:bg-panel-3"
-                  >
-                    Sign out
-                  </button>
-                </div>
-              ) : null}
+              <AccountMenu />
               <label className="relative">
                 <SearchIcon
                   size={14}
@@ -335,6 +316,11 @@ export function ProjectsWorkspace() {
                     setError('The project could not be renamed.'),
                   )
                 }
+                onRenameScene={(sceneId, name) =>
+                  void renameScene(sceneId, name, project.id).catch(() =>
+                    setError('The scene could not be renamed.'),
+                  )
+                }
                 onDelete={() =>
                   void deleteProject(project.id).catch(() =>
                     setError('The project could not be deleted.'),
@@ -391,13 +377,7 @@ export function ProjectsWorkspace() {
                     the encrypted vault instead of this browser.
                   </p>
                   {cloudStatus === 'signed-in' && cloudSession ? (
-                    <button
-                      type="button"
-                      onClick={() => void useCloudAuthStore.getState().signOut()}
-                      className="rounded-lg border border-line bg-panel-2 px-3 py-2 text-xs text-ink hover:bg-panel-3"
-                    >
-                      Sign out
-                    </button>
+                    <AccountMenu />
                   ) : null}
                 </div>
                 {cloudStatus === 'signed-in' && cloudSession ? (

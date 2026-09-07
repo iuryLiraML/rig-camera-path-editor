@@ -62,7 +62,7 @@ describe('VisualizeBar', () => {
   it('reviews shots without Add a Shot or Play animatic', () => {
     const { container } = render(<VisualizeBar />)
     expect(container.querySelector('[data-visualize-bar]')).not.toBeNull()
-    expect(container.textContent).toContain('Shots')
+    expect(container.textContent).toContain('Storyboard')
     expect(container.textContent).toContain('Cameras')
     expect(container.textContent).not.toContain('Add a Shot')
     expect(container.textContent).not.toContain('Play animatic')

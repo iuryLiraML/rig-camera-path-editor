@@ -4,7 +4,13 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { NO_SERVER_KEYS } from '../lib/agent/serverKeys'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
+import { makeObject, useSceneStore } from '../state/useSceneStore'
 import { DirectorDock } from './DirectorDock'
+import { GUTTER, TOP_ROW_HEIGHT } from './viewportInsets'
+import * as THREE from 'three'
+
+/** The rail starts below the global top row, not at the window gutter. */
+const RAIL_TOP = `${GUTTER + TOP_ROW_HEIGHT + GUTTER}px`
 
 beforeEach(() => {
   useAgentStore.setState({
@@ -34,7 +40,9 @@ afterEach(() => {
     showAddDrawer: false,
     composeDock: 'sequence',
     timelineHeight: 240,
+    selection: null,
   })
+  useSceneStore.setState({ objects: [] })
 })
 
 describe('DirectorDock', () => {
@@ -55,13 +63,12 @@ describe('DirectorDock', () => {
   })
 
   it('always shows the transcript on the full-height rail', () => {
-    const { container, queryByTitle } = render(<DirectorDock />)
+    const { container, getByTitle } = render(<DirectorDock />)
     expect(container.textContent).toContain('Director')
     expect(container.textContent?.toLowerCase()).not.toContain('remaining')
-    expect(queryByTitle('Expand chat')).toBeNull()
-    expect(queryByTitle('Collapse chat')).toBeNull()
+    expect(getByTitle('Collapse Director')).toBeTruthy()
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.top).toBe('12px')
+    expect(root.style.top).toBe(RAIL_TOP)
     expect(root.style.bottom).toBe('12px')
   })
 
@@ -92,23 +99,23 @@ describe('DirectorDock', () => {
 
   it('fills the Compose right rail from the top gutter to the bottom', () => {
     useEditorStore.setState({ workspaceMode: 'compose' })
-    const { container, queryByTitle } = render(<DirectorDock />)
+    const { container, queryByTitle, getByTitle } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
     expect(root.className).toContain('panel')
-    expect(root.style.top).toBe('12px')
+    expect(root.style.top).toBe(RAIL_TOP)
     expect(root.style.bottom).toBe('12px')
     expect(root.style.height).toBe('')
     expect(container.querySelectorAll('.panel')).toHaveLength(1)
     expect(container.textContent).toContain('Director')
     expect(queryByTitle('Expand chat')).toBeNull()
-    expect(queryByTitle('Collapse chat')).toBeNull()
+    expect(getByTitle('Collapse Director')).toBeTruthy()
   })
 
   it('uses the same full-height rail in Visualize', () => {
     useEditorStore.setState({ workspaceMode: 'visualize' })
     const { container, queryByTitle } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.top).toBe('12px')
+    expect(root.style.top).toBe(RAIL_TOP)
     expect(root.style.bottom).toBe('12px')
     expect(container.textContent).toContain('Visualize')
     expect(queryByTitle('Expand chat')).toBeNull()
@@ -121,7 +128,7 @@ describe('DirectorDock', () => {
     useEditorStore.setState({ workspaceMode: 'compose', composeDock: 'timeline', timelineHeight: 240 })
     const { container } = render(<DirectorDock />)
     const root = container.firstElementChild as HTMLElement
-    expect(root.style.top).toBe('12px')
+    expect(root.style.top).toBe(RAIL_TOP)
     expect(root.style.bottom).toBe('12px')
     expect(root.style.height).toBe('')
   })
@@ -130,5 +137,13 @@ describe('DirectorDock', () => {
     const { getByTitle } = render(<DirectorDock />)
     fireEvent.click(getByTitle('Import a .glb, .gltf or .obj'))
     expect(useEditorStore.getState().showImportModal).toBe(true)
+  })
+
+  it('parks object Transform on the Director rail', () => {
+    const object = makeObject('Car', new THREE.Group(), { id: 'car' })
+    useSceneStore.setState({ objects: [object] })
+    useEditorStore.setState({ selection: 'obj:car' })
+    const { getByText } = render(<DirectorDock />)
+    expect(getByText('Transform')).toBeTruthy()
   })
 })

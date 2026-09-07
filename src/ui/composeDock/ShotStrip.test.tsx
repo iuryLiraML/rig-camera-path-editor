@@ -39,10 +39,11 @@ afterEach(() => {
 })
 
 describe('ShotStrip', () => {
-  it('labels the deck Shots and keeps Add a Shot / Play animatic on the strip', () => {
+  it('labels the deck Storyboard and keeps Add a Shot / Play animatic on the strip', () => {
     const { container, getByText } = render(<ShotStrip />)
     expect(container.querySelector('[data-shot-strip]')).not.toBeNull()
-    expect(container.textContent).toContain('Shots')
+    expect(container.textContent).toContain('Storyboard')
+    expect(container.textContent).not.toContain('Planned Shot List')
     expect(container.textContent).toContain('Add a Shot')
     expect(container.textContent).toContain('Play animatic')
     expect(container.textContent).toContain('No shots yet')

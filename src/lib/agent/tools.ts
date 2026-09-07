@@ -1,3 +1,5 @@
+import { booleanPrimitive, primitiveMesh } from '../solidEditing'
+import { primitiveTopology, type CadOp } from '../primitiveGeometry'
 import * as THREE from 'three'
 import type { ToolDef } from './providers'
 import { AGENT_SKILLS, getSkill } from './skills'
@@ -358,6 +360,31 @@ export const TOOL_DEFS: ToolDef[] = [
       },
       required: ['kind'],
     },
+  },
+  {
+    name: 'extrude_primitive',
+    description: 'Extrude a planar face of an existing primitive solid. Get face.normal and face.anchor from scene context. Distance is in local meters; negative recesses the surface. Never accepts triangles or Figures.',
+    input_schema: { type: 'object', properties: {
+      object_id: { type: 'string' },
+      face: { type: 'object', properties: { normal: vec3, anchor: vec3 }, required: ['normal', 'anchor'] },
+      distance: { type: 'number' },
+    }, required: ['object_id', 'face', 'distance'] },
+  },
+  {
+    name: 'boolean_primitive',
+    description: 'Union, subtract, or intersect two existing primitive solids. Snapshots the operand spec and relative transform at the current time. The source object remains in the scene. Figures and imported meshes are not solids.',
+    input_schema: { type: 'object', properties: {
+      object_id: { type: 'string' }, operand_id: { type: 'string' },
+      mode: { type: 'string', enum: ['union', 'subtract', 'intersect'] },
+    }, required: ['object_id', 'operand_id', 'mode'] },
+  },
+  {
+    name: 'slice_primitive',
+    description: 'Trim an existing primitive solid by a local plane. Offset is signed distance in local meters along the normalized normal. Keep positive or negative half-space. Persists a plane operation, never triangles.',
+    input_schema: { type: 'object', properties: {
+      object_id: { type: 'string' }, normal: vec3, offset: { type: 'number' },
+      keep: { type: 'string', enum: ['positive', 'negative'] },
+    }, required: ['object_id', 'normal', 'offset', 'keep'] },
   },
   {
     name: 'block_people_from_image',
@@ -823,6 +850,16 @@ const EXECUTORS: Record<string, Executor> = {
     })
   },
 
+  extrude_primitive: (input) => editPrimitiveTool(input, { type: 'extrude', face: input.face, distance: input.distance }),
+  slice_primitive: (input) => editPrimitiveTool(input, { type: 'slice', normal: input.normal, offset: input.offset, keep: input.keep }),
+  boolean_primitive: (input) => {
+    try {
+      if (!['union', 'subtract', 'intersect'].includes(String(input.mode))) return 'Choose union, subtract, or intersect.'
+      booleanPrimitive(String(input.object_id), String(input.operand_id), input.mode as 'union' | 'subtract' | 'intersect')
+      return `Applied ${input.mode} to solid ${input.object_id}. The operand remains in the scene.`
+    } catch (error) { return error instanceof Error ? error.message : 'The boolean failed.' }
+  },
+
   block_people_from_image: () => {
     const { falKey, samImageVersion } = readFalSettings()
     const scene = useSceneStore.getState()
@@ -925,6 +962,16 @@ const EXECUTORS: Record<string, Executor> = {
   },
 }
 
+function editPrimitiveTool(input: Record<string, unknown>, op: unknown): string {
+  try {
+    const object = useSceneStore.getState().objects.find((o) => o.id === input.object_id)
+    if (!object) return 'Select an existing primitive solid.'
+    primitiveMesh(object)
+    useSceneStore.getState().appendPrimitiveOp(object.id, op as CadOp)
+    return `Updated solid ${object.name}.`
+  } catch (error) { return error instanceof Error ? error.message : 'The solid edit failed.' }
+}
+
 const PLACE_TOOLS = new Set([
   'add_primitive',
   'pose_object',
@@ -976,6 +1023,10 @@ export function buildSceneContext(): string {
       pose_keyframes: o.keys.length,
       follow: o.follow ?? null,
       embedded_clips: o.clips.length,
+      ...(o.primitive ? {
+        primitive: o.primitive,
+        planar_faces: primitiveTopology(primitiveMesh(o).geometry).faces.filter((face) => face.triangles.length >= 2).slice(0, 48).map((face) => ({ ...face.ref, area: face.area })),
+      } : {}),
     }
   })
 

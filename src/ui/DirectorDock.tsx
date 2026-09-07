@@ -2,10 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
+import { useSceneStore } from '../state/useSceneStore'
+import { usePathStore } from '../state/usePathStore'
 import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
 import { ImportIcon, ImageIcon } from './icons'
-import { directorDockSlot, GUTTER, useViewportInsets } from './viewportInsets'
+import { TransformPopover, EnvironmentTransformPopover } from './TransformPopover'
+import { PathSections } from './RightPanel'
+import { CameraAdjustPanel } from './CameraAdjustPanel'
+import { directorDockSlot, GUTTER, useChromeLayout, useViewportInsets, useWindowSize } from './viewportInsets'
 
 function ToolChip({ name }: { name: string }) {
   return (
@@ -16,6 +21,33 @@ function ToolChip({ name }: { name: string }) {
 }
 
 const EMPTY_PROMPTS = ['slow orbit around the product, 12s', 'drone dive from above, fast']
+
+function DirectorInspector() {
+  const selection = useEditorStore((s) => s.selection)
+  const objectId = selection?.startsWith('obj:') ? selection.slice(4) : null
+  const object = useSceneStore((s) => (objectId ? s.objects.find((item) => item.id === objectId) : null))
+  const envSelected = selection === 'env'
+  const pathSelected = selection === 'camera-path' || selection?.startsWith('path:')
+  const pathName = usePathStore((s) => s.paths.find((p) => p.id === s.activePathId)?.name)
+
+  if (envSelected) {
+    return <EnvironmentTransformPopover embedded />
+  }
+  if (objectId && object) {
+    return <TransformPopover objectId={objectId} embedded />
+  }
+  if (pathSelected) {
+    return (
+      <div className="px-1">
+        <p className="mb-1 px-1 text-[10px] uppercase tracking-wide text-ink-dim">
+          {pathName ?? 'Path'}
+        </p>
+        <PathSections />
+      </div>
+    )
+  }
+  return <p className="px-2 py-1 text-[11px] text-ink-dim">Select an object or path</p>
+}
 
 const PLACEHOLDER: Record<'build' | 'compose' | 'visualize', string> = {
   build: 'Describe a scene, watch AI build it in 3D',
@@ -30,14 +62,23 @@ export function DirectorDock() {
   const taskProgress = useAgentStore((s) => s.taskProgress)
   const error = useAgentStore((s) => s.error)
   const failChips = useAgentStore((s) => s.failChips)
-  const hasKey = useAgentStore((s) => s.serverKeys[s.provider])
+  const hasKey = useAgentStore(
+    (s) => (s.keys[s.provider] ?? '').trim().length > 0 || s.serverKeys[s.provider],
+  )
   const provider = useAgentStore((s) => s.provider)
   const forcedSkill = useAgentStore((s) => s.forcedSkill)
   const liftPhotoName = useAgentStore((s) => s.liftPhotoName)
   const visualizeMedia = useEditorStore((s) => s.visualizeMedia)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const cameraPanel = useEditorStore(s => s.cameraPanel)
+  const editingCamera = workspaceMode === 'compose' && cameraPanel !== 'closed'
+  const editingPoint = usePathStore(s => s.selectedAnchorId !== null) && workspaceMode === 'compose'
   const insets = useViewportInsets()
   const dock = directorDockSlot(insets)
+  const { directorCompact } = useChromeLayout()
+  const win = useWindowSize()
+  const [chatOpen, setChatOpen] = useState(false)
+  const compact = directorCompact && !chatOpen
   const [input, setInput] = useState('')
   const [showSkills, setShowSkills] = useState(false)
   const [pendingImage, setPendingImage] = useState<File | null>(null)
@@ -71,10 +112,18 @@ export function DirectorDock() {
   return (
     <div
       className="panel absolute z-30 flex min-h-0 flex-col overflow-hidden"
+      onKeyDown={(e) => {
+        if (e.key === 'Escape' && chatOpen) {
+          e.stopPropagation()
+          setChatOpen(false)
+        }
+      }}
       style={{
         right: dock.right,
-        width: dock.width,
-        top: GUTTER,
+        width: chatOpen && directorCompact ? Math.min(360, win.w - GUTTER * 2) : dock.width,
+        // Below the global top row: at the top gutter the rail covered the
+        // toolbar's own band and ate the pills painted over it.
+        top: insets.top,
         bottom: GUTTER,
       }}
     >
@@ -83,11 +132,23 @@ export function DirectorDock() {
             <span className="text-[11px] font-medium text-ink">
               {generate ? 'Visualize' : 'Director'}
             </span>
+            <button
+              type="button"
+              title={compact ? 'Expand Director' : 'Collapse Director'}
+              aria-expanded={!compact}
+              onClick={() => {
+                if (directorCompact) setChatOpen(!chatOpen)
+                else useEditorStore.getState().setDirectorPreference('compact')
+              }}
+              className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+            >
+              {compact ? 'Expand' : 'Collapse'}
+            </button>
             {generate && (
               <button
                 type="button"
                 onClick={() => useEditorStore.getState().setWorkspaceMode('compose')}
-                className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+                className="rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
               >
                 Edit Shot
               </button>
@@ -100,18 +161,26 @@ export function DirectorDock() {
                   useProjectStore.getState().setDirectorChat([])
                 }}
                 title="New conversation"
-                className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+                className="rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
               >
                 New
               </button>
             )}
           </div>
 
-          {!hasKey ? (
+          <div
+            className={`min-h-0 px-1 py-2 ${editingCamera ? 'flex flex-col overflow-hidden' : 'overflow-y-auto'} ${
+              compact ? 'flex-1' : editingPoint || editingCamera ? 'max-h-[70%] shrink-0 border-b border-line/60' : 'max-h-[40%] shrink-0 border-b border-line/60'
+            }`}
+          >
+            {editingCamera ? <CameraAdjustPanel /> : <DirectorInspector />}
+          </div>
+
+          {!compact &&
+            (!hasKey ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center">
               <p className="text-[12px] leading-relaxed text-ink-dim">
-                The Director builds camera moves from a prompt. It runs on this
-                deployment's Anthropic key, which is not configured — see Settings.
+                The Director builds camera moves from a prompt. Add your API key to start.
               </p>
               <button
                 type="button"
@@ -193,11 +262,11 @@ export function DirectorDock() {
                 </div>
               )}
             </div>
-          )}
+            ))}
 
           {showSkills && <SkillsManager onClose={() => setShowSkills(false)} />}
 
-          {hasKey && (
+          {!compact && hasKey && (
             <div className="flex shrink-0 items-center gap-1 border-t border-line/60 px-2 py-1.5">
               <button
                 type="button"
@@ -215,7 +284,7 @@ export function DirectorDock() {
               <button
                 type="button"
                 onClick={() => useEditorStore.getState().setShowSettings(true)}
-                title="Director model"
+                title="Provider and keys"
                 className="ml-auto shrink-0 text-[10px] text-ink-dim hover:text-ink"
               >
                 {PROVIDERS[provider].label}
@@ -224,6 +293,7 @@ export function DirectorDock() {
           )}
         </div>
 
+      {!compact && (
       <div className="shrink-0 overflow-hidden border-t border-line/60 p-2.5">
         <input
           id="director-attach-photo"
@@ -275,7 +345,7 @@ export function DirectorDock() {
               </select>
             </label>
             <label className="text-[10px] text-ink-dim">
-              Model
+              Provider
               <select
                 value={provider}
                 onChange={(e) =>
@@ -340,6 +410,7 @@ export function DirectorDock() {
           )}
         </div>
       </div>
+      )}
     </div>
   )
 }

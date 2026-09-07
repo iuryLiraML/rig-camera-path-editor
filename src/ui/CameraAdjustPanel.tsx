@@ -1,34 +1,24 @@
 import { useEditorStore, type CameraPanel } from '../state/useEditorStore'
 import { CinemaCameraSections } from './RightPanel'
-import { LEFT_PANEL_MAX, useViewportInsets } from './viewportInsets'
 
 const TABS: { value: Exclude<CameraPanel, 'closed'>; label: string }[] = [
   { value: 'adjust', label: 'Adjust' },
   { value: 'fx', label: 'FX' },
 ]
 
-/**
- * Floating camera inspector for Compose. Lives next to the outliner, not
- * inside the Scene / Cameras / Paths tree — that list is for picking, this
- * panel is for lens, look-at, duration and camera noise.
- */
+/** Camera inspector embedded above the Director chat. */
 export function CameraAdjustPanel() {
   const tab = useEditorStore((s) => s.cameraPanel)
-  const insets = useViewportInsets()
 
   if (tab === 'closed') return null
 
   return (
     <div
-      className="panel absolute z-30 flex flex-col overflow-hidden"
-      style={{
-        left: insets.left,
-        top: insets.top,
-        width: LEFT_PANEL_MAX,
-        bottom: insets.contentBottom,
-      }}
+      role="region"
+      aria-label="Camera adjustments"
+      className="flex min-h-0 flex-1 flex-col overflow-hidden"
     >
-      <div className="flex items-center gap-1 border-b border-line/60 px-2 py-1.5">
+      <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-2 py-1.5">
         <span className="px-1 text-[11px] font-medium text-ink">Camera</span>
         <div className="flex items-center gap-0.5">
           {TABS.map((item) => (

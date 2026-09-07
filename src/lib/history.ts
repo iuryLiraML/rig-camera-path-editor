@@ -57,6 +57,7 @@ function capture() {
       pathSpace: r.pathSpace,
       cameraPathId: r.cameraPathId,
       cameraKind: r.cameraKind,
+      staticPose: r.staticPose,
     },
     paths: {
       paths: p.paths,
@@ -192,6 +193,21 @@ export function setHistorySuspended(value: boolean) {
   current = next
   currentJson = nextJson
   clock += 1
+}
+
+/** One pointer gesture is one undo step, even when the user pauses mid-drag. */
+export function beginHistoryTransaction(): (cancel?: boolean) => void {
+  // Commit earlier pending input before taking this gesture's baseline.
+  setHistorySuspended(false)
+  const before = capture()
+  setHistorySuspended(true)
+  let done = false
+  return (cancel = false) => {
+    if (done) return
+    done = true
+    if (cancel) apply(before)
+    setHistorySuspended(false)
+  }
 }
 
 let subscribed = false

@@ -139,12 +139,18 @@ describe('AddObjectDrawer find objects', () => {
 })
 
 describe('AddObjectDrawer primitive previews', () => {
+  it('keeps Female and Male on the separate Figures chip', () => {
+    const { container, getByRole } = render(<AddObjectDrawer />)
+    fireEvent.click(getByRole('button', { name: 'Figures' }))
+    expect(Array.from(container.querySelectorAll('[data-primitive]')).map((tile) => tile.getAttribute('data-primitive'))).toEqual(['female', 'male'])
+    fireEvent.click(getByRole('button', { name: 'Primitives' }))
+    expect(container.querySelector('[data-primitive="female"]')).toBeNull()
+  })
+
   it('shows a distinct shape preview for every primitive, not a shared cube icon', () => {
     const { container } = render(<AddObjectDrawer />)
     const tiles = Array.from(container.querySelectorAll('[data-primitive]'))
     expect(tiles.map((tile) => tile.getAttribute('data-primitive'))).toEqual([
-      'female',
-      'male',
       'box',
       'sphere',
       'cylinder',
@@ -155,7 +161,7 @@ describe('AddObjectDrawer primitive previews', () => {
     const previews = tiles
       .map((tile) => tile.querySelector('[data-primitive-preview]')?.getAttribute('data-primitive-preview'))
       .filter((value): value is string => Boolean(value))
-    expect(previews).toEqual(['female', 'male', 'box', 'sphere', 'cylinder', 'cone', 'plane', 'torus'])
+    expect(previews).toEqual(['box', 'sphere', 'cylinder', 'cone', 'plane', 'torus'])
     expect(container.querySelector('button[data-primitive] svg[viewBox="0 0 16 16"]')).toBeNull()
   })
 })

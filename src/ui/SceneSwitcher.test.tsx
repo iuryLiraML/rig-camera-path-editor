@@ -9,7 +9,7 @@ vi.mock('../lib/projects', () => ({
   switchScene: vi.fn(),
 }))
 
-import { createScene, switchScene } from '../lib/projects'
+import { createScene, renameScene, switchScene } from '../lib/projects'
 import { SceneSwitcher } from './SceneSwitcher'
 
 beforeEach(() => {
@@ -26,6 +26,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  vi.clearAllMocks()
 })
 
 describe('SceneSwitcher', () => {
@@ -37,9 +38,30 @@ describe('SceneSwitcher', () => {
   })
 
   it('creates a new scene from the menu', () => {
-    const { getByTitle, getByRole } = render(<SceneSwitcher />)
+    const { getByTitle, getByRole, getByText } = render(<SceneSwitcher />)
     fireEvent.click(getByTitle('Switch scene'))
-    fireEvent.click(getByRole('menuitem', { name: '+ New scene' }))
+    expect(getByText('Scenes')).toBeTruthy()
+    fireEvent.click(getByRole('menuitem', { name: 'New scene' }))
     expect(createScene).toHaveBeenCalled()
+  })
+
+  it('renames the active scene on double-click in the chip', () => {
+    const { getByTitle, getByDisplayValue } = render(<SceneSwitcher />)
+    fireEvent.doubleClick(getByTitle('Switch scene'))
+    const input = getByDisplayValue('Scene 1')
+    fireEvent.change(input, { target: { value: 'Kitchen set' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    expect(renameScene).toHaveBeenCalledWith('scene-1', 'Kitchen set')
+  })
+
+  it('renames a scene on double-click in the open menu', () => {
+    const { getByTitle, getByRole, getByDisplayValue } = render(<SceneSwitcher />)
+    fireEvent.click(getByTitle('Switch scene'))
+    fireEvent.doubleClick(getByRole('menuitem', { name: 'Kitchen' }))
+    const input = getByDisplayValue('Kitchen')
+    fireEvent.change(input, { target: { value: 'Studio' } })
+    fireEvent.blur(input)
+    expect(renameScene).toHaveBeenCalledWith('scene-2', 'Studio')
+    expect(switchScene).not.toHaveBeenCalled()
   })
 })

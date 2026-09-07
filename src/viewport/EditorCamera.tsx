@@ -4,7 +4,7 @@ import { OrbitControls, OrthographicCamera, PerspectiveCamera } from '@react-thr
 import { useFrame, useThree } from '@react-three/fiber'
 import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
 import { lockOrbit, restoreViewportNav, unlockOrbit } from '../lib/orbitLock'
-import { useShiftHeld } from '../lib/useShiftHeld'
+import { cssPointFromClient, ndcFromPane } from '../lib/pointerNdc'
 import { beginPickClick, hasInteractivePick } from '../lib/viewportPick'
 import { aimOrbitAtWorldOrigin } from '../lib/orbitHome'
 import { isCinemaViewport, isPathStrokeTool } from '../lib/workspaceChrome'
@@ -43,6 +43,8 @@ export function EditorCamera() {
   const frameRequest = useEditorStore((s) => s.frameRequest)
   const homeRequest = useEditorStore((s) => s.homeRequest)
   const viewRequest = useEditorStore((s) => s.viewRequest)
+  const restoreViewRequest = useEditorStore((s) => s.restoreViewRequest)
+  const viewPoseRestore = useEditorStore((s) => s.viewPoseRestore)
   const controls = useThree((s) => s.controls) as OrbitControlsImpl | null
   const fallbackCam = useThree((s) => s.camera)
   const gl = useThree((s) => s.gl)
@@ -50,13 +52,30 @@ export function EditorCamera() {
   const lastZoom = useRef(100)
   const perspRef = useRef<THREE.PerspectiveCamera>(null)
   const orthoRef = useRef<THREE.OrthographicCamera>(null)
-  const shiftHeld = useShiftHeld()
   const pointerView = useRef<'editor' | 'camera' | 'front' | 'top' | 'right'>('editor')
 
   const editorCam = (): THREE.Camera => {
     const owned = projection === 'perspective' ? perspRef.current : orthoRef.current
     return owned ?? fallbackCam
   }
+
+  useEffect(() => {
+    if (!isPathStrokeTool(tool) || viewPoseRestore?.captured || !controls) return
+    const camera = editorCam()
+    useEditorStore.getState().captureViewPose({
+      position: [camera.position.x, camera.position.y, camera.position.z],
+      target: [controls.target.x, controls.target.y, controls.target.z],
+    })
+  }, [tool, viewPoseRestore, controls, fallbackCam, projection])
+
+  useEffect(() => {
+    if (restoreViewRequest === 0 || !viewPoseRestore?.captured || !controls) return
+    const camera = editorCam()
+    camera.position.set(...viewPoseRestore.position)
+    controls.target.set(...viewPoseRestore.target)
+    controls.update()
+    useEditorStore.setState({ viewPoseRestore: null })
+  }, [restoreViewRequest, viewPoseRestore, controls, fallbackCam, projection])
 
   // F — frame the pane under the cursor (or the editor camera in single view)
   useEffect(() => {
@@ -145,15 +164,18 @@ export function EditorCamera() {
 
   // Bind orbit to whichever pane the pointer is in, before OrbitControls sees
   // the event — otherwise a drag in Front would spin the Editor camera.
-  // A hit on a mesh/gizmo/anchor locks orbit for the whole gesture so a
-  // select click cannot start an orbit on the same down.
+  // A hit on a mesh/gizmo/anchor holds navigation during its edit gesture.
   useEffect(() => {
     const el = gl.domElement
     const raycaster = new THREE.Raycaster()
     const ndc = new THREE.Vector2()
     let held = false
+    let navigationPointer: number | null = null
 
     const sync = (e: PointerEvent | WheelEvent) => {
+      // Keep a drag on the pane where it began, including when the pointer
+      // crosses a splitter or the non-editable camera preview.
+      if (navigationPointer !== null) return
       const rect = el.getBoundingClientRect()
       const leaf = paneAt(e.clientX - rect.left, e.clientY - rect.top, rect.width, rect.height)
       const view = leaf?.view ?? 'editor'
@@ -171,21 +193,50 @@ export function EditorCamera() {
       if (current) bindOrbitToPane(current, pointerView.current, editorCam(), editorCamActive)
     }
 
+    const finishNavigation = () => { navigationPointer = null }
+    const cancelNavigation = () => {
+      if (navigationPointer === null) return
+      const pointerId = navigationPointer
+      navigationPointer = null
+      // three-stdlib stores its gesture and pointer list in a closure. Merely
+      // setting enabled (or a state field) cannot end it. Use its cancellation
+      // listener, only for the navigation gesture owned here.
+      el.dispatchEvent(new PointerEvent('pointercancel', { pointerId, pointerType: 'mouse', button: 1, bubbles: true }))
+    }
+    const onBlur = () => { release(); cancelNavigation() }
+    const onNavigationKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancelNavigation()
+    }
+
     const onDown = (e: PointerEvent) => {
       sync(e)
-      // Middle button is pan (same as RMB). Stop the browser autoscroll glyph.
-      if (e.button === 1) e.preventDefault()
+      // Blender: MMB orbit, Shift+MMB pan, Ctrl+MMB dolly. OrbitControls
+      // already maps Shift+ROTATE to pan, but Ctrl needs an explicit dolly.
+      // Configure before its native pointerdown; React key state can lag a click.
+      if (e.button === 1) {
+        e.preventDefault()
+        const current = controlsRef.current
+        if (current) {
+          current.mouseButtons.MIDDLE = e.ctrlKey ? THREE.MOUSE.DOLLY : THREE.MOUSE.ROTATE
+          if (current.enabled) {
+            navigationPointer = e.pointerId
+            try { el.setPointerCapture(e.pointerId) } catch { /* inactive pointer */ }
+          }
+        }
+      }
       if (e.button !== 0 || !editorCamActive) return
-      const rect = el.getBoundingClientRect()
-      const w = rect.width
-      const h = rect.height
-      const leaf = paneAt(e.clientX - rect.left, e.clientY - rect.top, w, h)
-      const leaves = computeRects(useLayoutStore.getState().root, { x: 0, y: 0, w, h }).leaves
-      const pane = (leaf && leaves.get(leaf.id)) ?? { x: 0, y: 0, w, h }
-      ndc.set(
-        ((e.clientX - rect.left - pane.x) / Math.max(1, pane.w)) * 2 - 1,
-        -((e.clientY - rect.top - pane.y) / Math.max(1, pane.h)) * 2 + 1,
-      )
+      const css = cssPointFromClient(e.clientX, e.clientY, el)
+      if (!css) return
+      const leaf = paneAt(css.x, css.y, css.width, css.height)
+      const leaves = computeRects(useLayoutStore.getState().root, {
+        x: 0,
+        y: 0,
+        w: css.width,
+        h: css.height,
+      }).leaves
+      const pane = (leaf && leaves.get(leaf.id)) ?? { x: 0, y: 0, w: css.width, h: css.height }
+      const pointer = ndcFromPane(css.x, css.y, pane)
+      ndc.set(pointer.x, pointer.y)
       let cam = editorCam()
       if (leaf && isSpatialView(leaf.view)) cam = spatialCameras[leaf.view]
       else if (leaf?.view === 'camera' && cinemaCameraRef.current) cam = cinemaCameraRef.current
@@ -212,17 +263,32 @@ export function EditorCamera() {
     el.addEventListener('pointerdown', onDown, true)
     el.addEventListener('pointermove', sync, true)
     el.addEventListener('wheel', sync, { capture: true, passive: true })
-    window.addEventListener('pointerup', release)
-    window.addEventListener('pointercancel', release)
+    // The path controller consumes canvas pointerup. Release this camera's
+    // own lock in capture, even when another gesture owner stops bubbling.
+    window.addEventListener('pointerup', release, true)
+    window.addEventListener('pointercancel', release, true)
+    window.addEventListener('lostpointercapture', release, true)
+    window.addEventListener('pointerup', finishNavigation, true)
+    window.addEventListener('pointercancel', finishNavigation, true)
+    el.addEventListener('lostpointercapture', cancelNavigation)
+    window.addEventListener('blur', onBlur)
+    window.addEventListener('keydown', onNavigationKey)
     return () => {
+      cancelNavigation()
       el.removeEventListener('pointerdown', onDown, true)
       el.removeEventListener('pointermove', sync, true)
       el.removeEventListener('wheel', sync, true)
-      window.removeEventListener('pointerup', release)
-      window.removeEventListener('pointercancel', release)
+      window.removeEventListener('pointerup', release, true)
+      window.removeEventListener('pointercancel', release, true)
+      window.removeEventListener('lostpointercapture', release, true)
+      window.removeEventListener('pointerup', finishNavigation, true)
+      window.removeEventListener('pointercancel', finishNavigation, true)
+      el.removeEventListener('lostpointercapture', cancelNavigation)
+      window.removeEventListener('blur', onBlur)
+      window.removeEventListener('keydown', onNavigationKey)
       release()
     }
-  }, [gl, editorCamActive, projection, playMode, cameraView, scene])
+  }, [gl, editorCamActive, projection, playMode, cameraView, scene, tool, workspaceMode])
 
   useFrame(() => {
     const camera = editorCam()
@@ -275,16 +341,16 @@ export function EditorCamera() {
         makeDefault
         enabled={editorCamActive}
         enableDamping={editorCamActive}
-        enableRotate={!isPathStrokeTool(tool)}
+        enableRotate={editorCamActive}
         enableZoom={editorCamActive}
-        enablePan={editorCamActive && !shiftHeld}
+        enablePan={editorCamActive}
         dampingFactor={0.08}
         minPolarAngle={0.02}
         maxPolarAngle={Math.PI - 0.02}
         mouseButtons={{
-          LEFT: THREE.MOUSE.ROTATE,
-          MIDDLE: THREE.MOUSE.PAN,
-          RIGHT: THREE.MOUSE.PAN,
+          LEFT: undefined,
+          MIDDLE: THREE.MOUSE.ROTATE,
+          RIGHT: undefined,
         }}
       />
     </>

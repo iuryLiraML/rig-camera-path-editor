@@ -37,7 +37,9 @@ type OrbitGesture = {
 }
 
 /**
- * Clear a leaked lock and abort any half-finished OrbitControls gesture.
+ * Clear a leaked lock and public gesture state, when exposed by the controls.
+ * three-stdlib keeps its gesture private: EditorCamera cancels navigation via
+ * its pointercancel listener on blur, Escape, capture loss and tool changes.
  * Safe to call without a controls handle (Esc / workspace switch).
  * Does not dispatch pointer events — that would re-commit a live Draw stroke.
  */

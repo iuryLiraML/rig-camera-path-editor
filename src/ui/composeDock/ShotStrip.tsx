@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { loadShot, playAnimatic, saveCurrentAsShot } from '../../lib/projects'
+import { loadShot, playAnimatic, saveCurrentAsShot, duplicateShotAsCameraOption } from '../../lib/projects'
 import { useEditorStore } from '../../state/useEditorStore'
 import { useProjectStore, type Shot } from '../../state/useProjectStore'
 import { CameraIcon, PlayIcon, PlusIcon } from '../icons'
@@ -12,7 +12,7 @@ export function ShotStrip() {
   return (
     <div data-shot-strip className="flex shrink-0 flex-col border-b border-line/60">
       <div className="flex items-center gap-2 px-3 py-1.5">
-        <span className="text-[11px] font-medium text-ink">Shots</span>
+        <span className="text-[11px] font-medium text-ink">Storyboard</span>
         <div className="ml-auto flex items-center gap-2">
           <button
             type="button"
@@ -84,6 +84,17 @@ function ShotThumb({ shot, index }: { shot: Shot; index: number }) {
           </span>
         </div>
         <span className="truncate px-1.5 py-0.5 text-[10px] text-ink">{shot.name}</span>
+      </button>
+      <button
+        type="button"
+        title="Duplicate as camera option"
+        onClick={(e) => {
+          e.stopPropagation()
+          duplicateShotAsCameraOption(shot)
+        }}
+        className="absolute left-1 bottom-1 rounded bg-black/60 px-1 text-[10px] leading-none text-white hover:text-accent"
+      >
+        Duplicate as camera option
       </button>
       <button
         type="button"

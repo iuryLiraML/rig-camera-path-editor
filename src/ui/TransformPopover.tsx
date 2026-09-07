@@ -15,7 +15,7 @@ import { XYZInput } from './primitives'
 import { patchEnvTransform } from '../lib/environment'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 
-export function TransformPopover({ objectId }: { objectId: string }) {
+export function TransformPopover({ objectId, embedded = false }: { objectId: string; embedded?: boolean }) {
   const object = useSceneStore((s) => s.objects.find((o) => o.id === objectId))
   const t = useRigStore((s) => s.t)
   const ease = useRigStore((s) => s.ease)
@@ -50,16 +50,18 @@ export function TransformPopover({ objectId }: { objectId: string }) {
   }
 
   return (
-    <div className="panel w-[280px] p-3">
+    <div className={embedded ? 'w-full p-2' : 'panel w-[280px] p-3'}>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[12px] font-semibold text-ink">Transform</span>
-        <button
-          type="button"
-          onClick={() => useEditorStore.getState().setObjectBarPanel('none')}
-          className="text-ink-dim hover:text-ink"
-        >
-          ×
-        </button>
+        {!embedded && (
+          <button
+            type="button"
+            onClick={() => useEditorStore.getState().setObjectBarPanel('none')}
+            className="text-ink-dim hover:text-ink"
+          >
+            ×
+          </button>
+        )}
       </div>
       <Row label="Position" keyframe={<PoseKeyButton objectId={objectId} channel="position" />}>
         <XYZInput
@@ -125,7 +127,7 @@ function Row({
 }
 
 /** Numeric palco pose (E12). No keyframes — the splat is a still Location. */
-export function EnvironmentTransformPopover() {
+export function EnvironmentTransformPopover({ embedded = false }: { embedded?: boolean }) {
   const transform = useEnvironmentStore((s) => s.environmentTransform)
   const [uniform, setUniform] = useState(true)
 
@@ -136,16 +138,18 @@ export function EnvironmentTransformPopover() {
   }
 
   return (
-    <div className="panel w-[280px] p-3">
+    <div className={embedded ? 'w-full p-2' : 'panel w-[280px] p-3'}>
       <div className="mb-2 flex items-center justify-between">
         <span className="text-[12px] font-semibold text-ink">Environment</span>
-        <button
-          type="button"
-          onClick={() => useEditorStore.getState().setObjectBarPanel('none')}
-          className="text-ink-dim hover:text-ink"
-        >
-          ×
-        </button>
+        {!embedded && (
+          <button
+            type="button"
+            onClick={() => useEditorStore.getState().setObjectBarPanel('none')}
+            className="text-ink-dim hover:text-ink"
+          >
+            ×
+          </button>
+        )}
       </div>
       <Row label="Position">
         <XYZInput value={transform.position} onChange={(axis, value) => setAxis('position', axis, value)} />

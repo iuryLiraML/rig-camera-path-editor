@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useEditorStore, type Projection, type QuickView, type ViewMode } from '../state/useEditorStore'
 import { detectPreset, leafList, useLayoutStore, type LayoutPreset } from '../state/useLayoutStore'
 import { LookCluster } from './LookCluster'
@@ -44,6 +44,25 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
   const preset = useLayoutStore((s) => detectPreset(s.root))
   const win = useWindowSize()
   const band = chromeBand(insets, win.w)
+  const compact = band.width < 1040
+  const [viewsOpen, setViewsOpen] = useState(false)
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!viewsOpen && !cameraOpen) return
+    const close = (e: PointerEvent) => {
+      if (!menuRef.current?.contains(e.target as Node)) { setViewsOpen(false); setCameraOpen(false) }
+    }
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setViewsOpen(false); setCameraOpen(false) }
+    }
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', escape)
+    }
+  }, [viewsOpen, cameraOpen])
 
   if (cameraView) return null
 
@@ -58,32 +77,8 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
     h: (free.y + free.h * 0.5) / Math.max(1, win.h),
   }
 
-  return (
-    <div
-      className="pointer-events-none absolute z-20 flex flex-nowrap items-center gap-2"
-      style={{
-        left: band.left,
-        width: band.width,
-        bottom: insets.bottom + GUTTER,
-      }}
-    >
-      <div className="pointer-events-auto flex min-w-0 flex-1 items-center justify-start gap-2">
-        <LookCluster />
-        <div className="flex rounded-full bg-panel/90 p-0.5 shadow-lg backdrop-blur">
-          {MODES.map((mode) => (
-            <button
-              key={mode.value}
-              onClick={() => setViewMode(mode.value)}
-              title={`Render the viewport, preview and exports as ${mode.label.toLowerCase()}`}
-              className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
-                viewMode === mode.value ? 'bg-panel-3 text-ink' : 'text-ink-dim hover:text-ink'
-              }`}
-            >
-              {mode.label}
-            </button>
-          ))}
-        </div>
-        {viewMode === 'outline' && (
+  const sceneVisibility = (
+    viewMode === 'outline' && (
           <button
             type="button"
             title={showSceneObjects ? 'Hide scene objects' : 'Show scene objects'}
@@ -97,12 +92,11 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
           >
             {showSceneObjects ? <EyeIcon size={13} /> : <EyeOffIcon size={13} />}
           </button>
-        )}
-      </div>
+        )
+  )
 
-      {center && <div className="pointer-events-auto shrink-0">{center}</div>}
-
-      <div className="pointer-events-auto flex min-w-0 flex-1 items-center justify-end gap-2">
+  const viewControls = (
+      <div className={compact ? "flex flex-wrap items-center gap-2" : "pointer-events-auto flex min-w-0 flex-1 items-center justify-end gap-2"}>
         <div className="flex rounded-full bg-panel/90 p-0.5 shadow-lg backdrop-blur">
           {VIEWS.map((view) => (
             <button
@@ -158,6 +152,60 @@ export function ViewportFooter({ center }: { center?: ReactNode }) {
           ?
         </button>
       </div>
+  )
+
+  return (
+    <div
+      ref={menuRef}
+      data-viewport-footer
+      className={`pointer-events-none absolute flex flex-nowrap items-center justify-between gap-2 ${viewsOpen || cameraOpen ? 'z-40' : 'z-20'}`}
+      style={{
+        left: band.left,
+        width: band.width,
+        bottom: insets.bottom + GUTTER,
+      }}
+    >
+      {compact ? <select aria-label="Viewport render pass" value={viewMode}
+        onChange={(e) => setViewMode(e.target.value as ViewMode)}
+        className="pointer-events-auto min-w-0 rounded-full bg-panel px-2 py-1.5 text-[11px] text-ink">
+        {MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
+      </select> : <div className="pointer-events-auto flex min-w-0 flex-1 items-center justify-start gap-2">
+        <LookCluster />
+        <div className="flex rounded-full bg-panel/90 p-0.5 shadow-lg backdrop-blur">
+          {MODES.map((mode) => (
+            <button
+              key={mode.value}
+              onClick={() => setViewMode(mode.value)}
+              title={`Render the viewport, preview and exports as ${mode.label.toLowerCase()}`}
+              className={`rounded-full px-2.5 py-1 text-[11px] transition-colors ${
+                viewMode === mode.value ? 'bg-panel-3 text-ink' : 'text-ink-dim hover:text-ink'
+              }`}
+            >
+              {mode.label}
+            </button>
+          ))}
+        </div>
+        {sceneVisibility}
+      </div>}
+
+      {center && <div className="pointer-events-auto relative shrink-0">
+        {band.width < 440 ? <>
+          <button type="button" aria-expanded={cameraOpen} onClick={() => { setCameraOpen(!cameraOpen); setViewsOpen(false) }}
+            className="rounded-full bg-panel/90 px-3 py-1.5 text-[11px] text-ink shadow-lg">Camera</button>
+          {cameraOpen && <div className="panel absolute bottom-10 left-1/2 z-30 -translate-x-1/2 p-2">{center}</div>}
+        </> : center}
+      </div>}
+
+      {compact ? (
+        <div className="pointer-events-auto relative shrink-0">
+          <button type="button" aria-expanded={viewsOpen} onClick={() => { setViewsOpen(!viewsOpen); setCameraOpen(false) }}
+            className="rounded-full bg-panel/90 px-3 py-1.5 text-[11px] text-ink shadow-lg">Views</button>
+          {viewsOpen && <div className="panel absolute bottom-10 right-0 z-30 space-y-2 p-3" style={{ width: Math.min(360, band.width) }}>
+            <div className="flex items-center gap-2"><LookCluster />{sceneVisibility}</div>
+            {viewControls}
+          </div>}
+        </div>
+      ) : viewControls}
     </div>
   )
 }

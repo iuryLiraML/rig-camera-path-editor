@@ -4,6 +4,7 @@ import {
   type ComposeDock,
   type WorkspaceMode,
 } from '../state/useEditorStore'
+import { directorIsCompact, layoutTier, type LayoutTier } from '../lib/chromeLayout'
 
 /**
  * Single source of truth for the free area of the viewport — the region not
@@ -24,6 +25,8 @@ export const AXIS_GIZMO_RADIUS = 40
 export const DIRECTOR_COMPOSER_HEIGHT = 100
 /** floating Director column on the right of the free area */
 export const DIRECTOR_DOCK_WIDTH = 360
+/** collapsed Director rail — header + inspector, not the full chat column */
+export const COMPACT_DIRECTOR_DOCK_WIDTH = 240
 /** height of the top row (Toolbar / ModeSwitcher / ProjectChip), both at top-3 */
 export const TOP_ROW_HEIGHT = 38
 
@@ -44,12 +47,14 @@ export const MIN_FREE_WIDTH = 260
 export const MIN_FREE_HEIGHT = 140
 
 /**
- * Tools hug the right edge of the free area and size to their contents.
- * A fixed 300px slot plus overflow-x-auto painted a Windows scrollbar under
- * the toolbar.
+ * Tools hug the window's right edge and size to their contents. They used to
+ * hug the free area instead, which squeezed them into the band left of the
+ * Director and painted the pills over the project chip and the mode switcher —
+ * at 1024×700 seven controls, the Pen among them, were unreachable. The top row
+ * is global chrome: every panel now starts at `insets.top`, below it.
  */
-export function toolbarSlot(insets: ViewportInsets, windowWidth: number): { right: number } {
-  return { right: Math.max(GUTTER, windowWidth - insets.right) }
+export function toolbarSlot(): { right: number } {
+  return { right: GUTTER }
 }
 
 /**
@@ -126,6 +131,7 @@ export interface ChromeSizeInput {
   showOutliner: boolean
   timelineVisible: boolean
   requestedHeight?: number
+  directorCompact?: boolean
 }
 
 export function chromeSizes(
@@ -134,6 +140,7 @@ export function chromeSizes(
   input: ChromeSizeInput,
 ): { leftWidth: number; rightWidth: number; timelineHeight: number } {
   const requestedHeight = input.requestedHeight ?? TIMELINE_HEIGHT_DEFAULT
+  const directorWidth = input.directorCompact ? COMPACT_DIRECTOR_DOCK_WIDTH : DIRECTOR_DOCK_WIDTH
   let leftWidth = 0
   let rightWidth = 0
   let timelineHeight = 0
@@ -141,17 +148,17 @@ export function chromeSizes(
   switch (input.mode) {
     case 'build':
       leftWidth = input.showOutliner ? LEFT_PANEL_MAX : 0
-      rightWidth = DIRECTOR_DOCK_WIDTH
+      rightWidth = directorWidth
       break
     case 'compose':
       leftWidth = input.showOutliner ? LEFT_PANEL_MAX : 0
-      rightWidth = DIRECTOR_DOCK_WIDTH
+      rightWidth = directorWidth
       if (input.timelineVisible) {
         timelineHeight = clamp(requestedHeight, TIMELINE_MIN, TIMELINE_HEIGHT_MAX)
       }
       break
     case 'visualize':
-      rightWidth = DIRECTOR_DOCK_WIDTH
+      rightWidth = directorWidth
       break
     default: {
       const _never: never = input.mode
@@ -228,7 +235,7 @@ export function viewportInsets(
   timelineVisible: boolean,
   windowHeight = 900,
   requestedHeight = TIMELINE_HEIGHT_DEFAULT,
-  extras: { composeDock?: ComposeDock; showOutliner?: boolean } = {},
+  extras: { composeDock?: ComposeDock; showOutliner?: boolean; directorCompact?: boolean } = {},
 ): ViewportInsets {
   const { leftWidth, rightWidth, timelineHeight } = chromeSizes(windowWidth, windowHeight, {
     mode,
@@ -236,6 +243,7 @@ export function viewportInsets(
     showOutliner: extras.showOutliner ?? false,
     timelineVisible,
     requestedHeight,
+    directorCompact: extras.directorCompact ?? false,
   })
   const left = leftWidth > 0 ? GUTTER + leftWidth + GUTTER : GUTTER
   const right = windowWidth - (rightWidth > 0 ? GUTTER + rightWidth + GUTTER : GUTTER)
@@ -319,6 +327,22 @@ export function useWindowSize() {
   return size
 }
 
+export function useChromeLayout(): {
+  w: number
+  h: number
+  tier: LayoutTier
+  directorCompact: boolean
+} {
+  const win = useWindowSize()
+  const preference = useEditorStore((s) => s.directorPreference)
+  return {
+    w: win.w,
+    h: win.h,
+    tier: layoutTier(win.w, win.h),
+    directorCompact: directorIsCompact(win.w, win.h, preference),
+  }
+}
+
 /** Reactive variant: re-derives when play mode or the job chrome changes. */
 export function useViewportInsets(windowWidth?: number, windowHeight?: number): ViewportInsets {
   const playMode = useEditorStore((s) => s.playMode)
@@ -326,14 +350,14 @@ export function useViewportInsets(windowWidth?: number, windowHeight?: number): 
   const composeDock = useEditorStore((s) => s.composeDock)
   const showOutliner = useEditorStore((s) => s.showOutliner)
   const timelineHeight = useEditorStore((s) => s.timelineHeight)
+  const directorPreference = useEditorStore((s) => s.directorPreference)
   const win = useWindowSize()
+  const w = windowWidth ?? win.w
+  const h = windowHeight ?? win.h
   const timelineVisible = !playMode && workspaceMode === 'compose'
-  return viewportInsets(
-    workspaceMode,
-    windowWidth ?? win.w,
-    timelineVisible,
-    windowHeight ?? win.h,
-    timelineHeight,
-    { composeDock, showOutliner },
-  )
+  return viewportInsets(workspaceMode, w, timelineVisible, h, timelineHeight, {
+    composeDock,
+    showOutliner,
+    directorCompact: directorIsCompact(w, h, directorPreference),
+  })
 }

@@ -259,6 +259,19 @@ export const PersonIcon = (p: IconProps) => (
   </svg>
 )
 
+export const HomeIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M2.6 7.4L8 3.2l5.4 4.2" />
+    <path d="M4.4 6.8V13h7.2V6.8" />
+  </svg>
+)
+
+export const ChevronDownIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M3.5 6.2L8 10.8l4.5-4.6" />
+  </svg>
+)
+
 export const GlobeIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <circle cx="8" cy="8" r="5.2" />

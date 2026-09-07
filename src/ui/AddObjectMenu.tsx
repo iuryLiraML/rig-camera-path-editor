@@ -1,3 +1,5 @@
+import { addDummyToSceneWhenReady } from '../lib/dummyCharacter'
+import { FigurePreview, PrimitivePreview } from './PrimitivePreview'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { openImportDialog } from '../lib/sceneIO'
@@ -95,7 +97,13 @@ export function AddObjectMenu({
             className="panel fixed z-50 w-44 p-1"
             style={{ top: coords.top, left: coords.left }}
           >
-            <div className="px-2 pb-1 pt-1 text-[10px] font-medium text-ink-dim">Add shape</div>
+            <div className="px-2 pb-1 pt-1 text-[10px] font-medium text-ink-dim">Figures</div>
+            {(['female', 'male'] as const).map((sex) => (
+              <button key={sex} type="button" onClick={() => closeAnd(() => { void addDummyToSceneWhenReady(sex) })} className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-[11px] text-ink hover:bg-panel-2">
+                <span className="h-9 w-9"><FigurePreview sex={sex} /></span>{sex === 'female' ? 'Female' : 'Male'}
+              </button>
+            ))}
+            <div className="px-2 pb-1 pt-1 text-[10px] font-medium text-ink-dim">Primitives</div>
             {PRIMITIVE_KINDS.map((kind) => (
               <button
                 key={kind}
@@ -103,7 +111,7 @@ export function AddObjectMenu({
                 onClick={() => closeAnd(() => useSceneStore.getState().addPrimitive(kind))}
                 className="w-full rounded-md px-2 py-1.5 text-left text-[11px] text-ink hover:bg-panel-2"
               >
-                {PRIMITIVE_DEFS[kind].label}
+                <span className="inline-block h-7 w-7 align-middle"><PrimitivePreview kind={kind} /></span> {PRIMITIVE_DEFS[kind].label}
               </button>
             ))}
             <div className="my-1 h-px bg-line/60" />

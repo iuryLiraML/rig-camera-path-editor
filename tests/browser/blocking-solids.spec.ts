@@ -1,0 +1,70 @@
+import { expect, test } from '@playwright/test'
+
+// These tests use a fresh browser context and create their own disposable scene.
+test('Add Object separates Figures and primitives and renders the bundled GLBs as clay', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  const errors: string[] = []
+  const requests: string[] = []
+  page.on('request', (request) => requests.push(request.url()))
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.goto('/')
+  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 45_000 })
+  await page.evaluate(async () => {
+    const { useEditorStore } = await import('/src/state/useEditorStore.ts')
+    useEditorStore.getState().setWorkspaceMode('build')
+    useEditorStore.getState().openAddDrawerChip('primitives')
+  })
+  await expect(page.getByRole('button', { name: 'Figures', exact: true })).toBeVisible()
+  await expect(page.locator('img[data-primitive-preview]')).toHaveCount(6, { timeout: 30_000 })
+  await expect(page.getByText('Female', { exact: true })).toHaveCount(0)
+  const primitiveSources = await page.locator('img[data-primitive-preview]').evaluateAll((images) => images.map((img) => (img as HTMLImageElement).src))
+  expect(new Set(primitiveSources).size).toBe(6)
+  expect(primitiveSources.every((src) => src.startsWith('data:image/png'))).toBe(true)
+  await page.screenshot({ path: 'test-results/blocking-primitives.png' })
+  await page.getByRole('button', { name: 'Figures', exact: true }).click()
+  await expect(page.locator('img[data-figure-preview]')).toHaveCount(2, { timeout: 45_000 })
+  await expect(page.locator('img[data-primitive-preview]')).toHaveCount(0)
+  const sources = await page.locator('img[data-figure-preview]').evaluateAll((images) => images.map((img) => ({ src: (img as HTMLImageElement).src, source: img.getAttribute('data-thumb-source'), width: (img as HTMLImageElement).naturalWidth })))
+  expect(sources.every((image) => image.src.startsWith('data:image/png') && image.source === 'bundled-glb' && image.width > 0)).toBe(true)
+  expect(sources[0].src).not.toBe(sources[1].src)
+  expect(requests.some((url) => url.endsWith('/dummy/Female.glb'))).toBe(true)
+  expect(requests.some((url) => url.endsWith('/dummy/Male.glb'))).toBe(true)
+  await page.screenshot({ path: 'test-results/blocking-figures.png' })
+  expect(errors).toEqual([])
+})
+
+test('Shape preview updates after parameter edits and CSG stays cached across time', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto('/')
+  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 45_000 })
+  const id = await page.evaluate(async () => {
+    const { useEditorStore } = await import('/src/state/useEditorStore.ts')
+    const { useSceneStore } = await import('/src/state/useSceneStore.ts')
+    useEditorStore.getState().setWorkspaceMode('build')
+    useEditorStore.getState().setShowAddDrawer(false)
+    useSceneStore.getState().addPrimitive('box')
+    return useSceneStore.getState().objects.at(-1)!.id
+  })
+  await page.getByRole('button', { name: 'Shape', exact: true }).click()
+  const preview = page.locator('[data-solid-preview] img')
+  await expect(preview).toBeVisible({ timeout: 30_000 })
+  const before = await preview.getAttribute('src')
+  await page.evaluate(async (id) => {
+    const { useSceneStore } = await import('/src/state/useSceneStore.ts')
+    useSceneStore.getState().updatePrimitiveParams(id, { width: 3.7, height: 2, corner: 0 })
+  }, id)
+  await expect(preview).not.toHaveAttribute('src', before!)
+  await page.getByRole('button', { name: 'Face', exact: true }).click()
+  await page.getByLabel('Planar face').selectOption('0')
+  await page.getByRole('button', { name: 'Extrude face', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Remove last operation' })).toBeVisible()
+  const counters = await page.evaluate(async () => {
+    const { primitiveEvaluationCount } = await import('/src/lib/primitiveGeometry.ts')
+    const { useRigStore } = await import('/src/state/useRigStore.ts')
+    const before = primitiveEvaluationCount()
+    for (const t of [0, 1, 0.2, 0.7, 0]) useRigStore.getState().setT(t)
+    return { before, after: primitiveEvaluationCount() }
+  })
+  expect(counters.after).toBe(counters.before)
+  await page.screenshot({ path: 'test-results/blocking-shape.png' })
+})

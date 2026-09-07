@@ -77,6 +77,14 @@ describe('ObjectBar asset display controls', () => {
     expect(queryByRole('button', { name: 'Wireframe display' })).toBeNull()
   })
 
+  it('does not overlay Transform on the viewport', () => {
+    const object = makeObject('Car', meshRoot(), { id: 'car', triangleCount: 12 })
+    useSceneStore.setState({ objects: [object] })
+    useEditorStore.setState({ selection: 'obj:car', objectBarPanel: 'transform' })
+    const { queryByText } = render(<ObjectBar />)
+    expect(queryByText('Transform')).toBeNull()
+  })
+
   it('exposes an accessible clay color input and Reset gray action in Shape', () => {
     const object = makeObject('Car', meshRoot(), {
       id: 'car',

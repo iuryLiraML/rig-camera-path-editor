@@ -15,7 +15,8 @@ import { clamp01 } from '../lib/intervalSpacing'
 import {
   buildPrimitiveGeometry,
   defaultParams,
-  floorOffsetY,
+  primitiveSpecKey,
+  type CadOp,
   PRIMITIVE_DEFS,
   type PrimitiveKind,
   type PrimitiveSpec,
@@ -282,15 +283,27 @@ export function makePrimitive(
   options: Parameters<typeof makeObject>[2] & { params?: Record<string, number> } = {},
 ): SceneObject {
   const params = { ...defaultParams(kind), ...(options.params ?? options.primitive?.params ?? {}) }
-  const spec: PrimitiveSpec = { kind, params }
+  const spec: PrimitiveSpec = { kind, params, ...(options.primitive?.ops ? { ops: structuredClone(options.primitive.ops) } : {}) }
   const geometry = buildPrimitiveGeometry(spec)
   const mesh = new THREE.Mesh(geometry)
-  mesh.position.y = floorOffsetY(geometry)
+  mesh.position.y = geometry.userData.cadSeedFloor
   const group = new THREE.Group()
   group.add(mesh)
   const { params: _p, ...rest } = options
   void _p
   return makeObject(PRIMITIVE_DEFS[kind].label, group, { ...rest, bufferKey: null, primitive: spec })
+}
+
+/** Build first, then swap, so failed operations leave both spec and mesh intact. */
+function rebuildPrimitive(object: SceneObject, spec: PrimitiveSpec): Partial<SceneObject> {
+  if (object.primitive && primitiveSpecKey(object.primitive) === primitiveSpecKey(spec)) return {}
+  const mesh = object.root.children.find((child): child is THREE.Mesh => child instanceof THREE.Mesh)
+  if (!mesh) throw new Error('The primitive mesh is missing.')
+  const geometry = buildPrimitiveGeometry(spec)
+  mesh.geometry.dispose()
+  mesh.geometry = geometry
+  mesh.position.y = geometry.userData.cadSeedFloor
+  return { primitive: spec, triangleCount: countRenderedTriangles(object.root) }
 }
 
 export function makeDefaultKnotObject(
@@ -339,6 +352,8 @@ interface SceneState {
   ) => void
   addPrimitive: (kind: PrimitiveKind) => void
   updatePrimitiveParams: (id: string, params: Record<string, number>) => void
+  appendPrimitiveOp: (id: string, op: CadOp) => void
+  removeLastPrimitiveOp: (id: string) => void
   removeObject: (id: string) => void
   renameObject: (id: string, name: string) => void
   duplicateObject: (id: string) => void
@@ -474,17 +489,16 @@ export const useSceneStore = create<SceneState>()(
         },
 
         updatePrimitiveParams: (id, params) =>
+          updateObject(id, (o) => o.primitive ? rebuildPrimitive(o, { ...o.primitive, params: { ...o.primitive.params, ...params } }) : {}),
+
+        appendPrimitiveOp: (id, op) =>
           updateObject(id, (o) => {
-            if (!o.primitive) return {}
-            const spec: PrimitiveSpec = { kind: o.primitive.kind, params: { ...o.primitive.params, ...params } }
-            const mesh = o.root.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh)
-            if (mesh) {
-              mesh.geometry.dispose()
-              mesh.geometry = buildPrimitiveGeometry(spec)
-              mesh.position.y = floorOffsetY(mesh.geometry)
-            }
-            return { primitive: spec, triangleCount: countRenderedTriangles(o.root) }
+            if (!o.primitive || o.rigKind === 'dummy') throw new Error('Select an existing primitive solid.')
+            return rebuildPrimitive(o, { ...o.primitive, ops: [...(o.primitive.ops ?? []), structuredClone(op)] })
           }),
+
+        removeLastPrimitiveOp: (id) =>
+          updateObject(id, (o) => o.primitive ? rebuildPrimitive(o, { ...o.primitive, ops: (o.primitive.ops ?? []).slice(0, -1) }) : {}),
 
         removeObject: (id) => {
           set((s) => {
@@ -533,7 +547,7 @@ export const useSceneStore = create<SceneState>()(
             // rebuild primitives from their spec; clone meshes for GLBs
             let copy: SceneObject
             if (src.primitive) {
-              copy = makePrimitive(src.primitive.kind, { ...common, params: src.primitive.params })
+              copy = makePrimitive(src.primitive.kind, { ...common, primitive: src.primitive })
             } else {
               const clonedRoot = SkeletonUtils.clone(src.root)
               sourceMaterialsForClone(src, clonedRoot)
@@ -732,12 +746,13 @@ export const useSceneStore = create<SceneState>()(
               objectGraveyard.delete(snap.id)
               // rebuild the primitive geometry if its params changed
               let primitive = base.primitive
-              if (snap.primitive && base.primitive) {
+              if (snap.primitive && base.primitive && primitiveSpecKey(snap.primitive) !== primitiveSpecKey(base.primitive)) {
                 const mesh = base.root.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh)
                 if (mesh) {
+                  const geometry = buildPrimitiveGeometry(snap.primitive)
                   mesh.geometry.dispose()
-                  mesh.geometry = buildPrimitiveGeometry(snap.primitive)
-                  mesh.position.y = floorOffsetY(mesh.geometry)
+                  mesh.geometry = geometry
+                  mesh.position.y = mesh.geometry.userData.cadSeedFloor
                 }
                 primitive = snap.primitive
               }

@@ -46,11 +46,14 @@ describe('path anchor multi-select', () => {
     expect(anchors[2].position).toEqual([5, 1.5, -2])
   })
 
-  it('keeps the set when clicking a member without additive (so a gizmo drag can move the group)', () => {
+  it('replaces the set on a plain click and keeps it only when preserveGroup is set', () => {
     const [a, b] = usePathStore.getState().paths[0].anchors.map((anchor) => anchor.id)
     usePathStore.getState().selectAnchor(a, false)
     usePathStore.getState().selectAnchor(b, true)
     usePathStore.getState().selectAnchor(a, false)
+    expect(usePathStore.getState().selectedAnchorIds).toEqual([a])
+    usePathStore.getState().selectAnchor(b, true)
+    usePathStore.getState().selectAnchor(a, false, true)
     expect(usePathStore.getState().selectedAnchorIds).toEqual([a, b])
   })
 
@@ -341,5 +344,13 @@ describe('path anchor multi-select', () => {
       primaryAnchorRef: { pathId: otherPathId, anchorId: secondOther },
       selectedAnchorIds: [firstOther, secondOther],
     })
+  })
+
+  it('keeps the path record after every remaining anchor is deleted', () => {
+    const ids = usePathStore.getState().paths[0].anchors.map((anchor) => anchor.id)
+    usePathStore.getState().removeAnchors(ids)
+    const path = usePathStore.getState().paths.find((item) => item.id === CAMERA_PATH_ID)
+    expect(path).toBeTruthy()
+    expect(path?.anchors).toEqual([])
   })
 })

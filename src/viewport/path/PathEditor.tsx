@@ -2,7 +2,7 @@ import { useLayoutEffect, useMemo, useRef, type ReactNode, type RefObject } from
 import * as THREE from 'three'
 import { Line } from '@react-three/drei'
 import { GizmoControls } from '../GizmoControls'
-import { useFrame, useThree, type ThreeEvent } from '@react-three/fiber'
+import { useFrame, type ThreeEvent } from '@react-three/fiber'
 import {
   centroidOf,
   snapshotAnchors,
@@ -10,28 +10,31 @@ import {
   worldAnchorPivot,
   type WorldAnchorPoseSnapshot,
 } from '../../lib/anchorSelection'
-import { buildCurve, computeAutoHandles } from '../../lib/curve'
+import { buildCurve, computeAutoHandles, nearestCurveParameter } from '../../lib/curve'
 import { useEditorOnly } from '../../lib/editorOnly'
-import { lockOrbit, unlockOrbit } from '../../lib/orbitLock'
-import { localPointToWorld } from '../../lib/pathSpace'
 import {
   currentPathParentTransform,
   worldHitToPathLocal,
   type PathSpaceScene,
 } from '../../lib/pathSpaceBind'
+import { eventShiftHeld } from '../../lib/pointerNdc'
 import { useScreenScale } from '../../lib/screenScale'
 import { useShiftHeld } from '../../lib/useShiftHeld'
-import { isPathEditing, isPathStrokeTool, pathGuidesVisible } from '../../lib/workspaceChrome'
+import { pathGizmoStealsStroke } from '../../lib/penGesture'
+import { isPathStrokeTool } from '../../lib/workspaceChrome'
 import {
   isPointGizmoActive,
+  isTechMode,
   useEditorStore,
   type GizmoMode,
+  type Tool,
 } from '../../state/useEditorStore'
 import { usePathStore, type AnchorRef, type PathAnchor } from '../../state/usePathStore'
 import { useRigStore } from '../../state/useRigStore'
 import { useSceneStore, type Vec3 } from '../../state/useSceneStore'
-import { isTechMode } from '../RenderPasses'
-import { capturePointer, finishPen, releasePointer } from './PenTool'
+import { activateEditPath, applySelectPointerIntent } from '../../state/cameraPathLink'
+import { pathLineAppearance, pathOverlay, PATH_FOLLOWED } from '../../lib/pathVisual'
+import { selectPointerIntent } from '../../lib/viewportPick'
 
 function ignoreRaycast() {
   // Decorative path strokes must not steal object clicks.
@@ -80,65 +83,17 @@ function ParentSpaceGroup({
   )
 }
 
-const ACCENT = '#3b82f6'
 const HANDLE_COLOR = '#9db9f5'
 
-/** Drag helper: intersect the pointer ray with a horizontal plane at `y`. */
-function useHorizontalDrag() {
-  const controls = useThree((s) => s.controls) as { enabled: boolean } | null
-  const plane = useRef(new THREE.Plane())
-  const hit = useRef(new THREE.Vector3())
-
-  return {
-    start: (e: ThreeEvent<PointerEvent>, y: number) => {
-      e.stopPropagation()
-      plane.current.set(new THREE.Vector3(0, 1, 0), -y)
-      lockOrbit()
-      if (controls) controls.enabled = false
-      capturePointer(e)
-    },
-    move: (e: ThreeEvent<PointerEvent>): THREE.Vector3 | null =>
-      e.ray.intersectPlane(plane.current, hit.current),
-    end: (e: ThreeEvent<PointerEvent>) => {
-      unlockOrbit()
-      releasePointer(e)
-    },
-  }
-}
-
-function AnchorGizmo({ anchor, isFirst }: { anchor: PathAnchor; isFirst: boolean }) {
-  const tool = useEditorStore((s) => s.tool)
+/** Pointer interaction is owned by the shared canvas controller in PenTool. */
+function AnchorGizmo({ anchor }: { anchor: PathAnchor }) {
   const selected = usePathStore((s) => s.selectedAnchorIds.includes(anchor.id))
   const ref = useRef<THREE.Mesh>(null)
-  useScreenScale(ref, 0.07)
-
+  useScreenScale(ref, 0.09)
   return (
-    <mesh
-      ref={ref}
-      position={anchor.position}
-      userData={{ pickKind: 'path-anchor', pickId: `anchor:${anchor.id}` }}
-      frustumCulled={false}
-      onPointerDown={(e) => {
-        if (e.button !== 0) return
-        if (useEditorStore.getState().cameraView) return
-        // while drawing, clicking the first anchor closes the loop
-        if (isPathStrokeTool(tool)) {
-          if (tool === 'pen' && isFirst) {
-            e.stopPropagation()
-            finishPen(true)
-          }
-          return
-        }
-        useEditorStore.getState().select('camera-path')
-        useEditorStore.getState().setTool('select')
-        const additive = Boolean(e.shiftKey || e.nativeEvent.shiftKey)
-        usePathStore.getState().selectAnchor(anchor.id, additive)
-        e.stopPropagation()
-        e.nativeEvent.stopImmediatePropagation()
-      }}
-    >
+    <mesh ref={ref} position={anchor.position} userData={{ pickKind: 'path-anchor', pickId: `anchor:${anchor.id}` }} frustumCulled={false}>
       <boxGeometry args={[0.85, 0.85, 0.85]} />
-      <meshBasicMaterial color={selected ? '#ffffff' : ACCENT} depthTest={false} />
+      <meshBasicMaterial color={selected ? '#ffffff' : PATH_FOLLOWED} depthTest={false} />
     </mesh>
   )
 }
@@ -155,64 +110,18 @@ function SelectedAnchorMarker({ anchor }: { anchor: PathAnchor }) {
 }
 
 function HandleGizmo({ anchor, which }: { anchor: PathAnchor; which: 'in' | 'out' }) {
-  const selected = usePathStore((s) => s.selectedHandle === which)
-  const drag = useHorizontalDrag()
-  const dragging = useRef(false)
+  const selected = usePathStore((s) => s.selectedAnchorId === anchor.id && s.selectedHandle === which)
   const ref = useRef<THREE.Mesh>(null)
-  useScreenScale(ref, 0.06)
+  useScreenScale(ref, 0.085)
   const rel = which === 'in' ? anchor.handleIn : anchor.handleOut
-  const tip: Vec3 = [
-    anchor.position[0] + rel[0],
-    anchor.position[1] + rel[1],
-    anchor.position[2] + rel[2],
-  ]
-
+  const tip = anchor.position.map((v, i) => v + rel[i]) as Vec3
+  if (Math.hypot(...rel) < 1e-8) return null
   return (
     <group>
-      <Line
-        points={[anchor.position, tip]}
-        color={HANDLE_COLOR}
-        lineWidth={1}
-        depthTest={false}
-        raycast={ignoreRaycast}
-      />
-      <mesh
-        ref={ref}
-        position={tip}
-        userData={{ pickKind: 'path-anchor', pickId: `handle:${anchor.id}:${which}` }}
-        frustumCulled={false}
-        onPointerDown={(e) => {
-          if (e.button !== 0) return
-          if (useEditorStore.getState().cameraView) return
-          usePathStore.getState().selectAnchor(anchor.id)
-          usePathStore.getState().selectHandle(which)
-          dragging.current = true
-          const parent = currentPathParentTransform(usePathStore.getState().activePathId, pathScene())
-          const worldTip = parent ? localPointToWorld(tip, parent) : tip
-          drag.start(e, worldTip[1])
-        }}
-        onPointerMove={(e) => {
-          if (!dragging.current) return
-          const p = drag.move(e)
-          if (p) {
-            const local = toPathLocal([p.x, p.y, p.z])
-            usePathStore
-              .getState()
-              .setHandle(
-                anchor.id,
-                which,
-                [local[0] - anchor.position[0], local[1] - anchor.position[1], local[2] - anchor.position[2]],
-                e.altKey,
-              )
-          }
-        }}
-        onPointerUp={(e) => {
-          dragging.current = false
-          drag.end(e)
-        }}
-      >
-        <sphereGeometry args={[1, 12, 12]} />
-        <meshBasicMaterial color={selected ? '#ffffff' : HANDLE_COLOR} depthTest={false} />
+      <Line points={[anchor.position, tip]} color={HANDLE_COLOR} lineWidth={1} depthTest={false} raycast={ignoreRaycast} />
+      <mesh ref={ref} position={tip} userData={{ pickKind: 'path-anchor', pickId: `handle:${anchor.id}:${which}` }} frustumCulled={false}>
+        {which === 'in' ? <boxGeometry args={[1, 1, 1]} /> : <sphereGeometry args={[0.6, 12, 12]} />}
+        <meshBasicMaterial color={selected ? '#ffffff' : which === 'in' ? '#f0bd77' : HANDLE_COLOR} depthTest={false} />
       </mesh>
     </group>
   )
@@ -279,7 +188,8 @@ function PathTransformGizmo({ worldSpace }: { worldSpace: boolean }) {
     return anchors.filter((anchor) => wanted.has(anchor.id))
   }, [anchors, selectedAnchorIds])
 
-  const primary = anchors.find((anchor) => anchor.id === selectedAnchorId) ?? selected[selected.length - 1]
+  const active = usePathStore(s => s.getPath(s.activePathId))
+  const primary = computeAutoHandles(anchors, active?.closed ?? false, active?.rounding ?? .8).find(anchor => anchor.id === selectedAnchorId) ?? selected[selected.length - 1]
 
   const target: Vec3 = (() => {
     if (primary && selectedHandle === 'in') {
@@ -414,15 +324,102 @@ function PathTransformGizmo({ worldSpace }: { worldSpace: boolean }) {
   )
 }
 
-/** Faint, non-interactive lines for every path that is not being edited. */
+function PathStroke({
+  points,
+  followed,
+  selected,
+  pathId,
+  tool,
+  onInsert,
+  appearance,
+}: {
+  points: THREE.Vector3[]
+  followed: boolean
+  selected: boolean
+  pathId: string
+  tool: Tool
+  onInsert?: (point: THREE.Vector3) => void
+  appearance?: ReturnType<typeof pathLineAppearance>
+}) {
+  const look = appearance ?? pathLineAppearance(followed, selected)
+  const pickable = !isPathStrokeTool(tool)
+  return (
+    <group userData={{ pickKind: 'path-line', pickId: `path:${pathId}` }}>
+      {look.halo && (
+        <Line
+          points={points}
+          color={look.haloColor}
+          lineWidth={look.lineWidth + 2.5}
+          transparent
+          opacity={0.45}
+          depthTest={false}
+          raycast={ignoreRaycast}
+        />
+      )}
+      <Line
+        points={points}
+        color={look.color}
+        lineWidth={look.lineWidth}
+        transparent
+        opacity={look.opacity}
+        depthTest={false}
+        {...(pickable
+          ? {
+              onPointerDown: (e: ThreeEvent<PointerEvent>) => {
+                if (e.button !== 0) return
+                if (useEditorStore.getState().cameraView) return
+                const intent = selectPointerIntent(e.intersections)
+                if (intent.action !== 'select-path' || intent.id !== `path:${pathId}`) return
+                e.stopPropagation()
+                applySelectPointerIntent(intent, eventShiftHeld(e))
+              },
+              onDoubleClick: (e: ThreeEvent<PointerEvent>) => {
+                if (!onInsert) return
+                e.stopPropagation()
+                onInsert(e.point)
+              },
+            }
+          : {})}
+      />
+    </group>
+  )
+}
+
+function InactiveAnchorGizmo({ pathId, anchor }: { pathId: string; anchor: PathAnchor }) {
+  const ref = useRef<THREE.Mesh>(null)
+  const tool = useEditorStore((s) => s.tool)
+  const stealStroke = pathGizmoStealsStroke(tool)
+  useScreenScale(ref, 0.055)
+  return (
+    <mesh
+      ref={ref}
+      position={anchor.position}
+      userData={{ pickKind: 'path-anchor', pickId: `anchor:${anchor.id}` }}
+      frustumCulled={false}
+      raycast={stealStroke ? undefined : ignoreRaycast}
+      onPointerDown={(e) => {
+        if (e.button !== 0) return
+        if (useEditorStore.getState().cameraView) return
+        if (!pathGizmoStealsStroke(useEditorStore.getState().tool)) return
+        e.stopPropagation()
+        activateEditPath(pathId)
+        usePathStore.getState().selectAnchor(anchor.id, eventShiftHeld(e))
+      }}
+    >
+      <boxGeometry args={[0.7, 0.7, 0.7]} />
+      <meshBasicMaterial color="#c7c7cc" depthTest={false} />
+    </mesh>
+  )
+}
 export function InactivePaths() {
   const paths = usePathStore((s) => s.paths)
   const activePathId = usePathStore((s) => s.activePathId)
+  const cameraPathId = useRigStore((s) => s.cameraPathId)
   const playMode = useEditorStore((s) => s.playMode)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
-  const cameraKind = useRigStore((s) => s.cameraKind)
   const hiddenIds = useEditorStore((s) => s.hiddenIds)
   const selectionIds = useEditorStore((s) => s.selectionIds)
+  const tool = useEditorStore((s) => s.tool)
   const selectedAnchorRefs = usePathStore((s) => s.selectedAnchorRefs)
   const tech = useEditorStore((s) => isTechMode(s.viewMode))
   const rootRef = useRef<THREE.Group>(null)
@@ -433,7 +430,16 @@ export function InactivePaths() {
       paths
         .filter((p) => p.id !== activePathId && !hiddenIds.includes(`path:${p.id}`))
         .map((p) => {
-          const curve = p.anchors.length >= 2 ? buildCurve(p.anchors, p.closed, p.rounding) : null
+          const overlay = pathOverlay({
+            playMode,
+            workspaceMode,
+            hidden: false,
+            tech,
+            anchorCount: p.anchors.length,
+            followed: p.id === cameraPathId,
+            selected: selectionIds.includes(`path:${p.id}`),
+          })
+          const curve = overlay.stroke ? buildCurve(p.anchors, p.closed, p.rounding) : null
           const selectedIds = new Set(
             selectedAnchorRefs
               .filter((ref) => ref.pathId === p.id)
@@ -441,32 +447,47 @@ export function InactivePaths() {
           )
           return {
             id: p.id,
+            anchors: p.anchors,
+            overlay,
             points: curve ? curve.getPoints(Math.max(64, p.anchors.length * 24)) : null,
             selectedAnchors: p.anchors.filter((anchor) => selectedIds.has(anchor.id)),
           }
         }),
-    [paths, activePathId, hiddenIds, selectedAnchorRefs],
+    [
+      paths,
+      activePathId,
+      hiddenIds,
+      selectedAnchorRefs,
+      playMode,
+      workspaceMode,
+      tech,
+      cameraPathId,
+      selectionIds,
+    ],
   )
 
-  if (!pathGuidesVisible(playMode, workspaceMode, cameraKind) || tech || pathItems.length === 0) return null
+  if (tech || pathItems.length === 0) return null
 
   return (
     <group ref={rootRef} renderOrder={9}>
       {pathItems.map((item) => (
         <ParentSpaceGroup key={item.id} pathId={item.id}>
-          {item.points && (
-            <Line
+          {item.overlay.stroke && item.points && (
+            <PathStroke
               points={item.points}
-              color={selectionIds.includes(`path:${item.id}`) ? '#ffffff' : ACCENT}
-              lineWidth={selectionIds.includes(`path:${item.id}`) ? 2.5 : 1.5}
-              transparent
-              opacity={selectionIds.includes(`path:${item.id}`) ? 0.9 : 0.35}
-              depthTest={false}
-              raycast={ignoreRaycast}
+              followed={item.id === cameraPathId}
+              selected={selectionIds.includes(`path:${item.id}`)}
+              pathId={item.id}
+              tool={tool}
+              appearance={item.overlay.appearance}
             />
           )}
+          {item.overlay.editChrome &&
+            item.anchors.map((anchor) => (
+              <InactiveAnchorGizmo key={anchor.id} pathId={item.id} anchor={anchor} />
+            ))}
           {item.selectedAnchors.map((anchor) => (
-            <SelectedAnchorMarker key={anchor.id} anchor={anchor} />
+            <SelectedAnchorMarker key={`sel-${anchor.id}`} anchor={anchor} />
           ))}
         </ParentSpaceGroup>
       ))}
@@ -480,6 +501,7 @@ export function PathEditor() {
   const closed = active?.closed ?? false
   const rounding = active?.rounding ?? 0.8
   const selectedAnchorId = usePathStore((s) => s.selectedAnchorId)
+  const showAllHandles = usePathStore((s) => s.showAllHandles)
   const selectedAnchorRefs = usePathStore((s) => s.selectedAnchorRefs)
   const primaryAnchorRef = usePathStore((s) => s.primaryAnchorRef)
   const tool = useEditorStore((s) => s.tool)
@@ -489,9 +511,9 @@ export function PathEditor() {
   const pathSelected = useEditorStore((s) =>
     active ? s.selectionIds.includes(`path:${active.id}`) : false,
   )
+  const cameraPathId = useRigStore((s) => s.cameraPathId)
   const playMode = useEditorStore((s) => s.playMode)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
-  const cameraKind = useRigStore((s) => s.cameraKind)
   const pathHidden = useEditorStore((s) =>
     active ? s.hiddenIds.includes(`path:${active.id}`) : false,
   )
@@ -508,16 +530,18 @@ export function PathEditor() {
     [anchors, closed, rounding],
   )
 
-  if (
-    !isPathEditing(playMode, workspaceMode) ||
-    cameraKind === 'static' ||
-    pathHidden ||
-    tech ||
-    anchors.length === 0
-  )
-    return null
+  const overlay = pathOverlay({
+    playMode,
+    workspaceMode,
+    hidden: pathHidden,
+    tech,
+    anchorCount: anchors.length,
+    followed: Boolean(active && active.id === cameraPathId),
+    selected: pathSelected,
+  })
+  if (!overlay.stroke && !overlay.editChrome) return null
 
-  const selected = resolved.find((a) => a.id === selectedAnchorId)
+  const handleAnchors = resolved.filter(a => showAllHandles || ((pointContextActive || tool === 'pen') && selectedAnchorRefs.some(ref => ref.pathId === active!.id && ref.anchorId === a.id)))
   const selectedPathIds = new Set(selectedAnchorRefs.map((ref) => ref.pathId))
   const multiPathSelection = selectedPathIds.size > 1
 
@@ -525,53 +549,35 @@ export function PathEditor() {
   const insertAt = (point: THREE.Vector3) => {
     if (!curve) return
     const local = toPathLocal([point.x, point.y, point.z])
-    const localPoint = new THREE.Vector3(...local)
-    const segments = curve.curves
-    let best = 0
-    let bestDist = Infinity
-    segments.forEach((segment, i) => {
-      for (let s = 0; s <= 24; s++) {
-        const d = segment.getPoint(s / 24).distanceToSquared(localPoint)
-        if (d < bestDist) {
-          bestDist = d
-          best = i
-        }
-      }
-    })
-    usePathStore.getState().insertAnchor(best + 1, local)
+    const hit = nearestCurveParameter(curve, new THREE.Vector3(...local))
+    usePathStore.getState().splitSegment(hit.index, hit.t)
     useEditorStore.getState().select('camera-path')
   }
 
   return (
     <>
       <ParentSpaceGroup pathId={active!.id} renderOrder={10}>
-        {points && (
-          <group userData={{ pickKind: 'path-line', pickId: `path:${active!.id}` }}>
-            <Line
-              points={points}
-              color={pathSelected ? '#ffffff' : ACCENT}
-              lineWidth={pathSelected ? 2.75 : 2}
-              depthTest={false}
-              {...(isPathStrokeTool(tool) ? { raycast: ignoreRaycast } : {})}
-              onDoubleClick={(e) => {
-                if (isPathStrokeTool(tool)) return
-                e.stopPropagation()
-                insertAt(e.point)
-              }}
-            />
+        {overlay.stroke && points && (
+          <PathStroke
+            points={points}
+            followed={active!.id === cameraPathId}
+            selected={pathSelected}
+            pathId={active!.id}
+            tool={tool}
+            appearance={overlay.appearance}
+            onInsert={overlay.editChrome ? insertAt : undefined}
+          />
+        )}
+        {overlay.editChrome &&
+          anchors.map((a) => <AnchorGizmo key={a.id} anchor={a} />)}
+        {overlay.editChrome && handleAnchors.map(anchor => (
+          <group key={`handles:${anchor.id}`}>
+            <HandleGizmo anchor={anchor} which="in" />
+            <HandleGizmo anchor={anchor} which="out" />
           </group>
-        )}
-        {anchors.map((a, i) => (
-          <AnchorGizmo key={a.id} anchor={a} isFirst={i === 0} />
         ))}
-        {pointContextActive && selected && (
-          <>
-            <HandleGizmo anchor={selected} which="in" />
-            <HandleGizmo anchor={selected} which="out" />
-          </>
-        )}
       </ParentSpaceGroup>
-      {pointContextActive && !isPathStrokeTool(tool) && selectedAnchorId && (
+      {overlay.editChrome && pointContextActive && tool === 'select' && selectedAnchorId && (
         multiPathSelection ? (
           <PathTransformGizmo worldSpace />
         ) : (

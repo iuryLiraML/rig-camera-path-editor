@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useCameraAnchorCount, useCameraFollowers } from '../state/cameraPathLink'
+import { activateEditPath, useCameraAnchorCount, useCameraFollowers } from '../state/cameraPathLink'
 import { useEditorStore, type SelectableId } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { isRemeshPlaceholder, keepHighMesh, openImportDialog, resetScene } from '../lib/sceneIO'
@@ -10,10 +10,20 @@ import { createProject, deleteProject, switchProject } from '../lib/projects'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { useRigStore } from '../state/useRigStore'
-import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
+import { usePathStore } from '../state/usePathStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { generateRacingDroneCameras } from '../lib/cameraBatch/generateRacingDroneCameras'
 import { AddObjectMenu, addDrawnPath } from './AddObjectMenu'
+import {
+  CHROME_MENU,
+  CHROME_MENU_CAPTION,
+  CHROME_MENU_ITEM,
+  CHROME_MENU_ITEM_ACTIVE,
+  CHROME_MENU_ITEM_DANGER,
+  CHROME_MENU_ITEM_DANGER_CONFIRM,
+  CHROME_MENU_SEP,
+  CHROME_MENU_WIDTH,
+} from './chromeMenu'
 import {
   CameraIcon,
   CubeIcon,
@@ -29,7 +39,8 @@ import {
   TargetIcon,
   TrashIcon,
 } from './icons'
-import { GUTTER, TOP_ROW_HEIGHT, useViewportInsets } from './viewportInsets'
+import { SceneSwitcher } from './SceneSwitcher'
+import { GUTTER, LEFT_PANEL_MAX, useViewportInsets } from './viewportInsets'
 
 function VisibilityToggle({
   hideId,
@@ -134,7 +145,19 @@ function ObjectTreeItem({
       }`}
     >
       <button
-        onClick={() => select(activeSingleton ? null : selectableId)}
+        onClick={(e) => {
+          if (e.shiftKey) {
+            const editor = useEditorStore.getState()
+            const selectedAlready = editor.selectionIds.includes(selectableId)
+            editor.selectMany(
+              selectedAlready
+                ? editor.selectionIds.filter((id) => id !== selectableId)
+                : [...editor.selectionIds, selectableId],
+            )
+            return
+          }
+          select(activeSingleton ? null : selectableId)
+        }}
         className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
       >
         {remeshJob ? (
@@ -248,16 +271,20 @@ function ObjectTreeItem({
 
 /** A motion path in the tree — selecting it makes it the active/editable path. */
 function PathTreeItem({ id, name }: { id: string; name: string }) {
-  const selection = useEditorStore((s) => s.selection)
   const selectionIds = useEditorStore((s) => s.selectionIds)
-  const activePathId = usePathStore((s) => s.activePathId)
   const pathCount = usePathStore((s) => s.paths.length)
   const followedBy = useCameraFollowers(id)
   const selected = selectionIds.includes(`path:${id}`)
-  const activeSingleton =
-    selection === 'camera-path' && activePathId === id && selectionIds.length === 1
   const hidden = useEditorStore((s) => s.hiddenIds.includes(`path:${id}`))
   const [confirming, setConfirming] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [draft, setDraft] = useState(name)
+
+  const commitRename = () => {
+    const next = draft.trim()
+    if (next) usePathStore.getState().renamePath(id, next)
+    setRenaming(false)
+  }
 
   /*
    * Paths had no remove control here at all — the only way to delete one was to
@@ -282,22 +309,46 @@ function PathTreeItem({ id, name }: { id: string; name: string }) {
         selected ? 'bg-accent text-white' : 'text-ink hover:bg-panel-2'
       }`}
     >
-      <button
-        onClick={() => {
-          if (activeSingleton) {
-            useEditorStore.getState().select(null)
-            return
-          }
-          usePathStore.getState().setActivePath(id)
-          useEditorStore.getState().select('camera-path')
-        }}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
-      >
-        <span className={selected ? 'text-white' : 'text-ink-dim'}>
-          <PenIcon />
-        </span>
-        <span className={`truncate ${hidden ? 'opacity-45' : ''}`}>{name}</span>
-      </button>
+      {renaming ? (
+        <input
+          value={draft}
+          autoFocus
+          aria-label={`Rename ${name}`}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={commitRename}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              commitRename()
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault()
+              setDraft(name)
+              setRenaming(false)
+            }
+          }}
+          onClick={(e) => e.stopPropagation()}
+          className="min-w-0 flex-1 rounded bg-panel-3 px-2 py-1 text-xs text-ink outline-none"
+        />
+      ) : (
+        <button
+          onClick={(e) => {
+            activateEditPath(id, e.shiftKey)
+          }}
+          onDoubleClick={(e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setDraft(name)
+            setRenaming(true)
+          }}
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs"
+        >
+          <span className={selected ? 'text-white' : 'text-ink-dim'}>
+            <PenIcon />
+          </span>
+          <span className={`truncate ${hidden ? 'opacity-45' : ''}`}>{name}</span>
+        </button>
+      )}
       <VisibilityToggle hideId={`path:${id}`} name={name} selected={selected} />
       {confirming && !blocked ? (
         <button
@@ -473,11 +524,9 @@ function FooterItem({
   )
 }
 
-const PROJECT_MENU_WIDTH = 208
-
 function menuCoords(button: HTMLElement) {
   const r = button.getBoundingClientRect()
-  const left = Math.min(r.left, window.innerWidth - PROJECT_MENU_WIDTH - 8)
+  const left = Math.min(r.left, window.innerWidth - CHROME_MENU_WIDTH - 8)
   return { top: r.bottom + 6, left: Math.max(8, left) }
 }
 
@@ -511,18 +560,20 @@ export function ProjectMenu() {
     }
   }, [open])
 
-  const item = 'w-full rounded-md px-2 py-1.5 text-left text-[11px] text-ink hover:bg-panel-2'
   const closeMenu = () => {
     setOpen(false)
     setConfirming(null)
   }
 
   return (
-    <div ref={wrapRef} className="relative">
+    <div ref={wrapRef} className="relative shrink-0">
       <button
         ref={buttonRef}
-        className={open ? 'text-ink' : 'text-ink-dim hover:text-ink'}
+        className={`flex h-7 w-7 items-center justify-center rounded-md ${
+          open ? 'bg-panel text-ink' : 'text-ink-dim hover:bg-panel hover:text-ink'
+        }`}
         title="Project menu"
+        aria-expanded={open}
         onClick={() => {
           const button = buttonRef.current
           if (!open && button) setCoords(menuCoords(button))
@@ -536,12 +587,12 @@ export function ProjectMenu() {
         createPortal(
           <div
             ref={menuRef}
-            className="panel fixed z-50 w-52 p-1"
-            style={{ top: coords.top, left: coords.left }}
+            className={`${CHROME_MENU} fixed`}
+            style={{ top: coords.top, left: coords.left, width: CHROME_MENU_WIDTH }}
           >
           {projectList.length > 1 && (
             <>
-              <div className="px-2 pb-1 pt-1.5 text-[10px] font-medium text-ink-dim">Open project</div>
+              <div className={CHROME_MENU_CAPTION}>Open project</div>
               {projectList.map((p) => (
                 <button
                   key={p.id}
@@ -551,12 +602,12 @@ export function ProjectMenu() {
                       useSceneStore.getState().showNotice('Project could not be opened'),
                     )
                   }}
-                  className={`${item} ${p.id === projectId ? 'text-accent' : ''}`}
+                  className={p.id === projectId ? CHROME_MENU_ITEM_ACTIVE : CHROME_MENU_ITEM}
                 >
                   {p.name}
                 </button>
               ))}
-              <div className="my-1 h-px bg-line/60" />
+              <div className={CHROME_MENU_SEP} />
             </>
           )}
           <button
@@ -572,7 +623,7 @@ export function ProjectMenu() {
                   useSceneStore.getState().showNotice('Project could not be created'),
                 )
             }}
-            className={item}
+            className={CHROME_MENU_ITEM}
           >
             New project
           </button>
@@ -585,9 +636,9 @@ export function ProjectMenu() {
               closeMenu()
               void resetScene()
             }}
-            className={`w-full rounded-md px-2 py-1.5 text-left text-[11px] ${
-              confirming === 'reset' ? 'bg-red-500/15 text-red-400' : 'text-ink hover:bg-panel-2'
-            }`}
+            className={
+              confirming === 'reset' ? CHROME_MENU_ITEM_DANGER_CONFIRM : CHROME_MENU_ITEM_DANGER
+            }
           >
             {confirming === 'reset' ? 'Erase scene + path? Click to confirm' : 'Reset scene'}
           </button>
@@ -602,19 +653,19 @@ export function ProjectMenu() {
                 useSceneStore.getState().showNotice('Project could not be deleted'),
               )
             }}
-            className={`w-full rounded-md px-2 py-1.5 text-left text-[11px] ${
-              confirming === 'delete' ? 'bg-red-500/15 text-red-400' : 'text-ink hover:bg-panel-2'
-            }`}
+            className={
+              confirming === 'delete' ? CHROME_MENU_ITEM_DANGER_CONFIRM : CHROME_MENU_ITEM_DANGER
+            }
           >
             {confirming === 'delete' ? 'Delete this project? Click to confirm' : 'Delete project'}
           </button>
-          <div className="my-1 h-px bg-line/60" />
+          <div className={CHROME_MENU_SEP} />
           <button
             onClick={() => {
               closeMenu()
               useEditorStore.getState().setShowSettings(true)
             }}
-            className={item}
+            className={CHROME_MENU_ITEM}
           >
             Settings…
           </button>
@@ -633,6 +684,7 @@ export function LeftPanel() {
   const paths = usePathStore((s) => s.paths)
   const lookAtMode = useRigStore((s) => s.lookAtMode)
   const cameraOptions = useCameraOptionsStore((s) => s.options)
+  const scenes = useProjectStore((s) => s.scenes)
   const [query, setQuery] = useState('')
   const insets = useViewportInsets()
 
@@ -647,37 +699,46 @@ export function LeftPanel() {
   const visible = items.filter((i) => i.name.toLowerCase().includes(q))
   const visibleCameras = cameraOptions.filter((c) => c.name.toLowerCase().includes(q))
   const pathItems = paths
-    .map((p) => ({ id: p.id, name: p.id === CAMERA_PATH_ID ? 'Camera Path' : p.name }))
+    .map((p) => ({ id: p.id, name: p.name }))
     .filter((p) => p.name.toLowerCase().includes(q))
 
   return (
     <div
-      className="panel absolute z-20 flex flex-col overflow-hidden rounded-t-none border-t-0"
+      className="panel absolute z-20 flex flex-col overflow-visible"
       style={{
         left: GUTTER,
-        top: GUTTER + TOP_ROW_HEIGHT,
+        // Below the global top row, so the chip and the modes stay put instead
+        // of this column taking over their band when the outliner opens.
+        top: insets.top,
         bottom: GUTTER,
-        width: insets.leftWidth || 280,
+        width: insets.leftWidth || LEFT_PANEL_MAX,
       }}
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="px-2 pt-2">
-        <div className="flex items-center gap-2 rounded-md bg-panel-2 px-2 py-1.5">
-          <SearchIcon className="shrink-0 text-ink-dim" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search"
-            className="w-full bg-transparent text-xs text-ink outline-none placeholder:text-ink-dim"
-          />
+        <div className="flex items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-panel-2 px-2 py-1.5">
+            <SearchIcon className="shrink-0 text-ink-dim" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search"
+              className="w-full bg-transparent text-xs text-ink outline-none placeholder:text-ink-dim"
+            />
+          </div>
+          <ProjectMenu />
         </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-2">
         <div className="flex items-center justify-between px-2 pb-1">
-          <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">
-            Scene
-          </span>
+          {scenes.length > 0 ? (
+            <SceneSwitcher />
+          ) : (
+            <span className="text-[10px] font-medium uppercase tracking-wide text-ink-dim">
+              Scene
+            </span>
+          )}
           <AddObjectMenu compact title="Add a shape or import a model" />
         </div>
         <div className="flex flex-col gap-0.5">

@@ -2,10 +2,8 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { useFrame, useThree } from '@react-three/fiber'
 import { applyDepthUniforms, fitDepthRange, resolveDepthRange } from '../lib/depthRange'
-import { useEditorStore, type ViewMode } from '../state/useEditorStore'
+import { isTechMode, useEditorStore } from '../state/useEditorStore'
 import { invalidateSceneBoundsCache, sceneBoundsThrottled } from './SceneObjects'
-
-export const isTechMode = (mode: ViewMode) => mode !== 'clay' && mode !== 'look'
 
 // ---------------------------------------------------------------------------
 // Depth window: near/far follow the active camera around the scene so the

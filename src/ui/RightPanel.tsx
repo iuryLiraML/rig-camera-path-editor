@@ -1,3 +1,4 @@
+import { PrimitiveShapeControls } from './SolidControls'
 import { useState } from 'react'
 
 import { useEditorStore, type ExportAspect, type ExportRes } from '../state/useEditorStore'
@@ -11,9 +12,10 @@ import {
 } from '../state/useRigStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
-import { anchorTangentMode, type TangentMode } from '../lib/curve'
+import { anchorTangentMode, computeAutoHandles, type TangentMode } from '../lib/curve'
 import { addStaticCamera, switchActiveCameraToPath, switchActiveCameraToStatic } from '../lib/addStaticCamera'
 import {
+  activateFollowedPath,
   otherCamerasOnPath,
   useCameraAnchorCount,
   useCameraPath,
@@ -45,7 +47,6 @@ import {
   resetDummyBonePose,
   setDummyBoneAxis,
 } from '../lib/dummyCharacter'
-import { PRIMITIVE_DEFS } from '../lib/primitiveGeometry'
 import {
   ColorField,
   KeyButton,
@@ -345,7 +346,7 @@ function FollowSection({ objectId }: { objectId: string }) {
           <option value="">None</option>
           {paths.map((p) => (
             <option key={p.id} value={p.id}>
-              {p.id === CAMERA_PATH_ID ? 'Camera Path' : p.name}
+              {p.name}
             </option>
           ))}
           <option value="__new">+ New path…</option>
@@ -523,21 +524,7 @@ function ObjectSections({ objectId }: { objectId: string }) {
       <FollowSection objectId={object.id} />
       {object.primitive && (
         <Section title="Shape">
-          {PRIMITIVE_DEFS[object.primitive.kind].params.map((def) => {
-            const value = object.primitive!.params[def.key] ?? def.default
-            return (
-              <Row key={def.key} label={def.label}>
-                <Slider
-                  value={value}
-                  onChange={(v) => scene.updatePrimitiveParams(object.id, { [def.key]: v })}
-                  min={def.min}
-                  max={def.max}
-                  step={def.step}
-                  format={def.step >= 1 ? (n) => String(Math.round(n)) : meters}
-                />
-              </Row>
-            )
-          })}
+          <PrimitiveShapeControls object={object} />
         </Section>
       )}
       <Section title="Transform">
@@ -635,7 +622,7 @@ function LightSections() {
   )
 }
 
-function PathSections() {
+export function PathSections() {
   const active = usePathStore((s) => s.paths.find((p) => p.id === s.activePathId))
   const activePathId = usePathStore((s) => s.activePathId)
   const anchors = active?.anchors ?? []
@@ -645,27 +632,112 @@ function PathSections() {
   const selectedAnchorIds = usePathStore((s) => s.selectedAnchorIds)
   const drawPlaneY = usePathStore((s) => s.drawPlaneY)
   const path = usePathStore.getState()
+  const showAllHandles = usePathStore(s => s.showAllHandles)
+  const pendingHandle = usePathStore(s => s.pendingHandle)
   const showNotice = useSceneStore((s) => s.showNotice)
 
   const isCamera = activePathId === CAMERA_PATH_ID
-  const selected = anchors.find((a) => a.id === selectedAnchorId)
-  const index = selected ? anchors.indexOf(selected) : -1
+  const selected = computeAutoHandles(anchors, active?.closed ?? false, active?.rounding ?? .8).find((a) => a.id === selectedAnchorId)
+  const index = anchors.findIndex(a => a.id === selectedAnchorId)
   const multi = selectedAnchorIds.length > 1
   const pathHeight = anchors[0]?.position[1] ?? drawPlaneY
   const hasManual = anchors.some((a) => a.manual)
 
   return (
     <>
-      <Section title={isCamera ? 'Camera Path' : 'Path'}>
-        {!isCamera && (
-          <Row label="Name">
-            <input
-              value={active?.name ?? ''}
-              onChange={(e) => path.renamePath(activePathId, e.target.value)}
-              className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
+      {selected && (
+        <Section title={multi ? `${selectedAnchorIds.length} points` : `Point ${index + 1}`}>
+          <p className="mb-2 text-[11px] text-ink-dim">Drag a point or its handles in the viewport. Incoming: square · Outgoing: circle.</p>
+          <label className="mb-2 flex items-center gap-2 text-[11px] text-ink-dim">
+            <input type="checkbox" checked={showAllHandles} onChange={e => path.setShowAllHandles(e.target.checked)} /> Show all handles
+          </label>
+          {!closed && !multi && (index === 0 || index === anchors.length - 1) && (
+            <p className="mb-2 text-[11px] text-ink-dim">{index === 0 ? 'Incoming' : 'Outgoing'} handle controls the continuation when extending this endpoint.</p>
+          )}
+          {selected.manual && selected.handleInType && selected.handleOutType && selected.handleInType !== selected.handleOutType && (
+            <p className="mb-2 text-[11px] capitalize text-ink-dim">Incoming: {selected.handleInType} · Outgoing: {selected.handleOutType}</p>
+          )}
+          <Row label="Tangent">
+            <Segmented
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'vector', label: 'Vector' },
+                { value: 'aligned', label: 'Aligned' },
+                { value: 'free', label: 'Free' },
+              ]}
+              value={(() => { if (selected.manual && selected.handleInType && selected.handleOutType && selected.handleInType !== selected.handleOutType) return ''; const mode = anchorTangentMode(selected); return mode === 'smooth' || mode === 'mirrored' ? 'aligned' : mode === 'broken' || mode === 'corner' ? 'free' : mode })()}
+              onChange={(v) => path.setAnchorsTangent(selectedAnchorIds, v as TangentMode)}
             />
           </Row>
-        )}
+          <Row label="Height">
+            <Slider
+              value={selected.position[1]}
+              onChange={(y) => path.setAnchorsHeight(selectedAnchorIds, y)}
+              min={-10}
+              max={10}
+              step={0.1}
+              format={meters}
+            />
+          </Row>
+          {!multi && (
+            <Row label="Position">
+              <XYZInput
+                value={selected.position}
+                onChange={(axis, v) => {
+                  const next = [...selected.position] as Vec3
+                  next[axis] = v
+                  path.updateAnchorPosition(selected.id, next)
+                }}
+              />
+            </Row>
+          )}
+          {!multi && (
+            <>
+              <label className="my-2 flex items-center gap-2 text-[11px] text-ink-dim">
+                <input type="checkbox" checked={selected.manual && selected.mirrored} onChange={e => path.setAnchorTangent(selected.id, e.target.checked ? 'mirrored' : 'aligned')} /> Mirror handle lengths
+              </label>
+              <div className="my-2 flex gap-1.5">
+                <PanelButton label="Pull In" title="Then drag the selected point to pull its incoming handle" onClick={() => path.setPendingHandle('in')} />
+                <PanelButton label="Pull Out" title="Then drag the selected point to pull its outgoing handle" onClick={() => path.setPendingHandle('out')} />
+              </div>
+              {pendingHandle && <p role="status" className="mb-2 text-[11px] text-ink-dim">Drag the point to pull its {pendingHandle === 'in' ? 'incoming' : 'outgoing'} handle.</p>}
+              <Row label="Handle In">
+                <XYZInput
+                  value={selected.handleIn}
+                  onChange={(axis, v) => {
+                    const next = [...selected.handleIn] as Vec3
+                    next[axis] = v
+                    path.setHandle(selected.id, 'in', next, false)
+                  }}
+                />
+              </Row>
+              <Row label="Handle Out">
+                <XYZInput
+                  value={selected.handleOut}
+                  onChange={(axis, v) => {
+                    const next = [...selected.handleOut] as Vec3
+                    next[axis] = v
+                    path.setHandle(selected.id, 'out', next, false)
+                  }}
+                />
+              </Row>
+            </>
+          )}
+          <PanelButton
+            label={multi ? 'Delete Points' : 'Delete Point'}
+            tone="danger"
+            onClick={() => path.removeAnchors(selectedAnchorIds)}
+          />
+        </Section>
+      )}
+      <Section title={active?.name || (isCamera ? 'Camera Path' : 'Path')}>
+        <Row label="Name">
+          <input
+            value={active?.name ?? ''}
+            onChange={(e) => path.renamePath(activePathId, e.target.value)}
+            className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
+          />
+        </Row>
         {isCamera && (
           <div className="grid grid-cols-2 gap-1.5">
             {PRESETS.map((p) => (
@@ -689,11 +761,17 @@ function PathSections() {
             onClick={() => useEditorStore.getState().setTool('pen')}
           />
         )}
-        <Row label="Curves">
+        {!closed && anchors.length > 0 && (
+          <div className="mb-2 flex gap-1.5">
+            <PanelButton label="Continue start" onClick={() => { useEditorStore.getState().setTool('pen'); path.selectAnchor(anchors[0].id) }} />
+            <PanelButton label="Continue end" onClick={() => { useEditorStore.getState().setTool('pen'); path.selectAnchor(anchors.at(-1)!.id) }} />
+          </div>
+        )}
+        <Row label="Auto rounding">
           <Slider value={rounding} onChange={path.setRounding} format={pct} />
         </Row>
         <Row label="Height">
-          <Slider value={pathHeight} onChange={path.setPathHeight} min={0.2} max={10} step={0.1} format={meters} />
+          <Slider value={pathHeight} onChange={path.setPathHeight} min={-10} max={10} step={0.1} format={meters} />
         </Row>
         <Row label="Closed">
           <Segmented
@@ -746,83 +824,7 @@ function PathSections() {
         )}
       </Section>
 
-      {selected && (
-        <Section title={multi ? `${selectedAnchorIds.length} points` : `Point ${index + 1}`}>
-          <Row label="Tangent">
-            <Segmented
-              options={[
-                { value: 'auto', label: 'Auto' },
-                { value: 'smooth', label: 'Smooth' },
-                { value: 'corner', label: 'Corner' },
-                { value: 'broken', label: 'Broken' },
-              ]}
-              value={anchorTangentMode(selected)}
-              onChange={(v) => path.setAnchorsTangent(selectedAnchorIds, v as TangentMode)}
-            />
-          </Row>
-          <Row label="Height">
-            <Slider
-              value={selected.position[1]}
-              onChange={(y) => path.setAnchorsHeight(selectedAnchorIds, y)}
-              min={0.2}
-              max={10}
-              step={0.1}
-              format={meters}
-            />
-          </Row>
-          {!multi && (
-            <Row label="Position">
-              <XYZInput
-                value={selected.position}
-                onChange={(axis, v) => {
-                  const next = [...selected.position] as Vec3
-                  next[axis] = v
-                  path.updateAnchorPosition(selected.id, next)
-                }}
-              />
-            </Row>
-          )}
-          {!multi && selected.manual && (
-            <>
-              <Row label="Handles">
-                <Segmented
-                  options={[
-                    { value: 'mirrored', label: 'Mirrored' },
-                    { value: 'broken', label: 'Broken' },
-                  ]}
-                  value={selected.mirrored ? 'mirrored' : 'broken'}
-                  onChange={(v) => path.setHandle(selected.id, 'out', selected.handleOut, v === 'broken')}
-                />
-              </Row>
-              <Row label="Handle In">
-                <XYZInput
-                  value={selected.handleIn}
-                  onChange={(axis, v) => {
-                    const next = [...selected.handleIn] as Vec3
-                    next[axis] = v
-                    path.setHandle(selected.id, 'in', next, false)
-                  }}
-                />
-              </Row>
-              <Row label="Handle Out">
-                <XYZInput
-                  value={selected.handleOut}
-                  onChange={(axis, v) => {
-                    const next = [...selected.handleOut] as Vec3
-                    next[axis] = v
-                    path.setHandle(selected.id, 'out', next, false)
-                  }}
-                />
-              </Row>
-            </>
-          )}
-          <PanelButton
-            label={multi ? 'Delete Points' : 'Delete Point'}
-            tone="danger"
-            onClick={() => path.removeAnchors(selectedAnchorIds)}
-          />
-        </Section>
-      )}
+
     </>
   )
 }
@@ -1335,7 +1337,7 @@ function CameraOptionSection() {
         >
           {paths.map((path) => (
             <option key={path.id} value={path.id}>
-              {path.id === CAMERA_PATH_ID ? 'Camera Path' : path.name}
+              {path.name}
             </option>
           ))}
         </select>
@@ -1355,8 +1357,7 @@ function CameraOptionSection() {
           label="New path"
           onClick={() => {
             const id = usePathStore.getState().createPath(`${active.name} path`)
-            useRigStore.getState().setCameraPath(id)
-            useEditorStore.getState().select('camera-path')
+            activateFollowedPath(id)
           }}
         />
       </div>
@@ -1564,8 +1565,7 @@ export function DesignInspector() {
 
       {tool === 'pen' && (
         <div className="border-b border-line/60 bg-accent/10 px-3 py-2 text-[11px] leading-relaxed text-ink">
-          <span className="font-medium text-accent">Pen:</span> click to add a point;
-          click and drag to curve it. Click the 1st point to close the loop.{' '}
+          <span className="font-medium text-accent">Pen:</span> click to add; drag points or handles to edit. Ctrl-click a segment to insert. Alt-drag a point to pull a handle.{' '}
           <kbd>Enter</kbd>/<kbd>Esc</kbd> to finish.
         </div>
       )}

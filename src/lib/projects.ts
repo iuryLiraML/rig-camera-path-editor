@@ -2,6 +2,7 @@ import { useProjectStore, type CustomSkill, type DirectorChatEntry, type SavedPr
 import { useSceneStore, makeSceneId } from '../state/useSceneStore'
 import { applyRigSnapshot, getRigSnapshot, useRigStore, type RigSnapshot } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore, type MotionPath } from '../state/usePathStore'
+import { cameraAnchorCount } from '../state/cameraPathLink'
 import { useEditorStore } from '../state/useEditorStore'
 import { useAgentStore } from '../state/useAgentStore'
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
@@ -13,7 +14,7 @@ import {
 } from '../state/useCameraOptionsStore'
 import { idbDelete, idbGet, idbGetAll, idbPut, STORES } from './idb'
 import { CloudConflictError, createCloudProject, isTeamCloudApp, listCloudProjects } from './cloud/client'
-import { hydrateCloudProject, syncActiveProjectToCloud } from './cloud/sync'
+import { hydrateCloudProject, syncActiveProjectToCloud, syncProjectToCloud } from './cloud/sync'
 import { liveSceneMetas, loadSceneFromMetas, readLegacyMetas, sweepOrphanBuffers, type ObjectMeta } from './sceneIO'
 import { hydrateEnvironmentFromRecord, loadLiveEnvironmentBuffer } from './environmentJobs'
 import type { ProjectEnvironment, ProjectMeshAsset } from './environment'
@@ -456,6 +457,22 @@ async function refreshProjectList() {
   return records
 }
 
+/** Replace a Scene's paths, including transient anchor selection, before restoring its cameras. */
+function restoreScenePaths(paths?: MotionPath[], drawPlaneY = 1.2) {
+  usePathStore.setState({
+    paths: paths?.length
+      ? JSON.parse(JSON.stringify(paths))
+      : [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
+    activePathId: CAMERA_PATH_ID,
+    selectedAnchorRefs: [],
+    primaryAnchorRef: null,
+    selectedAnchorId: null,
+    selectedAnchorIds: [],
+    selectedHandle: 'none',
+    drawPlaneY,
+  })
+}
+
 function applyRecord(record: ProjectRecord) {
   const scene = activeSceneOf(record)
   useProjectStore.getState().loadProject({
@@ -475,15 +492,7 @@ function applyRecord(record: ProjectRecord) {
   })
   // restore the whole path collection first, then let the rig snapshot
   // upsert the camera path (keeps old records without `paths` working)
-  usePathStore.setState({
-    paths: scene.paths?.length
-      ? JSON.parse(JSON.stringify(scene.paths))
-      : [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
-    activePathId: CAMERA_PATH_ID,
-    selectedAnchorId: null,
-    selectedAnchorIds: [],
-    selectedHandle: 'none',
-  })
+  restoreScenePaths(scene.paths, scene.rig.drawPlaneY)
   useCameraOptionsStore
     .getState()
     .loadOptions(scene.cameraOptions, scene.activeCameraOptionId, scene.rig)
@@ -611,16 +620,7 @@ export async function initializeBlankProjectSession() {
       folderId: null,
     })
     hydrateEnvironmentFromRecord({})
-    usePathStore.setState({
-      paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
-      activePathId: CAMERA_PATH_ID,
-      selectedAnchorRefs: [],
-      primaryAnchorRef: null,
-      selectedAnchorId: null,
-      selectedAnchorIds: [],
-      selectedHandle: 'none',
-      drawPlaneY: emptyRig.drawPlaneY,
-    })
+    restoreScenePaths(undefined, emptyRig.drawPlaneY)
     useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
     await loadSceneFromMetas([], true)
     restoreDirectorChat()
@@ -841,19 +841,26 @@ export function createScene(name = 'New scene') {
   return serializeProjectTransition(() => createSceneNow(name))
 }
 
-export async function renameScene(sceneId: string, name: string) {
+export async function renameScene(sceneId: string, name: string, projectId?: string) {
   const next = name.trim() || 'Untitled scene'
   const store = useProjectStore.getState()
-  if (store.activeSceneId === sceneId) {
+  const targetProjectId = projectId ?? store.projectId
+  const isActiveProject = Boolean(targetProjectId) && store.projectId === targetProjectId
+
+  if (isActiveProject && store.activeSceneId === sceneId) {
     store.setSceneName(next)
     await saveActiveProject()
+    await refreshProjectList()
     return
   }
-  const record = await getProjectRecord(store.projectId)
+  const record = await getProjectRecord(targetProjectId)
   if (!record) return
   const scenes = record.scenes.map((s) => (s.id === sceneId ? { ...s, name: next } : s))
   await idbPut(STORES.projects, { ...record, scenes, updatedAt: Date.now() })
-  useProjectStore.getState().setScenes(sceneSummaries(scenes))
+  if (isActiveProject) {
+    useProjectStore.getState().setScenes(sceneSummaries(scenes))
+  }
+  await refreshProjectList()
 }
 
 async function deleteSceneNow(sceneId: string) {
@@ -924,6 +931,7 @@ async function createProjectNow(name: string, saveCurrent: boolean, folderId: st
   localStorage.setItem(ACTIVE_KEY, id)
   await loadSceneFromMetas([], true) // fresh scene with the sample shape
   const emptyRig = makeEmptyRigSnapshot()
+  restoreScenePaths(undefined, emptyRig.drawPlaneY)
   applyRigSnapshot(emptyRig)
   useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
   useEditorStore.getState().select(null)
@@ -1044,7 +1052,7 @@ export async function captureThumbnail(maxWidth = 360): Promise<Blob | null> {
 }
 
 export async function saveCurrentAsShot() {
-  if ((usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors.length ?? 0) < 2) {
+  if (cameraAnchorCount() < 2) {
     useSceneStore.getState().showNotice('Create a camera path before saving a shot')
     return
   }
@@ -1063,7 +1071,7 @@ export async function saveCurrentAsShot() {
   }
   project.addShot(shot)
   useEditorStore.getState().setActiveShotId(shot.id)
-  useSceneStore.getState().showNotice(`"${shot.name}" saved — it is in Sequence`)
+  useSceneStore.getState().showNotice(`"${shot.name}" saved — it is in Storyboard`)
 }
 
 /** Restore a saved take onto the current camera. Does not spawn a new option. */
@@ -1077,12 +1085,106 @@ export function applyShot(shot: Shot) {
 }
 
 export function loadShot(shot: Shot) {
-  useCameraOptionsStore.getState().createOption(shot.name, shot.rig)
   applyShot(shot)
   const editor = useEditorStore.getState()
   editor.setAppView('editor')
   editor.select('camera-path')
   useSceneStore.getState().showNotice(`"${shot.name}" loaded`)
+}
+
+export function duplicateShotAsCameraOption(shot: Shot) {
+  const id = useCameraOptionsStore.getState().createOption(shot.name, shot.rig)
+  applyShot(shot)
+  useEditorStore.getState().select('cinema-camera')
+  useSceneStore.getState().showNotice(`"${shot.name}" duplicated as a camera option`)
+  return id
+}
+
+export async function goToProjectsHome() {
+  try {
+    await flushActiveProject()
+    if (useSaveStatusStore.getState().status === 'dirty') {
+      useSceneStore.getState().showNotice('Could not save. Stay in the editor and try again.')
+      return false
+    }
+    useEditorStore.getState().setAppView('projects')
+    return true
+  } catch (error) {
+    useSceneStore.getState().showNotice(
+      error instanceof Error ? error.message : 'Could not save. Stay in the editor and try again.',
+    )
+    return false
+  }
+}
+
+export async function listUnsyncedProjects(): Promise<{ id: string; name: string }[]> {
+  if (!isCloudFirst()) return []
+  const records = await idbGetAll<ProjectRecord>(STORES.projects)
+  return records
+    .filter((record) => !record.cloudUpdatedAt)
+    .map((record) => ({ id: record.id, name: record.name }))
+}
+
+export async function downloadProjectJson(id: string) {
+  const record = await idbGet<ProjectRecord>(STORES.projects, id)
+  if (!record) return
+  const blob = new Blob([JSON.stringify(record)], { type: 'application/json' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${record.name.replace(/[^\w.-]+/g, '_') || 'project'}.json`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+/** Flush, try to sync, then wipe — or park a no-default dialog when copies are unsynced. */
+export async function beginSignOut() {
+  const auth = useCloudAuthStore.getState()
+  if (auth.status !== 'signed-in' || !auth.session) return
+  await flushActiveProject({ createIfMissing: false })
+  try {
+    await syncActiveProjectToCloud()
+  } catch (error) {
+    console.error('Cloud sync before sign-out failed', error)
+  }
+  const unsynced = await listUnsyncedProjects()
+  if (unsynced.length === 0) {
+    await auth.signOut()
+    return
+  }
+  useCloudAuthStore.getState().setPendingSignOut(unsynced)
+}
+
+function dropPendingSignOut(id: string) {
+  const pending = useCloudAuthStore.getState().pendingSignOut
+  if (!pending) return
+  const next = pending.filter((project) => project.id !== id)
+  if (next.length === 0) {
+    void useCloudAuthStore.getState().signOut()
+    return
+  }
+  useCloudAuthStore.getState().setPendingSignOut(next)
+}
+
+/** Upload one parked local copy, then sign out when none remain. */
+export async function uploadUnsyncedProject(id: string) {
+  if (useProjectStore.getState().projectId === id) {
+    await flushActiveProject({ createIfMissing: false })
+  }
+  await syncProjectToCloud(id)
+  dropPendingSignOut(id)
+}
+
+/** Download one parked local copy, then sign out when none remain. */
+export async function backupUnsyncedProject(id: string) {
+  await downloadProjectJson(id)
+  dropPendingSignOut(id)
+}
+
+/** Discard one parked local copy, then sign out when none remain. */
+export async function discardUnsyncedProject(id: string) {
+  await deleteProject(id)
+  dropPendingSignOut(id)
 }
 
 // ---------------------------------------------------------------------------

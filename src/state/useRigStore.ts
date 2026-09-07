@@ -26,6 +26,7 @@ import { DEFAULT_EASE, easeForSmoothness, type EaseKind } from '../lib/easing'
 import { clampShotDuration, DEFAULT_SHOT_FPS, normalizeShotFps, type ShotFps } from '../lib/timeView'
 import { CAMERA_PATH_ID, makeAnchor, usePathStore, type MotionPath, type PathAnchor } from './usePathStore'
 import type { PathSpace } from '../lib/pathSpace'
+import { followedPathSnapshot } from './cameraPathLookup'
 
 export type { PathAnchor } from './usePathStore'
 export type LookAtMode = 'target' | 'path-tangent' | 'free'
@@ -260,7 +261,7 @@ export interface RigSnapshot {
 }
 
 interface RigState {
-  /** the path the cinema camera follows (always CAMERA_PATH_ID) */
+  /** the path the cinema camera follows */
   cameraPathId: string
   duration: number
   /** Composition timebase. Duration stays in seconds when this changes. */
@@ -619,13 +620,13 @@ export const useRigStore = create<RigState>()((set, get) => ({
 
       exportJSON: (): string => {
         const s = get()
-        const cam = usePathStore.getState().getPath(CAMERA_PATH_ID)
+        const followed = followedPathSnapshot()
         return JSON.stringify(
           {
             version: 5,
-            anchors: cam?.anchors ?? [],
-            closed: cam?.closed ?? false,
-            rounding: cam?.rounding ?? 0.8,
+            anchors: followed.anchors,
+            closed: followed.closed,
+            rounding: followed.rounding,
             duration: s.duration,
             fps: s.fps,
             ease: s.ease,
@@ -717,23 +718,23 @@ try {
 /** camera rig snapshot — bundles the camera path so shots/JSON stay self-contained */
 export function getRigSnapshot(): RigSnapshot {
   const s = useRigStore.getState()
-  const cam = usePathStore.getState().getPath(CAMERA_PATH_ID)
+  const followed = followedPathSnapshot()
   return JSON.parse(
     JSON.stringify({
-      anchors: cam?.anchors ?? [],
-      closed: cam?.closed ?? false,
+      anchors: followed.anchors,
+      closed: followed.closed,
       drawPlaneY: usePathStore.getState().drawPlaneY,
       duration: s.duration,
       fps: s.fps,
       smoothness: smoothnessForEase(s.ease),
       ease: s.ease,
-      rounding: cam?.rounding ?? 0.8,
+      rounding: followed.rounding,
       loop: s.loop,
       lookAtMode: s.lookAtMode,
       target: s.target,
       roll: s.roll,
       fov: s.fov,
-      pathId: s.cameraPathId,
+      pathId: followed.pathId,
       progressKeys: s.progressKeys,
       fovKeys: s.fovKeys,
       rollKeys: s.rollKeys,

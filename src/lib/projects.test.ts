@@ -9,6 +9,7 @@ import { CAMERA_PATH_ID, makeAnchor, usePathStore } from '../state/usePathStore'
 import { useRigStore } from '../state/useRigStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { LEGACY_META_KEY } from './sceneIO'
 
 const memory = new Map<string, { id: string; name: string; [key: string]: unknown }>()
@@ -29,6 +30,7 @@ vi.mock('./idb', () => ({
 vi.mock('./cloud/sync', () => ({
   hydrateCloudProject: vi.fn(),
   syncActiveProjectToCloud: vi.fn(async () => undefined),
+  syncProjectToCloud: vi.fn(async () => undefined),
 }))
 
 vi.mock('./cloud/client', async (importOriginal) => {
@@ -43,6 +45,8 @@ vi.mock('./cloud/client', async (importOriginal) => {
 import {
   AUTOSAVE_MS,
   bootProjects,
+  createProject,
+  switchProject,
   flushActiveProject,
   installPersistFlush,
   liveBufferKeys,
@@ -50,9 +54,15 @@ import {
   saveActiveProject,
   scheduleAutosave,
   switchScene,
+  goToProjectsHome,
+  beginSignOut,
+  discardUnsyncedProject,
+  backupUnsyncedProject,
+  uploadUnsyncedProject,
   type ProjectRecord,
 } from './projects'
 import { idbGet, idbGetAll, idbPut, STORES } from './idb'
+import { syncProjectToCloud } from './cloud/sync'
 import { makeEmptyRigSnapshot } from '../state/useCameraOptionsStore'
 
 beforeEach(() => {
@@ -99,6 +109,21 @@ afterEach(() => {
 })
 
 describe('saveActiveProject', () => {
+  it('creates an independent Scene without copying another project’s paths', async () => {
+    const anchor = makeAnchor([8, 2, 4])
+    const oldPathId = usePathStore.getState().createPath('Previous project path')
+    usePathStore.getState().setPathData(oldPathId, { anchors: [anchor] })
+    await saveActiveProject()
+    const oldProjectId = useProjectStore.getState().projectId
+
+    const newId = await createProject('Independent')
+    expect(usePathStore.getState().paths.map((path) => path.id)).toEqual([CAMERA_PATH_ID])
+    const record = await idbGet<ProjectRecord>(STORES.projects, newId)
+    expect(record?.scenes[0]?.paths?.map((path) => path.id)).toEqual([CAMERA_PATH_ID])
+
+    await switchProject(oldProjectId)
+    expect(usePathStore.getState().getPath(oldPathId)?.anchors).toEqual([anchor])
+  })
   it('creates a local untitled project when the id is empty', async () => {
     await saveActiveProject()
     const id = useProjectStore.getState().projectId
@@ -456,7 +481,7 @@ describe('non-cloud boot', () => {
     expect(useProjectStore.getState().projectList).toEqual([])
     expect(useEditorStore.getState().appView).toBe('editor')
     expect(usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors).toEqual([])
-    expect(useSceneStore.getState().objects).toHaveLength(1)
+    expect(useSceneStore.getState().objects).toHaveLength(0)
 
     window.dispatchEvent(new Event('pagehide'))
     await vi.waitFor(() => expect(useSaveStatusStore.getState().status).toBe('saved'))
@@ -482,6 +507,117 @@ describe('non-cloud boot', () => {
     expect(preserved.scenes[0].sceneMeta.map((meta) => meta.name)).toContain('Legacy object')
     expect(useProjectStore.getState().projectList).toHaveLength(1)
     expect(useProjectStore.getState().projectId).toBe('')
-    expect(useSceneStore.getState().objects).toHaveLength(1)
+    expect(useSceneStore.getState().objects).toHaveLength(0)
+  })
+})
+
+describe('goToProjectsHome', () => {
+  it('opens Projects after a successful save', async () => {
+    useProjectStore.setState({ projectId: 'proj-home', name: 'Home' })
+    useEditorStore.setState({ appView: 'editor' })
+    expect(await goToProjectsHome()).toBe(true)
+    expect(useEditorStore.getState().appView).toBe('projects')
+  })
+
+  it('stays in the editor when the save fails', async () => {
+    useProjectStore.setState({ projectId: 'proj-home', name: 'Home' })
+    useEditorStore.setState({ appView: 'editor' })
+    vi.mocked(idbPut).mockRejectedValueOnce(new Error('quota'))
+    expect(await goToProjectsHome()).toBe(false)
+    expect(useEditorStore.getState().appView).toBe('editor')
+    vi.mocked(idbPut).mockImplementation(async (_store, value) => {
+      const record = value as { id: string; name: string }
+      memory.set(record.id, record)
+    })
+  })
+})
+
+describe('beginSignOut', () => {
+  afterEach(() => {
+    useCloudAuthStore.setState({
+      status: 'signed-out',
+      session: null,
+      accessToken: null,
+      pendingSignOut: null,
+    })
+  })
+
+  it('does not wipe when there is no cloud session', async () => {
+    const signOut = vi.fn()
+    useCloudAuthStore.setState({
+      status: 'signed-out',
+      session: null,
+      signOut,
+    })
+    await beginSignOut()
+    expect(signOut).not.toHaveBeenCalled()
+  })
+
+  it('parks a dialog when local copies have not reached the cloud', async () => {
+    const signOut = vi.fn()
+    useCloudAuthStore.setState({
+      status: 'signed-in',
+      accessToken: 'tok',
+      session: { userId: 'u', tenantId: 't', email: 'a@b.c', name: 'A', picture: null },
+      pendingSignOut: null,
+      signOut,
+    })
+    memory.set('proj-local', { id: 'proj-local', name: 'Local only' })
+    useProjectStore.setState({ projectId: 'proj-local', name: 'Local only' })
+    await beginSignOut()
+    expect(signOut).not.toHaveBeenCalled()
+    expect(useCloudAuthStore.getState().pendingSignOut).toEqual([{ id: 'proj-local', name: 'Local only' }])
+  })
+
+  it('uploads one parked project without treating the rest as the active copy', async () => {
+    const signOut = vi.fn()
+    useCloudAuthStore.setState({
+      status: 'signed-in',
+      accessToken: 'tok',
+      session: { userId: 'u', tenantId: 't', email: 'a@b.c', name: 'A', picture: null },
+      pendingSignOut: [
+        { id: 'proj-a', name: 'Alpha' },
+        { id: 'proj-b', name: 'Beta' },
+      ],
+      signOut,
+    })
+    memory.set('proj-a', { id: 'proj-a', name: 'Alpha' })
+    memory.set('proj-b', { id: 'proj-b', name: 'Beta' })
+    useProjectStore.setState({ projectId: 'proj-b', name: 'Beta' })
+    await uploadUnsyncedProject('proj-a')
+    expect(vi.mocked(syncProjectToCloud)).toHaveBeenCalledWith('proj-a')
+    expect(signOut).not.toHaveBeenCalled()
+    expect(useCloudAuthStore.getState().pendingSignOut).toEqual([{ id: 'proj-b', name: 'Beta' }])
+  })
+
+  it('signs out after the last parked copy is discarded', async () => {
+    const signOut = vi.fn()
+    useCloudAuthStore.setState({
+      status: 'signed-in',
+      accessToken: 'tok',
+      session: { userId: 'u', tenantId: 't', email: 'a@b.c', name: 'A', picture: null },
+      pendingSignOut: [{ id: 'proj-local', name: 'Local only' }],
+      signOut,
+    })
+    memory.set('proj-local', { id: 'proj-local', name: 'Local only' })
+    useProjectStore.setState({ projectId: 'other', name: 'Other', projectList: [] })
+    await discardUnsyncedProject('proj-local')
+    expect(memory.has('proj-local')).toBe(false)
+    expect(signOut).toHaveBeenCalled()
+  })
+
+  it('treats Download JSON as resolving that parked copy', async () => {
+    const signOut = vi.fn()
+    useCloudAuthStore.setState({
+      status: 'signed-in',
+      accessToken: 'tok',
+      session: { userId: 'u', tenantId: 't', email: 'a@b.c', name: 'A', picture: null },
+      pendingSignOut: [{ id: 'proj-local', name: 'Local only' }],
+      signOut,
+    })
+    memory.set('proj-local', { id: 'proj-local', name: 'Local only' })
+    await backupUnsyncedProject('proj-local')
+    expect(memory.has('proj-local')).toBe(true)
+    expect(signOut).toHaveBeenCalled()
   })
 })

@@ -1,3 +1,5 @@
+import { useSolidSelectionStore } from '../state/useSolidSelectionStore'
+import { selectSolidSurface, SolidSelection } from './SolidSelection'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { useCursor } from '@react-three/drei'
@@ -26,15 +28,18 @@ import {
 import { repairImportedShading } from '../lib/prepareImport'
 import { usePathStore } from '../state/usePathStore'
 import { pickKindOf } from '../lib/viewportPick'
+import { eventShiftHeld } from '../lib/pointerNdc'
 import { isSceneEditing } from '../lib/workspaceChrome'
 import { writeObjectTransform } from '../lib/autoKey'
-import { isObjectGizmoActive, useEditorStore } from '../state/useEditorStore'
+import { isObjectGizmoActive, isTechMode, useEditorStore } from '../state/useEditorStore'
+import { collapsePointerPick, pointerPickMember } from '../state/selectionPick'
 import { useRigStore } from '../state/useRigStore'
 import { useSceneStore, type SceneObject, type Vec3 } from '../state/useSceneStore'
 import { GizmoControls } from './GizmoControls'
-import { isTechMode } from './RenderPasses'
 import { capturePointer, releasePointer } from './path/PenTool'
 import { applyAssetDisplay } from '../lib/assetDisplay'
+import { PATH_SELECTED_HALO } from '../lib/pathVisual'
+import { objectSelectionChrome } from '../lib/selectionChrome'
 
 const DEG = Math.PI / 180
 const RAD = 180 / Math.PI
@@ -111,7 +116,24 @@ function ObjectGizmo({
   )
 }
 
+function ignoreRaycast() {}
+
+function ObjectSelectionHalo({ target }: { target: React.RefObject<THREE.Group | null> }) {
+  const helper = useMemo(() => new THREE.BoxHelper(new THREE.Object3D(), PATH_SELECTED_HALO), [])
+  useFrame(() => {
+    const obj = target.current
+    if (!obj || !obj.visible) {
+      helper.visible = false
+      return
+    }
+    helper.visible = true
+    helper.setFromObject(obj)
+  })
+  return <primitive object={helper} raycast={ignoreRaycast} />
+}
+
 function ObjectNode({ object }: { object: SceneObject }) {
+  const solidMode = useSolidSelectionStore((s) => s.mode)
   const objectContextActive = useEditorStore((s) => isObjectGizmoActive(s.selection, object.id))
   const selectedMember = useEditorStore((s) => s.selectionIds.includes(`obj:${object.id}`))
   const dummyBone = useEditorStore((s) => (s.selection === `obj:${object.id}` ? s.dummyBone : null))
@@ -158,12 +180,14 @@ function ObjectNode({ object }: { object: SceneObject }) {
     applyDummyBonePose(object.root, object.bonePose, object.boneTranslate)
   }, [object.rigKind, object.playClips, object.bonePose, object.boneTranslate, object.root])
 
-  // hover/selection feedback: a subtle grayscale lift, no color involved
+  const chrome = objectSelectionChrome({ selected: selectedMember && editing })
+
+  // hover lift only — selection uses overlay chrome, not clay emissive
   useEffect(() => {
-    const emissive = !editing ? 0 : selectedMember ? 0.1 : hovered ? 0.05 : 0
+    const emissive = !editing ? 0 : selectedMember ? chrome.clayEmissive : hovered ? 0.05 : 0
     object.material.emissive.setScalar(emissive)
     object.wireframeMaterial.emissive.setScalar(emissive)
-  }, [object.material, object.wireframeMaterial, selectedMember, hovered, editing])
+  }, [object.material, object.wireframeMaterial, selectedMember, hovered, editing, chrome.clayEmissive])
 
   useEffect(() => {
     const group = groupRef.current
@@ -271,6 +295,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
     grab: Vec3
     startClient: [number, number]
     moved: boolean
+    collapseTo: `obj:${string}` | null
   } | null>(null)
 
   const cameraDirOf = (e: ThreeEvent<PointerEvent>): Vec3 => {
@@ -297,6 +322,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
       grab: subtract3(pos, hit),
       startClient: [e.clientX, e.clientY],
       moved: false,
+      collapseTo: meshDrag.current?.collapseTo ?? null,
     }
     return true
   }
@@ -349,13 +375,19 @@ function ObjectNode({ object }: { object: SceneObject }) {
           }
           if (useEditorStore.getState().lockedIds.includes(object.id)) {
             e.stopPropagation()
-            editor.select(`obj:${object.id}`)
+            pointerPickMember(`obj:${object.id}`, { additive: eventShiftHeld(e) })
             return
           }
           e.stopPropagation()
-          const alreadySelected = editor.selection === `obj:${object.id}`
-          editor.select(`obj:${object.id}`)
-          if (object.rigKind === 'dummy' && alreadySelected) {
+          if (object.primitive && useSolidSelectionStore.getState().mode !== 'body' && e.object instanceof THREE.Mesh && e.faceIndex != null) {
+            pointerPickMember(`obj:${object.id}`, { additive: false })
+            selectSolidSurface(object, e.object, e.faceIndex, e.point)
+            return
+          }
+          const member = `obj:${object.id}` as const
+          const alreadySelected = editor.selectionIds.includes(member)
+          const action = pointerPickMember(member, { additive: eventShiftHeld(e) })
+          if (object.rigKind === 'dummy' && alreadySelected && action === 'replace') {
             const limb = dummyBoneFromObject(e.object) ?? dummyBoneFromHit(object.root, e.point)
             if (limb) {
               editor.setDummyBone(limb)
@@ -369,6 +401,9 @@ function ObjectNode({ object }: { object: SceneObject }) {
           if (!g) return
           const pos: Vec3 = [g.position.x, g.position.y, g.position.z]
           if (!beginMeshDrag(e, pos, objectDragMode(e.shiftKey))) return
+          if (meshDrag.current) {
+            meshDrag.current.collapseTo = action === 'keep-group' ? member : null
+          }
           capturePointer(e)
         }}
         onPointerMove={(e) => {
@@ -378,8 +413,10 @@ function ObjectNode({ object }: { object: SceneObject }) {
         }}
         onPointerUp={(e) => {
           if (!meshDrag.current) return
+          const collapseTo = !meshDrag.current.moved ? meshDrag.current.collapseTo : null
           meshDrag.current = null
           releasePointer(e)
+          if (collapseTo) collapsePointerPick(collapseTo)
         }}
         onPointerOver={(e) => {
           e.stopPropagation()
@@ -388,7 +425,11 @@ function ObjectNode({ object }: { object: SceneObject }) {
         onPointerOut={() => setHovered(false)}
       >
         <primitive key={object.root.uuid} object={object.root} />
+        {object.primitive && selectedMember && editing && !recording && !tech && <SolidSelection object={object} />}
       </group>
+      {chrome.outline && showSceneObjects && !objectHidden && (
+        <ObjectSelectionHalo target={groupRef} />
+      )}
       {objectContextActive &&
         object.rigKind === 'dummy' &&
         editing &&
@@ -428,7 +469,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
             }}
           />
         )}
-      {objectContextActive && tool === 'select' && editing && !tech && !follow && !locked && !dummyBone && (
+      {objectContextActive && (!object.primitive || solidMode === 'body') && tool === 'select' && editing && !tech && !follow && !locked && !dummyBone && (
         <ObjectGizmo
           targetRef={groupRef}
           mode={gizmoMode}

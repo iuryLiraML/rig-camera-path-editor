@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { primitiveThumbUrl } from '../lib/primitiveThumb'
-import type { PrimitiveKind } from '../lib/primitiveGeometry'
+import { primitiveThumbUrl, figureThumbUrl } from '../lib/primitiveThumb'
+import { primitiveSpecKey, type PrimitiveKind, type PrimitiveSpec } from '../lib/primitiveGeometry'
 import type { FigureSex } from '../lib/dummyCharacter'
 
 /** Immediate shape so tiles never share a cube placeholder while WebGL thumbs load. */
@@ -65,8 +65,8 @@ function Fallback({ kind }: { kind: PrimitiveKind }) {
   )
 }
 
-/** Clay silhouettes so Female / Male do not look like empty primitive slots. */
-export function FigurePreview({ sex }: { sex: FigureSex }) {
+/** Warming fallback only; the final thumbnail comes from the bundled GLB. */
+function FigureFallback({ sex }: { sex: FigureSex }) {
   return (
     <svg
       viewBox="0 0 64 64"
@@ -101,26 +101,26 @@ export function FigurePreview({ sex }: { sex: FigureSex }) {
   )
 }
 
-export function PrimitivePreview({ kind }: { kind: PrimitiveKind }) {
-  const [src, setSrc] = useState<string | null>(null)
-
+export function FigurePreview({ sex }: { sex: FigureSex }) {
+  const [preview, setPreview] = useState<{ sex: FigureSex; url: string } | null>(null)
   useEffect(() => {
-    setSrc(primitiveThumbUrl(kind))
-  }, [kind])
+    let cancelled = false
+    void figureThumbUrl(sex).then((url) => { if (!cancelled && url) setPreview({ sex, url }) })
+    return () => { cancelled = true }
+  }, [sex])
+  return preview?.sex === sex
+    ? <img src={preview.url} alt="" data-figure-preview={sex} data-thumb-source="bundled-glb" className="h-full w-full object-contain" />
+    : <FigureFallback sex={sex} />
+}
 
-  return (
-    <div className="relative flex h-full w-full items-center justify-center">
-      <div className="relative h-full w-full">
-        <Fallback kind={kind} />
-        {src && (
-          <img
-            src={src}
-            alt=""
-            data-primitive-preview={kind}
-            className="absolute inset-0 h-full w-full object-contain"
-          />
-        )}
-      </div>
-    </div>
-  )
+export function PrimitivePreview({ kind, spec }: { kind: PrimitiveKind; spec?: PrimitiveSpec }) {
+  const key = spec ? primitiveSpecKey(spec) : kind
+  const [preview, setPreview] = useState<{ key: string; url: string } | null>(null)
+  useEffect(() => {
+    const url = primitiveThumbUrl(spec ?? kind)
+    if (url) setPreview({ key, url })
+  }, [kind, key, spec])
+  return preview?.key === key
+    ? <img src={preview.url} alt="" data-primitive-preview={kind} className="h-full w-full object-contain" />
+    : <Fallback kind={kind} />
 }

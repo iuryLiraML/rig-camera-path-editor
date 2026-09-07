@@ -1,11 +1,12 @@
 /**
- * Agent runtime. A provider-neutral conversation is kept by the store and
- * converted here into the Anthropic Messages API wire format.
+ * Multi-provider agent runtime. A provider-neutral conversation is kept by the
+ * store; each client converts it to its own wire format. Anthropic uses the
+ * Messages API; Kimi uses the OpenAI Chat Completions API.
  *
- * One auth mode: every request goes through the same-origin /api proxy, which
- * attaches the deployment's shared site key server-side (see
- * api/_lib/agentApi.ts). There is deliberately no browser-side key — nothing
- * in the UI can set one, so a vendor credential never reaches the client.
+ * Two auth modes per request: a personal key typed in Settings goes directly
+ * to the vendor from the browser (BYOK); with no personal key the request goes
+ * through the same-origin /api proxy, which attaches the deployment's shared
+ * site key server-side (see api/_lib/agentApi.ts).
  */
 
 import { serverHasKey } from './serverKeys'
@@ -35,10 +36,11 @@ export type AgentMessage =
   | { role: 'assistant'; text: string; toolCalls: ToolCall[] }
   | { role: 'tool'; toolCallId: string; name: string; content: string }
 
-export type ProviderKind = 'anthropic'
+export type ProviderKind = 'anthropic' | 'kimi'
 
 export interface ProviderConfig {
   kind: ProviderKind
+  apiKey: string
   model: string
   /** send image parts (chat photo, or viewport screenshot when no photo) */
   vision: boolean
@@ -49,48 +51,71 @@ export interface ModelOption {
   label: string
 }
 
-export const PROVIDERS: Record<ProviderKind, { label: string; defaultModel: string }> = {
-  anthropic: { label: 'Anthropic', defaultModel: 'claude-opus-4-6' },
+export const PROVIDERS: Record<ProviderKind, { label: string; defaultModel: string; keyHint: string }> = {
+  anthropic: { label: 'Anthropic', defaultModel: 'claude-opus-4-6', keyHint: 'sk-ant-…' },
+  kimi: { label: 'Kimi', defaultModel: 'kimi-k3', keyHint: 'Moonshot API key' },
 }
 
 /**
- * URL for one vendor call. Always the same-origin proxy, which attaches the
- * site key itself, so no credential is ever held in the browser. Exported for
- * tests.
+ * URL + auth headers for one vendor call. A personal key means direct BYOK;
+ * an empty key means the same-origin proxy, which adds the site key itself.
+ * Exported for tests.
  */
-export function providerRequest(kind: ProviderKind, path: string): { url: string } {
-  return { url: `/api/${kind}/${path}` }
+export function providerRequest(
+  kind: ProviderKind,
+  apiKey: string,
+  path: string,
+): { url: string; headers: Record<string, string> } {
+  const key = apiKey.trim()
+  if (kind === 'anthropic') {
+    return key
+      ? {
+          url: `https://api.anthropic.com/${path}`,
+          headers: {
+            'x-api-key': key,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          },
+        }
+      : { url: `/api/anthropic/${path}`, headers: {} }
+  }
+  return key
+    ? { url: `https://api.moonshot.ai/${path}`, headers: { authorization: `Bearer ${key}` } }
+    : { url: `/api/kimi/${path}`, headers: {} }
 }
 
-/** Can this provider be reached at all — i.e. does the deployment hold a site key? */
-export function providerUsable(kind: ProviderKind): boolean {
-  return serverHasKey(kind)
+/** Is there any way to reach this provider — a personal key or a site key? */
+export function providerUsable(kind: ProviderKind, apiKey: string): boolean {
+  return apiKey.trim().length > 0 || serverHasKey(kind)
 }
 
-/**
- * Why the model list failed, when the status makes it knowable. A 404 is not a
- * credential problem — it means the /api proxy route did not match, which is
- * exactly the failure a `[...path]` catch-all produced for multi-segment
- * vendor paths — so blaming the key there sends people to the wrong place.
- */
-function modelsErrorHint(status: number): string {
-  if (status === 401 || status === 403) return " — the deployment's key was rejected"
-  if (status === 404) return ' — the /api proxy route is missing on this deployment'
-  if (status === 503) return ' — no key is configured on this deployment'
-  return ''
-}
+/** Return models usable with the selected provider and account. */
+export async function listProviderModels(
+  kind: ProviderKind,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<ModelOption[]> {
+  if (!providerUsable(kind, apiKey)) return []
 
-/** The models the deployment's key is entitled to use. Empty without a site key. */
-export async function listProviderModels(kind: ProviderKind, signal?: AbortSignal): Promise<ModelOption[]> {
-  if (!providerUsable(kind)) return []
+  if (kind === 'anthropic') {
+    const req = providerRequest(kind, apiKey, 'v1/models?limit=100')
+    const res = await fetch(req.url, { signal, headers: req.headers })
+    if (!res.ok) throw new Error(`Unable to load Anthropic models (${res.status})`)
+    const body = (await res.json()) as { data?: { id?: string; display_name?: string }[] }
+    return (body.data ?? [])
+      .filter((model): model is { id: string; display_name?: string } => Boolean(model.id))
+      .map((model) => ({ id: model.id, label: model.display_name || model.id }))
+  }
 
-  const req = providerRequest(kind, 'v1/models?limit=100')
-  const res = await fetch(req.url, { signal })
-  if (!res.ok) throw new Error(`Unable to load Anthropic models (${res.status})${modelsErrorHint(res.status)}`)
-  const body = (await res.json()) as { data?: { id?: string; display_name?: string }[] }
+  // Kimi (Moonshot) is OpenAI-compatible, so /v1/models returns the live list
+  const req = providerRequest(kind, apiKey, 'v1/models')
+  const res = await fetch(req.url, { signal, headers: req.headers })
+  if (!res.ok) throw new Error(`Unable to load Kimi models (${res.status})`)
+  const body = (await res.json()) as { data?: { id?: string }[] }
   return (body.data ?? [])
-    .filter((model): model is { id: string; display_name?: string } => Boolean(model.id))
-    .map((model) => ({ id: model.id, label: model.display_name || model.id }))
+    .filter((model): model is { id: string } => Boolean(model.id))
+    .map((model) => ({ id: model.id, label: model.id }))
+    .sort((a, b) => a.label.localeCompare(b.label))
 }
 
 // Vision-capable model id patterns per provider. Kept conservative: 'Auto' only
@@ -98,6 +123,7 @@ export async function listProviderModels(kind: ProviderKind, signal?: AbortSigna
 // text-only model rejects image parts with a 400.
 const VISION_PATTERNS: Record<ProviderKind, RegExp> = {
   anthropic: /claude/i,
+  kimi: /vision|-vl\b|latest/i,
 }
 
 /** Heuristic: does this model accept image input? Used by the Auto screenshot mode. */
@@ -179,11 +205,11 @@ async function anthropicTurn(
   signal: AbortSignal | undefined,
   events: AgentEvents | undefined,
 ): Promise<TurnResult> {
-  const req = providerRequest('anthropic', 'v1/messages')
+  const req = providerRequest('anthropic', cfg.apiKey, 'v1/messages')
   const res = await fetch(req.url, {
     method: 'POST',
     signal,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...req.headers },
     body: JSON.stringify({
       model: cfg.model,
       max_tokens: 4096,
@@ -243,6 +269,110 @@ async function anthropicTurn(
 }
 
 // ---------------------------------------------------------------------------
+// OpenAI-compatible Chat Completions (OpenRouter, z.ai)
+// ---------------------------------------------------------------------------
+
+function toOpenAIMessages(system: string, messages: AgentMessage[], vision: boolean) {
+  const out: unknown[] = [{ role: 'system', content: system }]
+  for (const m of messages) {
+    if (m.role === 'user') {
+      const stills = vision ? userStills(m) : []
+      if (stills.length > 0) {
+        out.push({
+          role: 'user',
+          content: [
+            { type: 'text', text: m.text },
+            ...stills.map((data) => ({
+              type: 'image_url',
+              image_url: { url: `data:${m.imageMediaType ?? 'image/jpeg'};base64,${data}` },
+            })),
+          ],
+        })
+      } else {
+        out.push({ role: 'user', content: m.text })
+      }
+    } else if (m.role === 'assistant') {
+      const msg: Record<string, unknown> = { role: 'assistant', content: m.text || null }
+      if (m.toolCalls.length > 0) {
+        msg.tool_calls = m.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: { name: tc.name, arguments: JSON.stringify(tc.input ?? {}) },
+        }))
+      }
+      out.push(msg)
+    } else {
+      out.push({ role: 'tool', tool_call_id: m.toolCallId, content: m.content })
+    }
+  }
+  return out
+}
+
+async function openaiTurn(
+  cfg: ProviderConfig,
+  system: string,
+  messages: AgentMessage[],
+  tools: ToolDef[],
+  signal: AbortSignal | undefined,
+  events: AgentEvents | undefined,
+): Promise<TurnResult> {
+  const req = providerRequest(cfg.kind, cfg.apiKey, 'v1/chat/completions')
+  const res = await fetch(req.url, {
+    method: 'POST',
+    signal,
+    headers: { 'content-type': 'application/json', ...req.headers },
+    body: JSON.stringify({
+      model: cfg.model,
+      messages: toOpenAIMessages(system, messages, cfg.vision),
+      tools: tools.map((t) => ({
+        type: 'function',
+        function: { name: t.name, description: t.description, parameters: t.input_schema },
+      })),
+      tool_choice: 'auto',
+      stream: true,
+    }),
+  })
+  if (!res.ok) throw new Error(`${PROVIDERS[cfg.kind].label} ${res.status}: ${(await res.text().catch(() => '')).slice(0, 300)}`)
+
+  let text = ''
+  let stopReason = 'stop'
+  // tool calls stream in fragments keyed by index
+  const acc: { id: string; name: string; args: string }[] = []
+
+  await readSSE(res, (payload) => {
+    if (payload === '[DONE]') return
+    const evt = JSON.parse(payload)
+    const choice = evt.choices?.[0]
+    if (!choice) return
+    const delta = choice.delta ?? {}
+    if (typeof delta.content === 'string' && delta.content) {
+      text += delta.content
+      events?.onText?.(delta.content)
+    }
+    for (const tc of delta.tool_calls ?? []) {
+      const i = tc.index ?? 0
+      acc[i] ??= { id: '', name: '', args: '' }
+      if (tc.id) acc[i].id = tc.id
+      if (tc.function?.name) acc[i].name = tc.function.name
+      if (tc.function?.arguments) acc[i].args += tc.function.arguments
+    }
+    if (choice.finish_reason) stopReason = choice.finish_reason
+  })
+
+  const toolCalls: ToolCall[] = acc.filter(Boolean).map((t, i) => {
+    let input: unknown = {}
+    try {
+      input = t.args ? JSON.parse(t.args) : {}
+    } catch {
+      input = {}
+    }
+    return { id: t.id || `call_${i}`, name: t.name, input }
+  })
+
+  return { text, toolCalls, stopReason: stopReason === 'tool_calls' ? 'tool_use' : stopReason }
+}
+
+// ---------------------------------------------------------------------------
 // Shared SSE reader — calls `onData` with each `data:` payload string
 // ---------------------------------------------------------------------------
 
@@ -287,10 +417,11 @@ export async function runAgent(opts: {
 }> {
   const messages = [...opts.messages]
   const maxTurns = opts.maxTurns ?? 32
+  const turn = opts.provider.kind === 'anthropic' ? anthropicTurn : openaiTurn
 
   for (let i = 0; i < maxTurns; i++) {
     opts.events?.onTurn?.(i + 1, maxTurns)
-    const { text, toolCalls, stopReason } = await anthropicTurn(
+    const { text, toolCalls, stopReason } = await turn(
       opts.provider,
       opts.system,
       messages,

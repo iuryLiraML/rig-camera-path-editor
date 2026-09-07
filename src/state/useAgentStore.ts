@@ -33,6 +33,8 @@ export interface ChatEntry {
 interface AgentState {
   // settings (persisted)
   provider: ProviderKind
+  /** API key per provider */
+  keys: Record<ProviderKind, string>
   /** model id per provider */
   models: Record<ProviderKind, string>
   visionMode: VisionMode
@@ -54,6 +56,7 @@ interface AgentState {
   liftAttachmentKind: 'photo' | null
 
   setProvider: (kind: ProviderKind) => void
+  setKey: (kind: ProviderKind, key: string) => void
   setModel: (kind: ProviderKind, model: string) => void
   setVisionMode: (mode: VisionMode) => void
   setGuidelines: (text: string) => void
@@ -61,7 +64,7 @@ interface AgentState {
   setFalKey: (key: string) => void
   setSamImageVersion: (version: SamImageVersion) => void
   setServerKeys: (keys: ServerKeys) => void
-  /** the deployment holds a site key for the active provider */
+  /** active provider has a usable key */
   hasKey: () => boolean
   hasFalKey: () => boolean
   /** whether the screenshot is actually sent for the active provider/model */
@@ -83,10 +86,10 @@ function persistDirectorChat() {
 /** Turn raw API errors into an actionable hint. */
 function friendlyError(message: string, visionSent: boolean): string {
   if (/\b(401|403|invalid api key|unauthorized|authentication)\b/i.test(message)) {
-    return `${message}\n\nThe deployment's ${PROVIDERS.anthropic.label} key was rejected — it needs to be checked in the Vercel environment variables.`
+    return `${message}\n\nCheck your API key in Settings.`
   }
   if (/\b(429|insufficient balance|no resource package|quota|rate limit|please recharge)\b/i.test(message)) {
-    return `${message}\n\nThis is a billing/quota issue on the ${PROVIDERS.anthropic.label} account behind the deployment's shared key — it is out of credits or hit its rate limit. Wait and retry, or top the account up.`
+    return `${message}\n\nThis is a billing/quota issue on the provider side — your account is out of credits or hit its rate limit. Recharge at the provider's dashboard, switch provider in Settings, or wait and retry.`
   }
   if (visionSent && /image|vision|multimodal|not support|unsupported|modality/i.test(message)) {
     return `${message}\n\nThis model may not accept the viewport screenshot — set Screenshot to Off (or Auto) in Settings.`
@@ -100,12 +103,21 @@ let abortController: AbortController | null = null
 
 const defaultModels: Record<ProviderKind, string> = {
   anthropic: PROVIDERS.anthropic.defaultModel,
+  kimi: PROVIDERS.kimi.defaultModel,
+}
+
+const emptyKeys: Record<ProviderKind, string> = { anthropic: '', kimi: '' }
+
+/** Providers were reduced to Anthropic + Kimi; anything else falls back. */
+function normaliseProvider(value: unknown): ProviderKind {
+  return value === 'anthropic' || value === 'kimi' ? value : 'anthropic'
 }
 
 export const useAgentStore = create<AgentState>()(
   persist(
     (set, get) => ({
       provider: 'anthropic',
+      keys: { ...emptyKeys },
       models: { ...defaultModels },
       visionMode: 'auto',
       guidelines: '',
@@ -122,6 +134,7 @@ export const useAgentStore = create<AgentState>()(
       liftAttachmentKind: null,
 
       setProvider: (provider) => set({ provider }),
+      setKey: (kind, key) => set((s) => ({ keys: { ...s.keys, [kind]: key } })),
       setModel: (kind, model) => set((s) => ({ models: { ...s.models, [kind]: model } })),
       setVisionMode: (visionMode) => set({ visionMode }),
       setGuidelines: (guidelines) => set({ guidelines }),
@@ -137,7 +150,10 @@ export const useAgentStore = create<AgentState>()(
       },
       setServerKeys: (serverKeys) => set({ serverKeys }),
 
-      hasKey: () => get().serverKeys[get().provider],
+      hasKey: () => {
+        const s = get()
+        return (s.keys[s.provider] ?? '').trim().length > 0 || s.serverKeys[s.provider]
+      },
       hasFalKey: () => {
         const s = get()
         return s.falKey.trim().length > 0 || s.serverKeys.fal
@@ -154,7 +170,7 @@ export const useAgentStore = create<AgentState>()(
       },
 
       sendMessage: async (text, image) => {
-        const { provider, models, forcedSkill, status, falKey, samImageVersion } = get()
+        const { provider, keys, models, forcedSkill, status, falKey, samImageVersion } = get()
         const { guidelines, skills, directorLessons } = useProjectStore.getState()
         const trimmed = text.trim()
         if (image && isVideoFile(image)) {
@@ -169,12 +185,11 @@ export const useAgentStore = create<AgentState>()(
         }
         const media = image ?? getLiftAttachment()
         syncFalSettings(falKey, samImageVersion)
-        // every call goes through the same-origin /api proxy, which holds the
-        // key server-side — so with no site key there is nothing to fall back on
-        if (!get().serverKeys[provider]) {
-          set({
-            error: `No ${PROVIDERS[provider].label} key is configured on this deployment, so the Director cannot run. Set ANTHROPIC_API_KEY in the Vercel project and redeploy.`,
-          })
+        // empty key is fine when the deployment has a site key — providers.ts
+        // then routes the call through the same-origin /api proxy
+        const apiKey = (keys[provider] ?? '').trim()
+        if (!apiKey && !get().serverKeys[provider]) {
+          set({ error: `Add your ${PROVIDERS[provider].label} API key in Settings first.` })
           return
         }
         const modelId = (models[provider] ?? '').trim() || PROVIDERS[provider].defaultModel
@@ -187,6 +202,7 @@ export const useAgentStore = create<AgentState>()(
         })
         const config: ProviderConfig = {
           kind: provider,
+          apiKey,
           model: modelId,
           vision,
         }
@@ -319,11 +335,12 @@ export const useAgentStore = create<AgentState>()(
     }),
     {
       name: 'rig-agent-settings',
-      version: 6,
+      version: 5,
       partialize: (s) => {
         const signedIn = Boolean(localStorage.getItem(CLOUD_ACCESS_TOKEN_KEY)?.trim())
         return {
           provider: s.provider,
+          keys: signedIn ? emptyKeys : s.keys,
           models: s.models,
           visionMode: s.visionMode,
           guidelines: s.guidelines,
@@ -331,26 +348,42 @@ export const useAgentStore = create<AgentState>()(
           samImageVersion: s.samImageVersion,
         }
       },
-      /**
-       * v6 removes browser-side LLM keys and the Kimi provider: the Director
-       * now runs only on the deployment's Anthropic site key. Any persisted
-       * `keys` blob is dropped rather than migrated — leaving it would keep a
-       * vendor credential in localStorage that no UI can see or clear.
-       */
-      migrate: (persisted) => {
+      migrate: (persisted, version) => {
         const p = (persisted ?? {}) as Record<string, unknown>
+        if (version < 2) {
+          return {
+            provider: 'anthropic' as ProviderKind,
+            keys: { ...emptyKeys, anthropic: (p.anthropicKey as string) ?? '' },
+            models: { ...defaultModels, anthropic: (p.model as string) ?? defaultModels.anthropic },
+            visionMode: 'auto' as VisionMode,
+            guidelines: (p.guidelines as string) ?? '',
+            falKey: '',
+            samImageVersion: '3.1' as SamImageVersion,
+          }
+        }
         if ('vision' in p && !('visionMode' in p)) {
           p.visionMode = p.vision === false ? 'off' : 'auto'
           delete p.vision
         }
+        // v4 dropped OpenRouter and z.ai: keep only the keys/models that still
+        // map to a supported provider, so stale ones cannot be selected.
+        const persistedKeys = (p.keys ?? {}) as Record<string, string>
         const persistedModels = (p.models ?? {}) as Record<string, string>
+        const samVersion = p.samImageVersion === '3.0' ? '3.0' : '3.1'
         return {
-          provider: 'anthropic' as ProviderKind,
-          models: { anthropic: persistedModels.anthropic || defaultModels.anthropic },
+          provider: normaliseProvider(p.provider),
+          keys: {
+            anthropic: persistedKeys.anthropic ?? '',
+            kimi: persistedKeys.kimi ?? '',
+          },
+          models: {
+            anthropic: persistedModels.anthropic || defaultModels.anthropic,
+            kimi: persistedModels.kimi || defaultModels.kimi,
+          },
           visionMode: (p.visionMode as VisionMode) ?? 'auto',
           guidelines: (p.guidelines as string) ?? '',
           falKey: typeof p.falKey === 'string' ? p.falKey : '',
-          samImageVersion: (p.samImageVersion === '3.0' ? '3.0' : '3.1') as SamImageVersion,
+          samImageVersion: samVersion as SamImageVersion,
         }
       },
       onRehydrateStorage: () => (state) => {

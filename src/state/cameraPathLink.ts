@@ -1,6 +1,11 @@
 import { CAMERA_PATH_ID, usePathStore, type MotionPath } from './usePathStore'
 import { useRigStore } from './useRigStore'
 import { useCameraOptionsStore } from './useCameraOptionsStore'
+import { useEditorStore } from './useEditorStore'
+import { cameraPath } from './cameraPathLookup'
+import type { SelectPointerIntent } from '../lib/viewportPick'
+
+export { cameraPath, followedPathSnapshot } from './cameraPathLookup'
 
 /**
  * The link between a camera and the path it follows.
@@ -14,13 +19,6 @@ import { useCameraOptionsStore } from './useCameraOptionsStore'
  * Everything that used to ask "does `camera-path` have anchors?" asks these
  * helpers instead, so the coupling lives in one file rather than in thirteen.
  */
-
-/** The path the active camera follows, or the camera path if the link dangles. */
-export function cameraPath(): MotionPath | undefined {
-  const paths = usePathStore.getState().paths
-  const id = useRigStore.getState().cameraPathId
-  return paths.find((path) => path.id === id) ?? paths.find((path) => path.id === CAMERA_PATH_ID)
-}
 
 /** Anchor count of the followed path — the gate for scrubbing, export and the PiP. */
 export function cameraAnchorCount(): number {
@@ -83,6 +81,59 @@ export function otherCamerasOnPath(pathId: string, exceptOptionId: string): stri
       (option) => option.id !== exceptOptionId && (option.rig.pathId ?? CAMERA_PATH_ID) === pathId,
     )
     .map((option) => option.name)
+}
+
+/**
+ * Make `pathId` the edit-active path without changing which path the active camera follows.
+ * Plain click replaces the selection. Shift+click adds or removes that path member.
+ */
+export function activateEditPath(pathId: string, additive = false): void {
+  const paths = usePathStore.getState()
+  if (!paths.paths.some((path) => path.id === pathId)) return
+  const editor = useEditorStore.getState()
+  const member = `path:${pathId}` as const
+  if (additive) {
+    const selected = editor.selectionIds.includes(member)
+    editor.selectMany(
+      selected
+        ? editor.selectionIds.filter((id) => id !== member)
+        : [...editor.selectionIds, member],
+    )
+    return
+  }
+  if (paths.activePathId !== pathId) paths.setActivePath(pathId)
+  editor.select('camera-path')
+}
+
+/** Apply a Select-tool pointer decision. Path clicks never write follow. */
+export function applySelectPointerIntent(intent: SelectPointerIntent, additive = false): void {
+  if (intent.action !== 'select-path') return
+  const pathId = intent.id.startsWith('path:') ? intent.id.slice(5) : intent.id
+  activateEditPath(pathId, additive)
+}
+
+/**
+ * Make `pathId` the unique editing target and the path the active camera follows.
+ * Preview, easing and playblast already consume `cameraPathId`. Explicit follow only.
+ */
+export function activateFollowedPath(pathId: string): void {
+  const paths = usePathStore.getState()
+  if (!paths.paths.some((path) => path.id === pathId)) return
+  paths.setActivePath(pathId)
+  const rig = useRigStore.getState()
+  rig.setCameraPath(pathId)
+  if (rig.cameraKind !== 'path') rig.setCameraKind('path')
+  useCameraOptionsStore.getState().captureActive()
+  useEditorStore.getState().select('camera-path')
+}
+
+/**
+ * A Free camera has no follow. The first pen point on a path starts follow.
+ * Pen must not retarget a camera that already follows another path.
+ */
+export function followActivePathIfFree(): void {
+  if (useRigStore.getState().cameraKind !== 'static') return
+  activateFollowedPath(usePathStore.getState().activePathId)
 }
 
 /**

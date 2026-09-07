@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useProjectStore, type Shot } from '../state/useProjectStore'
 import { useEditorStore } from '../state/useEditorStore'
-import { loadShot, playAnimatic } from '../lib/projects'
+import { loadShot, playAnimatic, duplicateShotAsCameraOption } from '../lib/projects'
 import { PlayIcon } from './icons'
 
 function ShotCard({
@@ -84,6 +84,14 @@ function ShotCard({
             &#215;
           </button>
         </div>
+        <button
+          type="button"
+          title="Duplicate as camera option"
+          onClick={() => duplicateShotAsCameraOption(shot)}
+          className="text-[10px] text-ink-dim hover:text-ink"
+        >
+          Duplicate as camera option
+        </button>
       </div>
     </div>
   )

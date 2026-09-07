@@ -96,11 +96,20 @@ export function applyDeleteShortcut(
 }
 
 export const SHORTCUT_ROWS: { keys: string; action: string }[] = [
+  { keys: 'MMB drag', action: 'Orbit the viewport (Blender navigation)' },
+  { keys: 'Shift+MMB drag', action: 'Pan the viewport' },
+  { keys: 'Ctrl+MMB drag / Wheel', action: 'Zoom the viewport' },
+  { keys: 'LMB click / drag', action: 'Select / edit objects and curve points' },
   { keys: 'I', action: 'Key the focused property at the playhead' },
   { keys: 'Delete', action: 'Remove that key (then the object if none)' },
   { keys: 'WASD / arrows', action: 'Fly the cinema camera (look-through)' },
   { keys: 'Space', action: 'Play / pause' },
-  { keys: 'P', action: 'Pen — place path points (Compose)' },
+  { keys: 'P', action: 'Pen — create and edit Bézier curves (Compose)' },
+  { keys: '1 / 2 / 3 / 4', action: 'Handles: Auto / Vector / Aligned / Free' },
+  { keys: 'Ctrl+click curve', action: 'Insert point while preserving the curve' },
+  { keys: 'Alt+drag point / handle', action: 'Pull handle / move handle independently' },
+  { keys: 'X / Y / Z during drag', action: 'World axis constraint; Shift excludes that axis (plane)' },
+  { keys: 'Enter / Escape', action: 'Finish Pen / cancel active drag' },
   { keys: 'D', action: 'Draw a new camera path (Compose)' },
   {
     keys: 'Shift+drag',

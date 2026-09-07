@@ -13,7 +13,30 @@ import {
   setHistoryClockForTests,
   setHistorySuspended,
   undo,
+  redo,
+  beginHistoryTransaction,
 } from './history'
+import { CAMERA_PATH_ID, makeAnchor, usePathStore } from '../state/usePathStore'
+import { useRigStore } from '../state/useRigStore'
+import { writeStaticPose } from './autoKey'
+
+describe('camera pose history', () => {
+  it('undoes and redoes a Free camera gesture without animation keys', () => {
+    useRigStore.setState({
+      cameraKind: 'static',
+      staticPose: { position: [1, 2, 3], rotation: [0, 0, 0] },
+      staticPosXKeys: [], staticPosYKeys: [], staticPosZKeys: [],
+      staticRotXKeys: [], staticRotYKeys: [], staticRotZKeys: [],
+    })
+    resetHistory()
+    writeStaticPose({ position: [9, 8, 7], rotation: [0.1, 0.2, 0.3] })
+    expect(historyIsDirty()).toBe(true)
+    expect(undo()).toBe(true)
+    expect(useRigStore.getState().staticPose).toEqual({ position: [1, 2, 3], rotation: [0, 0, 0] })
+    expect(redo()).toBe(true)
+    expect(useRigStore.getState().staticPose).toEqual({ position: [9, 8, 7], rotation: [0.1, 0.2, 0.3] })
+  })
+})
 
 afterEach(() => {
   useSceneStore.setState({ bgColor: VIEWPORT_BG_DEFAULT_TOP, objects: [] })
@@ -93,6 +116,21 @@ describe('history vs per-object clay color', () => {
 })
 
 describe('history suspend', () => {
+  it('cancels a handle gesture without consuming the preceding undo step', () => {
+    usePathStore.getState().setPath([[0, 0, 0], [3, 0, 0]], false)
+    resetHistory()
+    const path = usePathStore.getState()
+    const id = path.getPath(path.activePathId)!.anchors[0].id
+    path.setHandle(id, 'out', [1, 2, 3], true)
+    const finish = beginHistoryTransaction()
+    path.setHandle(id, 'out', [4, 5, 6], true)
+    finish(true)
+    expect(path.getPath(path.activePathId)!.anchors[0].handleOut).toEqual([1, 2, 3])
+    expect(undo()).toBe(true)
+    expect(path.getPath(path.activePathId)!.anchors[0].manual).toBe(false)
+    expect(redo()).toBe(true)
+    expect(path.getPath(path.activePathId)!.anchors[0].handleOut).toEqual([1, 2, 3])
+  })
   it('groups edits into one undo step', () => {
     resetHistory()
     const before = useSceneStore.getState().bgColor
@@ -103,5 +141,34 @@ describe('history suspend', () => {
     expect(useSceneStore.getState().bgColor).toBe('#222222')
     expect(undo()).toBe(true)
     expect(useSceneStore.getState().bgColor).toBe(before)
+  })
+})
+
+describe('history vs path anchors', () => {
+  it('restores deleted anchors on the same path', () => {
+    const a = makeAnchor([0, 1, 0])
+    const b = makeAnchor([2, 1, 0])
+    usePathStore.setState({
+      paths: [
+        {
+          id: CAMERA_PATH_ID,
+          name: 'Camera Path',
+          closed: false,
+          rounding: 0.8,
+          anchors: [a, b],
+        },
+      ],
+      activePathId: CAMERA_PATH_ID,
+      selectedAnchorRefs: [],
+      primaryAnchorRef: null,
+      selectedAnchorId: null,
+      selectedAnchorIds: [],
+    })
+    resetHistory()
+    usePathStore.getState().removeAnchors([a.id, b.id])
+    expect(usePathStore.getState().paths[0]?.anchors).toEqual([])
+    expect(undo()).toBe(true)
+    const path = usePathStore.getState().paths.find((item) => item.id === CAMERA_PATH_ID)
+    expect(path?.anchors.map((anchor) => anchor.id)).toEqual([a.id, b.id])
   })
 })

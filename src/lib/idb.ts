@@ -1,13 +1,14 @@
 /** Shared IndexedDB access — one database, versioned stores. */
 
 const DB_NAME = 'rig-db'
-/** v4: folders store. v3 shipped in some sessions without creating it. */
-const DB_VERSION = 4
+/** v5: asset clay thumbs. v4: folders store. v3 shipped without folders. */
+const DB_VERSION = 5
 
 export const STORES = {
   buffers: 'model-buffers',
   projects: 'projects',
   folders: 'folders',
+  assetThumbs: 'asset-thumbs',
 } as const
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -23,6 +24,7 @@ export function ensureStores(db: {
   if (!db.objectStoreNames.contains(STORES.folders)) {
     db.createObjectStore(STORES.folders, { keyPath: 'id' })
   }
+  if (!db.objectStoreNames.contains(STORES.assetThumbs)) db.createObjectStore(STORES.assetThumbs)
 }
 
 function storesReady(db: { objectStoreNames: { contains: (name: string) => boolean } }) {

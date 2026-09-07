@@ -790,7 +790,7 @@ export async function installHighMeshBuffer(objectId: string, buffer: ArrayBuffe
 }
 
 /** Clears the current scene and rebuilds it from metadata + stored buffers. */
-export async function loadSceneFromMetas(metas: ObjectMeta[], seedIfEmpty = true) {
+export async function loadSceneFromMetas(metas: ObjectMeta[], _seedIfEmpty = false) {
   disposeSceneObjectDisplays(useSceneStore.getState().objects)
   objectGraveyard.clear()
   useSceneStore.setState({ objects: [] })
@@ -848,9 +848,6 @@ export async function loadSceneFromMetas(metas: ObjectMeta[], seedIfEmpty = true
     useSceneStore.getState().showNotice(denseLoadParkManyCopy(parked.length))
   }
 
-  if (seedIfEmpty && useSceneStore.getState().objects.length === 0) {
-    useSceneStore.getState().addObject(makeDefaultKnotObject())
-  }
 }
 
 /** Legacy metas from before the projects system (for first-boot migration). */
@@ -887,7 +884,7 @@ export async function resetScene() {
   useCameraOptionsStore.getState().loadOptions(undefined, undefined, emptyRig)
   disposeSceneObjectDisplays(useSceneStore.getState().objects)
   useSceneStore.setState({
-    objects: [makeDefaultKnotObject()],
+    objects: [],
     bgColor: VIEWPORT_BG_DEFAULT_TOP,
     showGrid: true,
     lightIntensity: 1.4,

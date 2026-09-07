@@ -91,7 +91,7 @@ export function CameraBar({ embedded = false }: { embedded?: boolean }) {
         </button>
         <button
           type="button"
-          title="Shot list"
+          title="Storyboard"
           onClick={() => useEditorStore.getState().setComposeDock('sequence')}
           className="flex h-7 w-7 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
         >

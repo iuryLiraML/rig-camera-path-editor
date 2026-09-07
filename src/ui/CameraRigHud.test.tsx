@@ -210,15 +210,21 @@ describe('CameraRigHud', () => {
 })
 
 describe('ViewportFooter', () => {
+  function renderFooter() {
+    const result = render(<ViewportFooter />)
+    const views = result.queryByRole('button', { name: 'Views' })
+    if (views) fireEvent.click(views)
+    return result
+  }
   it('hides Clay / Depth / Outline while looking through', () => {
     useEditorStore.setState({ cameraView: true })
-    const { container } = render(<ViewportFooter />)
+    const { container } = renderFooter()
     expect(container.textContent).toBe('')
   })
 
   it('shows Clay in the editor', () => {
     useEditorStore.setState({ cameraView: false })
-    const { container } = render(<ViewportFooter />)
+    const { container } = renderFooter()
     expect(container.textContent).toContain('Clay')
   })
 
@@ -229,7 +235,7 @@ describe('ViewportFooter', () => {
       cameraView: false,
       workspaceMode: 'compose',
     })
-    const { container } = render(<ViewportFooter />)
+    const { container } = renderFooter()
     expect(container.textContent).toContain('Look through')
     expect(container.textContent).not.toContain('Match view')
   })
@@ -237,7 +243,7 @@ describe('ViewportFooter', () => {
   it('offers Look through and Match view on a static camera', () => {
     useRigStore.setState({ cameraKind: 'static', lookAtMode: 'target' })
     useEditorStore.setState({ selection: 'cinema-camera', cameraView: false })
-    const { container } = render(<ViewportFooter />)
+    const { container } = renderFooter()
     expect(container.textContent).toContain('Look through')
     expect(container.textContent).toContain('Match view')
     expect(container.textContent).not.toContain('orange rings')
@@ -248,13 +254,13 @@ describe('ViewportFooter', () => {
   it('offers Show look-at when the aim handle is off', () => {
     useRigStore.setState({ cameraKind: 'static', lookAtMode: 'free' })
     useEditorStore.setState({ cameraView: false })
-    const { container } = render(<ViewportFooter />)
+    const { container } = renderFooter()
     expect(container.textContent).toContain('Show look-at')
   })
 
   it('shows an eye toggle in Outline to hide scene objects', () => {
     useEditorStore.setState({ cameraView: false, viewMode: 'outline', showSceneObjects: true })
-    const { getByTitle, queryByTitle, rerender } = render(<ViewportFooter />)
+    const { getByTitle, queryByTitle, rerender } = renderFooter()
     expect(getByTitle('Hide scene objects')).toBeTruthy()
     fireEvent.click(getByTitle('Hide scene objects'))
     expect(useEditorStore.getState().showSceneObjects).toBe(false)

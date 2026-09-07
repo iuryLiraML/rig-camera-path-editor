@@ -165,22 +165,22 @@ async function uploadDirtyAssets(
   return assets
 }
 
-export async function syncActiveProjectToCloud(options?: { ifMatch?: string }): Promise<void> {
+export async function syncProjectToCloud(
+  projectId: string,
+  options?: { ifMatch?: string },
+): Promise<void> {
   const accessToken = useCloudAuthStore.getState().accessToken
   if (!accessToken || useCloudAuthStore.getState().status !== 'signed-in') return
-
-  const { projectId, name, workflow } = useProjectStore.getState()
-  if (!projectId) return
 
   const record = await idbGet<ProjectRecord>(STORES.projects, projectId)
   if (!record) return
 
-  const payload = defaultWorkflowPayload(workflow)
+  const payload = defaultWorkflowPayload(record.workflow)
   const editorStateSeed = toCloudEditorState(record, emptyAssetMap())
 
   if (!record.cloudProjectId) {
     const created = await createCloudProject(accessToken, {
-      name,
+      name: record.name,
       workflowVersion: payload.workflowVersion,
       workflow: payload.workflow,
       editorState: editorStateSeed,
@@ -202,6 +202,12 @@ export async function syncActiveProjectToCloud(options?: { ifMatch?: string }): 
   await pushSnapshot(accessToken, record.cloudProjectId, record, ifMatch)
 }
 
+export async function syncActiveProjectToCloud(options?: { ifMatch?: string }): Promise<void> {
+  const { projectId } = useProjectStore.getState()
+  if (!projectId) return
+  await syncProjectToCloud(projectId, options)
+}
+
 async function pushSnapshot(
   accessToken: string,
   cloudProjectId: string,
@@ -209,21 +215,19 @@ async function pushSnapshot(
   ifMatch: string,
 ): Promise<void> {
   const assets = await uploadDirtyAssets(accessToken, cloudProjectId, record)
-  const { name, workflow } = useProjectStore.getState()
-  const payload = defaultWorkflowPayload(workflow)
+  const payload = defaultWorkflowPayload(record.workflow)
   const updated = await updateCloudProject(
     accessToken,
     cloudProjectId,
     {
-      name,
+      name: record.name,
       workflow: payload.workflow,
-      editorState: toCloudEditorState({ ...record, name }, assets),
+      editorState: toCloudEditorState(record, assets),
     },
     ifMatch,
   )
   await idbPut(STORES.projects, {
     ...record,
-    name,
     cloudProjectId,
     cloudUpdatedAt: updated.updatedAt,
     bufferAssets: assets.bufferAssets,

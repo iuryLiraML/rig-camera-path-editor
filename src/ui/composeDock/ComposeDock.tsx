@@ -44,7 +44,7 @@ export { TIMELINE_HEIGHT }
 
 function EmptyPathBody() {
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-between gap-4 px-3 py-3">
+    <div className="flex min-h-0 flex-1 flex-col items-start justify-start gap-3 overflow-y-auto px-3 py-3">
       <div className="min-w-0">
         <p className="text-[11px] font-medium text-ink">No camera path yet</p>
         <p className="mt-1 text-[10px] leading-4 text-ink-dim">
@@ -52,7 +52,7 @@ function EmptyPathBody() {
           your own with the pen tool (P).
         </p>
       </div>
-      <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+      <div className="flex w-full shrink-0 flex-wrap items-center gap-1.5">
         {PRESETS.map((preset) => (
           <button
             key={preset.kind}

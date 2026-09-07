@@ -69,7 +69,32 @@ function isTransformControl(object: Object3D): boolean {
   })
 }
 
+/**
+ * Raycaster includes invisible objects. TransformControls keeps pickers for
+ * every mode in the scene, including a large rotation sphere. Only the active
+ * mode's picker is interactive; its parent is intentionally invisible, while
+ * individual handles still use visibility to disable axes facing the camera.
+ */
+function isPickable(object: Object3D): boolean {
+  let activePicker: Object3D | undefined
+  let branch = object
+  for (let node: Object3D | null = object; node; node = node.parent) {
+    const gizmo = node as Object3D & { picker?: Record<string, Object3D>; mode?: string }
+    if (node.type === 'TransformControlsGizmo' && gizmo.picker && gizmo.mode) {
+      activePicker = gizmo.picker[gizmo.mode]
+      if (branch !== activePicker) return false
+      break
+    }
+    branch = node
+  }
+  for (let node: Object3D | null = object; node; node = node.parent) {
+    if (!node.visible && node !== activePicker) return false
+  }
+  return true
+}
+
 export function pickKindOf(object: Object3D): PickKind | null {
+  if (!isPickable(object)) return null
   if (isTransformControlPlane(object)) return null
   if (isTransformControl(object)) return 'gizmo'
   let node: Object3D | null = object
@@ -118,9 +143,7 @@ function takeClosest<T>(hits: TaggedHit<T>[]): TaggedHit<T>[] {
 export function preferTaggedHits<T>(tagged: TaggedHit<T>[]): TaggedHit<T>[] {
   if (tagged.length === 0) return tagged
 
-  const blockers = tagged.filter(
-    (item) => item.kind !== 'env' && item.kind !== 'path-line',
-  )
+  const blockers = tagged.filter((item) => item.kind !== 'env')
   if (blockers.length > 0) {
     tagged = tagged.filter((item) => item.kind !== 'env')
   }
@@ -178,7 +201,7 @@ export function filterViewportHits<T extends { object: Object3D; distance: numbe
   return preferTaggedHits(tagHits(hits)).map((item) => item.hit)
 }
 
-/** True when a left-click should hold orbit (not a fat spline miss). */
+/** True when a left-click should hold orbit. Path-line is not an orbit lock so Select can take the spline. */
 export function hasInteractivePick(
   hits: { object: Object3D; distance: number }[],
   opts?: { orbitThroughEnv?: boolean },
@@ -190,11 +213,49 @@ export function hasInteractivePick(
   })
 }
 
+export type SelectPointerIntent =
+  | { action: 'orbit' }
+  | { action: 'select-object'; id: string }
+  | { action: 'select-path'; id: string }
+
+/** Select-tool decision from tagged hits. Pen keeps `penStrokeIntent`. */
+export function selectPointerIntent<T extends { object: Object3D; distance: number }>(
+  hits: T[],
+): SelectPointerIntent {
+  const first = preferTaggedHits(tagHits(hits))[0]
+  if (!first) return { action: 'orbit' }
+  if (first.kind === 'path-line' && first.id) return { action: 'select-path', id: first.id }
+  if (first.kind === 'object' && first.id) return { action: 'select-object', id: first.id }
+  return { action: 'orbit' }
+}
+
+export type PenStrokeIntent<T> =
+  | { action: 'ignore' }
+  | { action: 'place' }
+  | { action: 'insert'; hit: T }
+
 /**
  * Pen placement listens on the canvas, because `filterViewportHits` drops the
  * unmarked construction plane and a fat path-line would steal the click.
- * Path anchors still win so clicking the first point can close the loop.
+ * A fat ortho path-anchor in the ray must not cancel a closer mesh or empty
+ * click; ignore only when the nearest tagged hit is the cube itself.
+ * Ctrl+insert densifies only when the nearest tagged hit is a path stroke.
  */
-export function penShouldPlace(hits: { object: Object3D; distance: number }[]): boolean {
-  return !tagHits(hits).some((item) => item.kind === 'path-anchor')
+export function penStrokeIntent<T extends { object: Object3D; distance: number }>(
+  hits: T[],
+): PenStrokeIntent<T> {
+  const tagged = tagHits(hits)
+  const nearest = tagged.reduce<TaggedHit<T> | undefined>(
+    (best, item) => (!best || item.distance < best.distance ? item : best),
+    undefined,
+  )
+  if (nearest?.kind === 'path-anchor') return { action: 'ignore' }
+  const line = tagged.find((item) => item.kind === 'path-line')
+  if (line) {
+    const closer = tagged.some(
+      (item) => item.kind !== 'path-line' && item.distance < line.distance,
+    )
+    if (!closer) return { action: 'insert', hit: line.hit }
+  }
+  return { action: 'place' }
 }

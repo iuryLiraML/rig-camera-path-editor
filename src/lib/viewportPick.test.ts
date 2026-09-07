@@ -1,13 +1,15 @@
 import * as THREE from 'three'
+import { TransformControls } from 'three-stdlib'
 import { describe, expect, it, beforeEach } from 'vitest'
 import {
   beginPickClick,
   filterViewportHits,
   hasInteractivePick,
-  penShouldPlace,
+  penStrokeIntent,
   pickKindOf,
   preferTaggedHits,
   resetPickCycle,
+  selectPointerIntent,
   setPickPointer,
   tagHits,
 } from './viewportPick'
@@ -133,8 +135,14 @@ describe('viewportPick', () => {
   })
 
   it('selects the palco when nothing else interactive is on the ray', () => {
-    const tagged = tagHits([hit('env', 'env', 1), hit('path-line', 'path:a', 1.02)])
+    const tagged = tagHits([hit('env', 'env', 1)])
     expect(preferTaggedHits(tagged)[0]?.kind).toBe('env')
+  })
+
+  it('selects a path line instead of the palco when both are on the ray', () => {
+    const tagged = tagHits([hit('env', 'env', 1), hit('path-line', 'path:a', 1.02)])
+    expect(preferTaggedHits(tagged)[0]?.kind).toBe('path-line')
+    expect(preferTaggedHits(tagged)[0]?.id).toBe('path:a')
   })
 
   it('does not treat a lone spline hit as an orbit lock', () => {
@@ -145,6 +153,13 @@ describe('viewportPick', () => {
     expect(hasInteractivePick([hit('gizmo', 'gizmo', 0.5), hit('env', 'env', 1)], { orbitThroughEnv: true })).toBe(
       true,
     )
+  })
+
+  it('lets R3F receive a path-line hit instead of the palco', () => {
+    const line = hit('path-line', 'path:a', 1.02)
+    const env = hit('env', 'env', 1)
+    const filtered = filterViewportHits([env, line])
+    expect(filtered[0]?.object).toBe(line.object)
   })
 
   it('drops unmarked helpers from the R3F hit list', () => {
@@ -160,12 +175,85 @@ describe('viewportPick', () => {
     expect(filtered[0]?.object).toBe(object)
   })
 
-  it('lets the pen place on empty space, meshes and the path stroke, but not on anchors', () => {
+  it('ranks a Pen stroke as place, insert, or ignore from one pick decision', () => {
     const plane = new THREE.Object3D()
-    expect(penShouldPlace([{ object: plane, distance: 1 }])).toBe(true)
-    expect(penShouldPlace([hit('object', 'obj:box', 1), hit('path-line', 'path:a', 1.1)])).toBe(true)
-    expect(penShouldPlace([hit('path-anchor', 'anchor:a', 0.4), hit('object', 'obj:box', 1)])).toBe(
-      false,
+    expect(penStrokeIntent([{ object: plane, distance: 1 }])).toEqual({ action: 'place' })
+    expect(penStrokeIntent([hit('object', 'obj:box', 1), hit('path-line', 'path:a', 1.1)])).toEqual({
+      action: 'place',
+    })
+    expect(penStrokeIntent([hit('path-anchor', 'anchor:a', 0.4), hit('object', 'obj:box', 1)])).toEqual(
+      { action: 'ignore' },
     )
+    expect(penStrokeIntent([hit('object', 'obj:box', 1), hit('path-anchor', 'anchor:a', 8)])).toEqual({
+      action: 'place',
+    })
+    const line = hit('path-line', 'path:a', 1.2)
+    expect(penStrokeIntent([line])).toEqual({ action: 'insert', hit: line })
+    expect(penStrokeIntent([hit('object', 'obj:box', 1), line])).toEqual({ action: 'place' })
+    expect(penStrokeIntent([line, hit('object', 'obj:box', 1.4)])).toEqual({ action: 'insert', hit: line })
+  })
+
+  it('turns a lone path-line hit into select-path', () => {
+    expect(selectPointerIntent([hit('path-line', 'path:a', 1)])).toEqual({
+      action: 'select-path',
+      id: 'path:a',
+    })
+  })
+
+  it('keeps a closer mesh as select-object over a path line', () => {
+    expect(
+      selectPointerIntent([hit('object', 'obj:box', 0.4), hit('path-line', 'path:a', 1.2)]),
+    ).toEqual({ action: 'select-object', id: 'obj:box' })
+    expect(
+      selectPointerIntent([hit('path-line', 'path:a', 1), hit('object', 'obj:box', 1.02)]),
+    ).toEqual({ action: 'select-object', id: 'obj:box' })
+  })
+
+  it('does not let env consume a path line the artist clicked', () => {
+    expect(selectPointerIntent([hit('env', 'env', 1), hit('path-line', 'path:a', 1.02)])).toEqual({
+      action: 'select-path',
+      id: 'path:a',
+    })
+  })
+})
+
+
+describe('real transform control hit regions', () => {
+  function control() {
+    const scene = new THREE.Scene(), object = new THREE.Object3D()
+    scene.add(object)
+    const controls = new TransformControls(new THREE.PerspectiveCamera(), undefined)
+    controls.attach(object)
+    scene.add(controls)
+    return controls
+  }
+
+  it('ignores inactive pickers and helper geometry while preserving the active picker', () => {
+    const controls = control()
+    const gizmo = controls.children.find(o => o.type === 'TransformControlsGizmo')! as THREE.Object3D & {
+      picker: Record<string, THREE.Object3D>; helper: Record<string, THREE.Object3D>
+    }
+    const active = gizmo.picker.translate.children[0]
+    const inactive = gizmo.picker.rotate.children[0]
+    const helper = gizmo.helper.translate.children[0]
+    expect(pickKindOf(active)).toBe('gizmo')
+    expect(pickKindOf(inactive)).toBeNull()
+    expect(pickKindOf(helper)).toBeNull()
+    expect(filterViewportHits([{ object: inactive, distance: 1 }, hit('object', 'other', 2)])[0].object.userData.pickId).toBe('other')
+    expect(hasInteractivePick([{ object: inactive, distance: 1 }])).toBe(false)
+    controls.setMode('rotate')
+    expect(pickKindOf(active)).toBeNull()
+    expect(pickKindOf(inactive)).toBe('gizmo')
+  })
+
+  it('does not pick a hidden object or detached transform control', () => {
+    const controls = control()
+    controls.detach()
+    const gizmo = controls.children.find(o => o.type === 'TransformControlsGizmo')!
+    expect(pickKindOf(gizmo.children[3].children[0])).toBeNull()
+    const parent = new THREE.Group(), h = hit('object', 'hidden', 1)
+    parent.visible = false
+    parent.add(h.object)
+    expect(pickKindOf(h.object)).toBeNull()
   })
 })

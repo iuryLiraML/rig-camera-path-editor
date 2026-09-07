@@ -39,14 +39,16 @@ describe('setAnchorTangent', () => {
 
   it('corner zeroes the handles and marks manual', () => {
     usePathStore.getState().setAnchorTangent(midId(), 'corner')
-    expect(anchorTangentMode(mid())).toBe('corner')
+    expect(anchorTangentMode(mid())).toBe('free')
+    expect(mid().handleIn).toEqual([0, 0, 0])
+    expect(mid().handleOut).toEqual([0, 0, 0])
     expect(mid().manual).toBe(true)
   })
 
   it('smooth seeds mirrored handles from the auto tangent', () => {
     usePathStore.getState().setAnchorTangent(midId(), 'smooth')
     const a = mid()
-    expect(anchorTangentMode(a)).toBe('smooth')
+    expect(anchorTangentMode(a)).toBe('mirrored')
     expect(a.mirrored).toBe(true)
     expect(a.handleIn).toEqual([-a.handleOut[0], -a.handleOut[1], -a.handleOut[2]])
     expect(a.handleOut[0]).not.toBe(0)

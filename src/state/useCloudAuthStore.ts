@@ -8,18 +8,14 @@ import {
   storeProviderCredential,
 } from '../lib/cloud/client'
 import { idbClear } from '../lib/idb'
+import type { ProviderKind } from '../lib/agent/providers'
 import { useAgentStore } from './useAgentStore'
 import { useEditorStore } from './useEditorStore'
 import { useProjectStore } from './useProjectStore'
 
 const TOKEN_KEY = CLOUD_ACCESS_TOKEN_KEY
 
-/**
- * Only Fal. LLM keys were removed from the browser entirely — the Director
- * runs on the deployment's Anthropic site key — so there is no LLM secret left
- * for a user to put in the vault.
- */
-export type VaultProvider = 'fal'
+export type VaultProvider = ProviderKind | 'fal'
 
 export interface CloudSaveConflict {
   projectId: string
@@ -40,16 +36,21 @@ interface CloudAuthState {
   /** id of the encrypted vault credential stored per AI provider (server-side) */
   credentialIds: Partial<Record<VaultProvider, string>>
   saveConflict: CloudSaveConflict | null
+  pendingSignOut: { id: string; name: string }[] | null
   setAccessToken: (token: string | null) => Promise<void>
   bootstrap: () => Promise<void>
   signOut: () => Promise<void>
+  setPendingSignOut: (projects: { id: string; name: string }[] | null) => void
   setSaveConflict: (conflict: CloudSaveConflict | null) => void
   /** store an API key in the encrypted cloud vault; returns the credential id */
   storeCredential: (provider: VaultProvider, secret: string) => Promise<string>
 }
 
 function clearAgentSecrets() {
-  useAgentStore.getState().setFalKey('')
+  const agent = useAgentStore.getState()
+  agent.setKey('anthropic', '')
+  agent.setKey('kimi', '')
+  agent.setFalKey('')
 }
 
 async function hydrateVaultSecrets(accessToken: string) {
@@ -58,9 +59,10 @@ async function hydrateVaultSecrets(accessToken: string) {
   const agent = useAgentStore.getState()
   for (const row of listed) {
     const retrieved = await retrieveOwnCredential(accessToken, row.id)
-    // an LLM credential from before the site-key-only change is ignored, not
-    // applied — there is no longer anywhere in the client to put it
-    if (retrieved.provider === 'fal') {
+    if (retrieved.provider === 'anthropic' || retrieved.provider === 'kimi') {
+      agent.setKey(retrieved.provider, retrieved.secret)
+      credentialIds[retrieved.provider] = retrieved.id
+    } else if (retrieved.provider === 'fal') {
       agent.setFalKey(retrieved.secret)
       credentialIds.fal = retrieved.id
     }
@@ -75,9 +77,14 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
   error: null,
   credentialIds: {},
   saveConflict: null,
+  pendingSignOut: null,
 
   setSaveConflict(conflict) {
     set({ saveConflict: conflict })
+  },
+
+  setPendingSignOut(projects) {
+    set({ pendingSignOut: projects })
   },
 
   async setAccessToken(token) {
@@ -138,6 +145,7 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
       error: null,
       credentialIds: {},
       saveConflict: null,
+      pendingSignOut: null,
     })
   },
 

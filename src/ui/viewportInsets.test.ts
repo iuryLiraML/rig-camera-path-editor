@@ -1,7 +1,10 @@
 import { describe, expect, it } from 'vitest'
+import { directorIsCompact } from '../lib/chromeLayout'
 import {
   chromeBand,
+  chromeSizes,
   clampPipRect,
+  COMPACT_DIRECTOR_DOCK_WIDTH,
   DIRECTOR_DOCK_WIDTH,
   directorDockSlot,
   FOOTER_ROW_HEIGHT,
@@ -81,6 +84,14 @@ describe('viewportInsets', () => {
     expect(insets.centre).not.toBe(WINDOW / 2)
   })
 
+  it('keeps the top row out of every panel, so its controls stay reachable', () => {
+    const closed = viewportInsets('build', WINDOW, false, 900, 240, { showOutliner: false })
+    const open = viewportInsets('build', WINDOW, false, 900, 240, { showOutliner: true })
+    // Panels start at `top`; the row owns the band above it at any panel width.
+    expect(open.top).toBe(closed.top)
+    expect(toolbarSlot().right).toBe(GUTTER)
+  })
+
   it('reserves the top row, so pane chrome cannot land under the Toolbar', () => {
     const insets = viewportInsets('build', WINDOW, false)
     expect(insets.top).toBe(GUTTER + 38 + GUTTER)
@@ -129,12 +140,13 @@ describe('viewportInsets', () => {
     expect(taller.bottom).toBeGreaterThan(compact.bottom)
   })
 
-  it('keeps the toolbar on the right of the free area, left of the Director rail', () => {
+  it('runs the toolbar to the window edge, over the band the Director vacated', () => {
     const insets = viewportInsets('build', WINDOW, false)
-    const slot = toolbarSlot(insets, WINDOW)
     const dock = directorDockSlot(insets)
     const dockLeft = WINDOW - dock.right - dock.width
-    expect(WINDOW - slot.right).toBeLessThanOrEqual(dockLeft)
+    expect(toolbarSlot().right).toBe(GUTTER)
+    // The rail no longer shares the row's band, so overlapping x is fine.
+    expect(WINDOW - toolbarSlot().right).toBeGreaterThan(dockLeft)
   })
 
   it('stops the Visualize review bar before the Director column', () => {
@@ -146,12 +158,8 @@ describe('viewportInsets', () => {
     expect(insets.contentBottom).toBe(insets.bottom + GUTTER)
   })
 
-  it('keeps the Visualize toolbar left of the Director rail', () => {
-    const insets = viewportInsets('visualize', WINDOW, false)
-    const slot = toolbarSlot(insets, WINDOW)
-    const dock = directorDockSlot(insets)
-    const dockLeft = WINDOW - dock.right - dock.width
-    expect(WINDOW - slot.right).toBeLessThanOrEqual(dockLeft)
+  it('anchors the Visualize toolbar to the window edge too', () => {
+    expect(toolbarSlot().right).toBe(GUTTER)
   })
 
   it('stops Compose docks before the Director column', () => {
@@ -163,13 +171,11 @@ describe('viewportInsets', () => {
     expect(band.width).toBeGreaterThan(400)
   })
 
-  it('keeps Compose toolbar and free area left of the Director column', () => {
+  it('keeps the Compose free area left of the Director column', () => {
     const insets = viewportInsets('compose', WINDOW, true, 900, 148, { composeDock: 'sequence' })
     expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
-    const tools = toolbarSlot(insets, WINDOW)
     const dock = directorDockSlot(insets)
     const dockLeft = WINDOW - dock.right - dock.width
-    expect(WINDOW - tools.right).toBeLessThanOrEqual(dockLeft)
     expect(insets.right).toBeLessThanOrEqual(dockLeft)
   })
 
@@ -199,5 +205,32 @@ describe('viewportInsets', () => {
     expect(clamped.bottom).toBeGreaterThanOrEqual(insets.contentBottom)
     const again = clampPipRect(clamped, insets, vw, vh)
     expect(again).toEqual(clamped)
+  })
+
+  it('uses the compact Director width when the rail is collapsed', () => {
+    const sizes = chromeSizes(1280, 800, {
+      mode: 'build',
+      composeDock: 'timeline',
+      showOutliner: false,
+      timelineVisible: false,
+      directorCompact: true,
+    })
+    expect(sizes.rightWidth).toBe(COMPACT_DIRECTOR_DOCK_WIDTH)
+    const insets = viewportInsets('build', 1280, false, 800, 240, { directorCompact: true })
+    expect(insets.rightWidth).toBe(COMPACT_DIRECTOR_DOCK_WIDTH)
+    expect(directorDockSlot(insets).width).toBe(COMPACT_DIRECTOR_DOCK_WIDTH)
+  })
+
+  it('reserves compact Director width at 1024×600 even if preference is expanded', () => {
+    const compact = directorIsCompact(1024, 600, 'expanded')
+    const insets = viewportInsets('build', 1024, false, 600, 240, { directorCompact: compact })
+    expect(insets.rightWidth).toBe(COMPACT_DIRECTOR_DOCK_WIDTH)
+    expect(directorDockSlot(insets).width).toBe(COMPACT_DIRECTOR_DOCK_WIDTH)
+  })
+
+  it('keeps expanded Director width at 1024×700 when preference is expanded', () => {
+    const compact = directorIsCompact(1024, 700, 'expanded')
+    const insets = viewportInsets('build', 1024, false, 700, 240, { directorCompact: compact })
+    expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
   })
 })

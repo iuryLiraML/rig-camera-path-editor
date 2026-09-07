@@ -1,3 +1,4 @@
+import { PrimitiveShapeControls } from './SolidControls'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { remeshSceneObject } from '../lib/meshJobs'
 import {
@@ -16,10 +17,8 @@ import {
   ListIcon,
   MagnetIcon,
   MoveIcon,
-  SlidersIcon,
 } from './icons'
-import { ClayColorControl, DesignInspector } from './RightPanel'
-import { EnvironmentTransformPopover, TransformPopover } from './TransformPopover'
+import { ClayColorControl } from './RightPanel'
 import { useViewportInsets } from './viewportInsets'
 
 export function ObjectBar() {
@@ -27,6 +26,8 @@ export function ObjectBar() {
   const panel = useEditorStore((s) => s.objectBarPanel)
   const snapEnabled = useEditorStore((s) => s.snapEnabled)
   const showOutliner = useEditorStore((s) => s.showOutliner)
+  const tool = useEditorStore((s) => s.tool)
+  const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const insets = useViewportInsets()
   const objectId = selection?.startsWith('obj:') ? selection.slice(4) : null
   const object = useSceneStore((s) => (objectId ? s.objects.find((o) => o.id === objectId) : null))
@@ -43,14 +44,7 @@ export function ObjectBar() {
       className="absolute z-30 flex -translate-x-1/2 flex-col items-center gap-2"
       style={{ left: insets.centre, bottom: insets.contentBottom }}
     >
-      {panel === 'transform' && envSelected && <EnvironmentTransformPopover />}
-      {panel === 'transform' && objectId && <TransformPopover objectId={objectId} />}
       {panel === 'name' && objectId && <NamePopover objectId={objectId} />}
-      {panel === 'properties' && objectId && (
-        <div className="panel max-h-[min(70vh,520px)] w-[280px] overflow-y-auto">
-          <DesignInspector />
-        </div>
-      )}
       {panel === 'more' && objectId && <MoreMenu objectId={objectId} />}
       {object && isRemeshPlaceholder(object.root) && (
         <div className="panel flex items-center gap-2 px-2.5 py-1.5 text-[10px] text-ink-dim">
@@ -99,17 +93,20 @@ export function ObjectBar() {
           <ListIcon size={14} />
         </IconBtn>
         {!envSelected && (
-          <IconBtn title="Properties" active={panel === 'properties'} onClick={() => setPanel('properties')}>
-            <SlidersIcon size={14} />
-          </IconBtn>
-        )}
-        {!envSelected && (
           <IconBtn title="More" active={panel === 'more'} onClick={() => setPanel('more')}>
             <DotsIcon size={14} />
           </IconBtn>
         )}
         <span className="mx-1 h-4 w-px bg-line" />
-        <IconBtn title="Move (W)" active={panel === 'transform'} onClick={() => setPanel('transform')}>
+        <IconBtn
+          title="Move (W)"
+          active={tool === 'select' && gizmoMode === 'translate'}
+          onClick={() => {
+            useEditorStore.getState().setTool('select')
+            useEditorStore.getState().setGizmoMode('translate')
+            useEditorStore.getState().setObjectBarPanel('none')
+          }}
+        >
           <MoveIcon size={14} />
         </IconBtn>
         <IconBtn
@@ -179,9 +176,9 @@ function NamePopover({ objectId }: { objectId: string }) {
   const shade = object?.shade ?? 0.7
   if (!object) return null
   return (
-    <div className="panel w-64 p-3">
+    <div className="panel max-h-[70vh] w-80 overflow-y-auto p-3">
       <div className="flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-ink">Name</span>
+        <span className="text-[12px] font-semibold text-ink">{object.primitive ? 'Shape' : 'Object'}</span>
         <button
           type="button"
           onClick={() => useEditorStore.getState().setObjectBarPanel('none')}
@@ -195,6 +192,7 @@ function NamePopover({ objectId }: { objectId: string }) {
         onChange={(e) => useSceneStore.getState().renameObject(objectId, e.target.value)}
         className="mt-2 w-full rounded-md bg-panel-2 px-2 py-1.5 text-[12px] text-ink outline-none"
       />
+      {object.primitive && <div className="mt-3"><PrimitiveShapeControls object={object} /></div>}
       <label className="mt-3 block text-[10px] uppercase tracking-wide text-ink-dim">Shade</label>
       <input
         type="range"

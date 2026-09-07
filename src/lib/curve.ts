@@ -5,13 +5,19 @@ import type { Vec3 } from '../state/useSceneStore'
 export const clamp01 = (t: number) => Math.min(1, Math.max(0, t))
 
 /** Per-point handle behavior, exposed in the pen tool. */
-export type TangentMode = 'auto' | 'smooth' | 'corner' | 'broken'
+export type HandleType = 'auto' | 'vector' | 'aligned' | 'free'
+export type TangentMode = HandleType | 'mirrored' | 'smooth' | 'corner' | 'broken'
 
 const handleLenSq = (h: Vec3) => h[0] * h[0] + h[1] * h[1] + h[2] * h[2]
 
 /** Classify an anchor's current handle setup into one of the named modes. */
 export function anchorTangentMode(anchor: PathAnchor): TangentMode {
   if (!anchor.manual) return 'auto'
+  if (anchor.handleInType || anchor.handleOutType) {
+    if (anchor.mirrored) return 'mirrored'
+    if (anchor.handleInType === anchor.handleOutType) return anchor.handleInType!
+    return 'free'
+  }
   const flat = handleLenSq(anchor.handleIn) < 1e-8 && handleLenSq(anchor.handleOut) < 1e-8
   if (flat) return 'corner'
   return anchor.mirrored ? 'smooth' : 'broken'
@@ -37,7 +43,8 @@ const v = {
  * Resolves Bézier handles for anchors that the user hasn't touched (manual=false)
  * using Catmull-Rom style tangents scaled by the "rounding" slider (0..1).
  * rounding = 0 → straight segments; rounding = 1 → fully rounded curve.
- * Manual anchors keep their stored handles untouched.
+ * Vector controls point one third of the way toward their neighbors. Other
+ * manual controls keep their stored positions, including untyped legacy data.
  */
 export function computeAutoHandles(
   anchors: PathAnchor[],
@@ -47,10 +54,19 @@ export function computeAutoHandles(
   const n = anchors.length
   if (n < 2) return anchors
   return anchors.map((anchor, i) => {
-    if (anchor.manual) return anchor
-
     const prevA = closed ? anchors[(i - 1 + n) % n] : anchors[Math.max(0, i - 1)]
     const nextA = closed ? anchors[(i + 1) % n] : anchors[Math.min(n - 1, i + 1)]
+    if (anchor.manual) {
+      // Old projects have no explicit types; their exact stored geometry survives.
+      const vector = (neighbor: PathAnchor): Vec3 => neighbor.position.map(
+        (value, axis) => (value - anchor.position[axis]) / 3,
+      ) as Vec3
+      return {
+        ...anchor,
+        handleIn: anchor.handleInType === 'vector' ? vector(prevA) : anchor.handleIn,
+        handleOut: anchor.handleOutType === 'vector' ? vector(nextA) : anchor.handleOut,
+      }
+    }
     v.p.set(...anchor.position)
     v.prev.set(...prevA.position)
     v.next.set(...nextA.position)
@@ -109,4 +125,39 @@ export function buildCurve(
     )
   }
   return path
+}
+
+/** Path-local distance a Ctrl+click must be within to count as a segment hit. */
+export const CURVE_SEGMENT_HIT_DISTANCE = 0.4
+
+/** Index of the closest cubic segment, or null when the point is off the curve. */
+export function nearestSegmentHit(
+  curve: THREE.CurvePath<THREE.Vector3>,
+  point: THREE.Vector3,
+  maxDistance = CURVE_SEGMENT_HIT_DISTANCE,
+): number | null {
+  const hit = nearestCurveParameter(curve, point)
+  return hit.distance <= maxDistance ? hit.index : null
+}
+
+/** Return the actual cubic parameter, not a sampled world point used as a new anchor. */
+export function nearestCurveParameter(curve: THREE.CurvePath<THREE.Vector3>, point: THREE.Vector3) {
+  let result = { index: 0, t: 0, distance: Infinity }
+  curve.curves.forEach((segment, index) => {
+    let sample = 0, distance = Infinity
+    for (let s = 0; s <= 64; s++) {
+      const d = segment.getPoint(s / 64).distanceToSquared(point)
+      if (d < distance) { sample = s / 64; distance = d }
+    }
+    let lo = Math.max(0, sample - 1 / 64), hi = Math.min(1, sample + 1 / 64)
+    for (let n = 0; n < 24; n++) {
+      const a = lo + (hi - lo) / 3, b = hi - (hi - lo) / 3
+      if (segment.getPoint(a).distanceToSquared(point) < segment.getPoint(b).distanceToSquared(point)) hi = b
+      else lo = a
+    }
+    const t = (lo + hi) / 2
+    distance = segment.getPoint(t).distanceTo(point)
+    if (distance < result.distance) result = { index, t, distance }
+  })
+  return result
 }

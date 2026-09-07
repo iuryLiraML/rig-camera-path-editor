@@ -4,6 +4,7 @@ import {
   isPointGizmoActive,
   useEditorStore,
 } from './useEditorStore'
+import { collapsePointerPick, pointerPickMember } from './selectionPick'
 import { CAMERA_PATH_ID, usePathStore } from './usePathStore'
 
 describe('editor multi-selection', () => {
@@ -114,5 +115,27 @@ describe('editor multi-selection', () => {
     expect(useEditorStore.getState().selectionIds).toEqual([])
     expect(usePathStore.getState().selectedAnchorRefs).toEqual([])
     expect(usePathStore.getState().primaryAnchorRef).toBeNull()
+  })
+})
+
+describe('pointerPickMember', () => {
+  beforeEach(() => {
+    useEditorStore.setState({ selection: null, selectionIds: [], dummyBone: null })
+  })
+
+  it('Shift-toggles an object into and out of the member set', () => {
+    useEditorStore.getState().select('obj:first')
+    expect(pointerPickMember('obj:second', { additive: true })).toBe('toggle')
+    expect(useEditorStore.getState().selectionIds).toEqual(['obj:first', 'obj:second'])
+    expect(pointerPickMember('obj:second', { additive: true })).toBe('toggle')
+    expect(useEditorStore.getState().selectionIds).toEqual(['obj:first'])
+  })
+
+  it('keeps a multi-selection on pointer-down and collapses it only on collapsePointerPick', () => {
+    useEditorStore.getState().selectMany(['obj:first', 'obj:second'])
+    expect(pointerPickMember('obj:first', { additive: false })).toBe('keep-group')
+    expect(useEditorStore.getState().selectionIds).toEqual(['obj:first', 'obj:second'])
+    collapsePointerPick('obj:first')
+    expect(useEditorStore.getState().selectionIds).toEqual(['obj:first'])
   })
 })

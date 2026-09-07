@@ -7,6 +7,7 @@ import { normalizeCameraNoise } from './cameraNoise'
 import { synthesizeQuarterOrbitPath } from './synthesizeDemoPath'
 import type { PathAnchor } from '../state/usePathStore'
 import type { Vec3 } from '../state/useSceneStore'
+import { editBezierHandle } from './bezierEditing'
 
 function channels(partial: Partial<CinemaChannels> = {}): CinemaChannels {
   return {
@@ -75,6 +76,19 @@ describe('synthesizeQuarterOrbitPath', () => {
 })
 
 describe('evaluateCinemaPose', () => {
+  it('previews the authored Bézier controls after converting Vector handles to Free', () => {
+    const path = {
+      id: 'path', name: 'Path', closed: false, rounding: .8,
+      anchors: lineAnchors([0, 0, 0], [4, 0, 0]).map(a => ({ ...a, manual: true, mirrored: false, handleInType: 'vector' as const, handleOutType: 'vector' as const })) as PathAnchor[],
+    }
+    const ch = channels({ ease: 'linear', target: [0, 0, -2] })
+    expect(evaluateCinemaPose(.5, path, ch)!.position[1]).toBeCloseTo(0)
+    path.anchors = editBezierHandle(path, 'a', 'out', [0, 4, 0], true)
+    path.anchors = editBezierHandle(path, 'b', 'in', [0, 4, 0], true)
+    const position = evaluateCinemaPose(.5, path, ch)!.position
+    expect(position[0]).toBeCloseTo(2, 6)
+    expect(position[1]).toBeCloseTo(3, 6)
+  })
   it('returns null when fewer than two anchors', () => {
     expect(
       evaluateCinemaPose(0, { anchors: lineAnchors([0, 1, 4], [0, 1, 4]).slice(0, 1) }, channels()),

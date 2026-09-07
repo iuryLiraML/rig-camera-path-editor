@@ -8,15 +8,22 @@ import {
   modelSupportsVision,
   PROVIDERS,
   type ModelOption,
+  type ProviderKind,
 } from '../lib/agent/providers'
 import type { VisionMode } from '../state/useAgentStore'
 import type { SamImageVersion } from '../lib/fal/models'
-import { fetchSessionEmail } from '../lib/siteSession'
 import { Row, Section, Segmented } from './primitives'
+import { GoogleSignInButton } from './GoogleSignInButton'
+
+const PROVIDER_OPTIONS = (Object.keys(PROVIDERS) as ProviderKind[]).map((k) => ({
+  value: k,
+  label: PROVIDERS[k].label,
+}))
 
 export function SettingsDialog() {
   const open = useEditorStore((s) => s.showSettings)
   const provider = useAgentStore((s) => s.provider)
+  const keys = useAgentStore((s) => s.keys)
   const models = useAgentStore((s) => s.models)
   const visionMode = useAgentStore((s) => s.visionMode)
   const falKey = useAgentStore((s) => s.falKey)
@@ -31,25 +38,14 @@ export function SettingsDialog() {
   const [vaultBusy, setVaultBusy] = useState(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
   const cloudStatus = useCloudAuthStore((s) => s.status)
-  // site-access session (the Google login gate) — null when there is no gate
-  const [siteEmail, setSiteEmail] = useState<string | null>(null)
+  const credentialId = useCloudAuthStore((s) => s.credentialIds?.[provider])
 
   useEffect(() => {
     if (!open) return
-    let live = true
-    void fetchSessionEmail().then((email) => {
-      if (live) setSiteEmail(email)
-    })
-    return () => {
-      live = false
-    }
-  }, [open])
-
-  useEffect(() => {
-    if (!open) return
-    // the model list loads through the same-origin /api proxy, so it needs the
-    // deployment's site key and nothing else
-    if (!serverKeys[provider]) {
+    const apiKey = keys[provider]
+    // no personal key needed when the deployment has a site key — the model
+    // list then loads through the same-origin /api proxy
+    if (!apiKey && !serverKeys[provider]) {
       setModelOptions([])
       setModelsError(null)
       setModelsLoading(false)
@@ -61,7 +57,7 @@ export function SettingsDialog() {
       setModelsLoading(true)
       setModelsError(null)
       try {
-        const options = await listProviderModels(provider, controller.signal)
+        const options = await listProviderModels(provider, apiKey, controller.signal)
         setModelOptions(options)
         const selected = models[provider]
         if (options.length > 0 && !options.some((option) => option.id === selected)) {
@@ -81,7 +77,7 @@ export function SettingsDialog() {
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [agent, models, open, provider, serverKeys])
+  }, [agent, keys, models, open, provider, serverKeys])
 
   if (!open) return null
 
@@ -105,38 +101,42 @@ export function SettingsDialog() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-        {siteEmail && (
-          <Section title="Site access">
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <div className="truncate text-[11px] text-ink" title={siteEmail}>
-                  {siteEmail}
-                </div>
-                <div className="text-[10px] text-ink-dim">Signed in to this site with Google</div>
-              </div>
-              {/* a real navigation, not fetch(): the server clears the cookie and
-                  serves the signed-out page, which lives outside the gate */}
-              <a
-                href="/api/auth/logout"
-                className="shrink-0 rounded-md bg-panel-2 px-2.5 py-1.5 text-[11px] text-ink hover:bg-panel-3"
-              >
-                Sign out of Rig
-              </a>
+        {cloudStatus !== 'signed-in' && (
+          <Section title="Cloud account">
+            <p className="px-4 pb-2 text-[11px] leading-5 text-ink-dim">
+              Sign in to sync projects. Local sessions stay on this machine until you connect.
+            </p>
+            <div className="px-4 pb-3">
+              <GoogleSignInButton
+                onCredential={(credential) => {
+                  void useCloudAuthStore.getState().setAccessToken(credential)
+                }}
+              />
             </div>
           </Section>
         )}
-
-        <Section title="Director model">
-          {!serverKeys[provider] ? (
-            <div className="rounded-md bg-red-500/10 px-2 py-1.5 text-[10px] leading-relaxed text-red-300">
-              No {PROVIDERS[provider].label} key is configured on this deployment, so the
-              Director cannot run. Set <span className="font-mono">ANTHROPIC_API_KEY</span> in
-              the Vercel project and redeploy.
-            </div>
-          ) : (
+        <Section title={cloudStatus === 'signed-in' ? 'AI provider (session only; store in your vault)' : 'AI provider (stored locally in this browser)'}>
+          <Row label="Provider">
+            <Segmented<ProviderKind>
+              options={PROVIDER_OPTIONS}
+              value={provider}
+              onChange={(v) => agent.setProvider(v)}
+            />
+          </Row>
+          <Row label="API key">
+            <input
+              type="password"
+              value={keys[provider]}
+              onChange={(e) => agent.setKey(provider, e.target.value.trim())}
+              placeholder={serverKeys[provider] ? 'Using the site key — optional override' : PROVIDERS[provider].keyHint}
+              className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
+            />
+          </Row>
+          {serverKeys[provider] && !keys[provider].trim() && (
             <div className="text-[10px] leading-relaxed text-ink-dim">
-              The Director runs on this deployment's shared {PROVIDERS[provider].label} key.
-              Requests go through the site and the key never reaches the browser.
+              This deployment has a shared {PROVIDERS[provider].label} key — requests go
+              through the site, and the key never reaches the browser. Paste your own key
+              to use it instead.
             </div>
           )}
           <Row label="Model">
@@ -148,7 +148,9 @@ export function SettingsDialog() {
             >
               {modelsLoading && <option value={models[provider]}>Loading models…</option>}
               {!modelsLoading && modelOptions.length === 0 && (
-                <option value={models[provider]}>Models unavailable</option>
+                <option value={models[provider]}>
+                  {modelsError ? 'Models unavailable' : 'Add an API key to load models'}
+                </option>
               )}
               {!modelsLoading &&
                 modelOptions.map((model) => (
@@ -158,7 +160,38 @@ export function SettingsDialog() {
                 ))}
             </select>
           </Row>
-          {modelsError && <div className="text-[10px] text-red-400">{modelsError}.</div>}
+          {modelsError && <div className="text-[10px] text-red-400">{modelsError}. Check the API key.</div>}
+          {cloudStatus === 'signed-in' && (
+            <div className="space-y-1.5">
+              <button
+                type="button"
+                disabled={vaultBusy || !keys[provider].trim()}
+                onClick={() => {
+                  setVaultBusy(true)
+                  setVaultMessage(null)
+                  void useCloudAuthStore
+                    .getState()
+                    .storeCredential(provider, keys[provider].trim())
+                    .then((id) => {
+                      setVaultMessage(`Stored in vault (${id.slice(0, 8)}…) — secret not returned.`)
+                    })
+                    .catch((error) => {
+                      setVaultMessage(error instanceof Error ? error.message : 'Vault store failed')
+                    })
+                    .finally(() => setVaultBusy(false))
+                }}
+                className="rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink hover:bg-panel-3 disabled:opacity-50"
+              >
+                {vaultBusy ? 'Storing…' : 'Store key in encrypted cloud vault'}
+              </button>
+              {credentialId && (
+                <div className="text-[10px] text-ink-dim">
+                  Vault credential: <span className="font-mono">{credentialId.slice(0, 8)}…</span>
+                </div>
+              )}
+              {vaultMessage && <div className="text-[10px] text-ink-dim">{vaultMessage}</div>}
+            </div>
+          )}
           <Row label="Screenshot">
             <Segmented<VisionMode>
               options={[
@@ -224,7 +257,6 @@ export function SettingsDialog() {
               {vaultBusy ? 'Storing…' : 'Store Fal key in encrypted cloud vault'}
             </button>
           )}
-          {vaultMessage && <div className="text-[10px] text-ink-dim">{vaultMessage}</div>}
           <Row label="Mask model">
             <Segmented<SamImageVersion>
               options={[

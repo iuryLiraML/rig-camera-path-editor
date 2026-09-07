@@ -5,8 +5,9 @@ import { useRigStore } from '../state/useRigStore'
 import { usePathStore } from '../state/usePathStore'
 import { cameraReady } from '../state/cameraPathLink'
 import { editorChrome } from '../lib/workspaceChrome'
+import { COMPACT_LAYOUT_MIN } from '../lib/chromeLayout'
 import { Viewport } from '../viewport/Viewport'
-import { Toolbar } from '../ui/Toolbar'
+import { TopChrome } from '../ui/TopChrome'
 import { LeftPanel } from '../ui/LeftPanel'
 import { DirectorDock } from '../ui/DirectorDock'
 import { ViewportFooter } from '../ui/ViewportFooter'
@@ -15,7 +16,9 @@ import { OnboardingCard } from '../ui/OnboardingCard'
 import { CameraPreviewFrame } from '../ui/CameraPreviewFrame'
 import { CameraRigHud } from '../ui/CameraRigHud'
 import { AreaLayer } from '../ui/AreaLayer'
+import { useChromeLayout } from '../ui/viewportInsets'
 import { SettingsDialog } from '../ui/SettingsDialog'
+import { SignOutDialog } from '../ui/SignOutDialog'
 import { ProjectsWorkspace } from '../ui/ProjectsWorkspace'
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { isTeamCloudApp } from '../lib/cloud/client'
@@ -40,15 +43,12 @@ import { applyTogglePlayback } from '../lib/playback'
 import { importDroppedSceneFiles, undoLastMeshRevision } from '../lib/sceneIO'
 import { useProjectStore } from '../state/useProjectStore'
 import { resolveWorkspace } from './resolveWorkspace'
-import { ModeSwitcher } from '../ui/ModeSwitcher'
-import { ProjectChip } from '../ui/ProjectChip'
 import { AddObjectDrawer } from '../ui/AddObjectDrawer'
 import { ObjectBar } from '../ui/ObjectBar'
 import { NavLegend } from '../ui/NavLegend'
 import { ImportAssetsModal } from '../ui/ImportAssetsModal'
 import { RemeshJobOverlay } from '../ui/RemeshProgressBar'
 import { CameraBar } from '../ui/CameraBar'
-import { CameraAdjustPanel } from '../ui/CameraAdjustPanel'
 import { ShortcutsOverlay } from '../ui/ShortcutsOverlay'
 import { VisualizeBar } from '../ui/visualize/VisualizeBar'
 
@@ -165,7 +165,7 @@ function useShortcuts() {
         case '3':
         case '4':
           if (path.selectedAnchorIds.length > 0) {
-            const modes = ['auto', 'smooth', 'corner', 'broken'] as const
+            const modes = ['auto', 'vector', 'aligned', 'free'] as const
             path.setAnchorsTangent(path.selectedAnchorIds, modes[Number(e.key) - 1])
           }
           break
@@ -249,6 +249,7 @@ function EditorWorkspace() {
     showOutliner,
     showAddDrawer,
   })
+  const { tier } = useChromeLayout()
   const [dragging, setDragging] = useState(false)
 
   useShortcuts()
@@ -279,13 +280,7 @@ function EditorWorkspace() {
 
       <AreaLayer />
 
-      {chrome.toolbar && (
-        <>
-          <ProjectChip />
-          <ModeSwitcher />
-          <Toolbar />
-        </>
-      )}
+      {chrome.toolbar && <TopChrome />}
       {chrome.outliner && <LeftPanel />}
       {chrome.directorDock && <DirectorDock />}
       <KeepMounted show={chrome.timeline || chrome.sequence}>
@@ -305,9 +300,6 @@ function EditorWorkspace() {
       </KeepMounted>
       <KeepMounted show={chrome.cameraBar && !chrome.footer}>
         <CameraBar />
-      </KeepMounted>
-      <KeepMounted show={chrome.cameraBar}>
-        <CameraAdjustPanel />
       </KeepMounted>
       {chrome.objectBar && <ObjectBar />}
       {chrome.addDrawer && <AddObjectDrawer />}
@@ -344,6 +336,15 @@ function EditorWorkspace() {
       {notice && (
         <div className="panel absolute left-1/2 top-16 z-30 -translate-x-1/2 px-4 py-2 text-xs text-ink">
           {notice}
+        </div>
+      )}
+
+      {tier === 'unsupported' && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-40 flex justify-center">
+          <div className="panel px-4 py-2 text-xs text-ink">
+            This window is below the supported size ({COMPACT_LAYOUT_MIN.w}×{COMPACT_LAYOUT_MIN.h}).
+            Enlarge it to keep editing.
+          </div>
         </div>
       )}
 
@@ -442,6 +443,7 @@ export function App() {
       {body}
       <SettingsDialog />
       <SaveConflictDialog />
+      <SignOutDialog />
     </>
   )
 }

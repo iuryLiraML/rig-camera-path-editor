@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { DEFAULT_CAMERA_NOISE } from '../lib/cameraNoise'
 import { applyRigSnapshot, getRigSnapshot, useRigStore } from './useRigStore'
+import { CAMERA_PATH_ID, usePathStore } from './usePathStore'
 import { makeEmptyRigSnapshot, useCameraOptionsStore } from './useCameraOptionsStore'
 
 afterEach(() => {
@@ -71,5 +72,24 @@ describe('camera FX reload', () => {
     applyRigSnapshot(saved)
     expect(useRigStore.getState().fps).toBe(24)
     expect(useRigStore.getState().duration).toBe(8)
+  })
+})
+
+describe('getRigSnapshot followed path', () => {
+  it('bundles the camera-followed path geometry, not the unused camera-path slot', () => {
+    const road = usePathStore.getState().createPath('Road')
+    usePathStore.getState().setActivePath(road)
+    usePathStore.getState().setPath(
+      [
+        [0, 1, 0],
+        [4, 1, 0],
+      ],
+      false,
+    )
+    useRigStore.setState({ cameraPathId: road })
+    const snap = getRigSnapshot()
+    expect(snap.pathId).toBe(road)
+    expect(snap.anchors).toHaveLength(2)
+    expect(usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors).toHaveLength(0)
   })
 })

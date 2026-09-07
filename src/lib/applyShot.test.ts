@@ -3,7 +3,7 @@ import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore, type Shot } from '../state/useProjectStore'
 import { useRigStore } from '../state/useRigStore'
-import { applyShot } from './projects'
+import { applyShot, duplicateShotAsCameraOption, loadShot } from './projects'
 import { makeEmptyRigSnapshot } from '../state/useCameraOptionsStore'
 
 function fakeShot(): Shot {
@@ -44,5 +44,25 @@ describe('applyShot', () => {
     expect(useEditorStore.getState().exportRes).toBe(720)
     expect(useRigStore.getState().fov).toBe(28)
     created.mockRestore()
+  })
+})
+
+describe('loadShot', () => {
+  it('opens a storyboard take without forking a camera option', () => {
+    const created = vi.spyOn(useCameraOptionsStore.getState(), 'createOption')
+    const before = useCameraOptionsStore.getState().options.length
+    loadShot(fakeShot())
+    expect(created).not.toHaveBeenCalled()
+    expect(useCameraOptionsStore.getState().options.length).toBe(before)
+    expect(useEditorStore.getState().activeShotId).toBe('shot-review')
+    created.mockRestore()
+  })
+})
+
+describe('duplicateShotAsCameraOption', () => {
+  it('forks a camera option only when asked', () => {
+    const before = useCameraOptionsStore.getState().options.length
+    duplicateShotAsCameraOption(fakeShot())
+    expect(useCameraOptionsStore.getState().options.length).toBe(before + 1)
   })
 })

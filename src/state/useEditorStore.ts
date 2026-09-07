@@ -8,7 +8,11 @@ import {
 } from '../lib/compositionGuides'
 import { clampTimeView, FULL_TIME_VIEW, type TimeView } from '../lib/timeView'
 import { resetOrbitLock } from '../lib/orbitLock'
+import type { DirectorPreference } from '../lib/chromeLayout'
 import { usePathStore, type AnchorRef } from './usePathStore'
+// useSceneStore imports this module back, so it may only be read inside an
+// action — never while this module is still evaluating.
+import { useSceneStore } from './useSceneStore'
 import type { RigChannel } from './useRigStore'
 
 export type SelectedTimelineKey =
@@ -22,11 +26,20 @@ export type ExportAspect = '16:9' | '1:1' | '9:16'
 export type ExportRes = 720 | 1080 | 'custom'
 export type QuickView = 'front' | 'top' | 'right'
 export type ViewMode = 'look' | 'clay' | 'depth' | 'outline' | 'normals'
+/** Passes that replace scene shading, so editor gizmos and helpers stand down. */
+export const isTechMode = (mode: ViewMode) => mode !== 'clay' && mode !== 'look'
+
+/**
+ * Pen and Draw mount only in a shaded, non-look-through Compose. Anything that
+ * leaves that surface must put the tool down too, or the toolbar keeps a lit
+ * button over a tool whose clicks the canvas drops.
+ */
+const disarmStroke = (tool: Tool): Tool => (tool === 'pen' || tool === 'draw' ? 'select' : tool)
 export type AppView = 'projects' | 'editor' | 'board'
 export type PanelTab = 'design' | 'assistant'
 /** Job the editor chrome is serving. Same 3D scene; different overlays. */
 export type WorkspaceMode = 'build' | 'compose' | 'visualize'
-export type AddDrawerChip = 'primitives' | 'assets' | 'generate' | 'environment'
+export type AddDrawerChip = 'figures' | 'primitives' | 'assets' | 'generate' | 'environment'
 export type ComposeDock = 'sequence' | 'timeline'
 export type ObjectBarPanel = 'none' | 'transform' | 'name' | 'properties' | 'more'
 /** Floating camera inspector in Compose — not inside the outliner tree. */
@@ -123,6 +136,16 @@ interface EditorState {
   visualizeMedia: VisualizeMedia
   /** Director composer transcript is open above the floating bar. */
   directorExpanded: boolean
+  /** Persisted compact/expanded preference; auto follows layoutTier. */
+  directorPreference: DirectorPreference
+  /** Pose to restore after Pen/Draw Top view. */
+  viewPoseRestore: {
+    projection: Projection
+    position: [number, number, number]
+    target: [number, number, number]
+    captured: boolean
+  } | null
+  restoreViewRequest: number
   /** Design field that should receive I, or null to use the selection rule */
   keyableFocus: KeyableFocus | null
   /** settings dialog (API keys, model, guidelines) */
@@ -201,6 +224,8 @@ interface EditorState {
   toggleHidden: (id: string) => void
   setVisualizeMedia: (media: VisualizeMedia) => void
   setDirectorExpanded: (on: boolean) => void
+  setDirectorPreference: (pref: DirectorPreference) => void
+  captureViewPose: (pose: { position: [number, number, number]; target: [number, number, number] }) => void
   toggleExportPass: (pass: ViewMode) => void
   setExportSize: (size: [number, number] | null) => void
   setShowPreview: (on: boolean) => void
@@ -258,7 +283,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   lockedIds: [],
   hiddenIds: [],
   visualizeMedia: 'still',
-  directorExpanded: false,
+  directorExpanded: true,
+  directorPreference: (() => {
+    try {
+      const v = localStorage.getItem('rig-director-preference')
+      if (v === 'expanded' || v === 'compact' || v === 'auto') return v
+    } catch {
+      /* private mode */
+    }
+    return 'auto' as const
+  })(),
+  viewPoseRestore: null,
+  restoreViewRequest: 0,
   viewMode: 'clay',
   depthNear: 0.1,
   depthFar: 20,
@@ -288,17 +324,48 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   flyRecording: false,
   compositionGuides: { ...DEFAULT_COMPOSITION_GUIDES },
   showSceneObjects: true,
-  setTool: (tool) =>
+  setTool: (tool) => {
+    let leftTechPass = false
     set((s) => {
       if (tool !== 'pen' && tool !== 'draw') resetOrbitLock()
-      return tool === 'draw'
-        ? {
-            tool,
-            projection: 'orthographic' as const,
-            viewRequest: { view: 'top' as const, n: (s.viewRequest?.n ?? 0) + 1 },
-          }
-        : { tool }
-    }),
+      const enteringStroke = tool === 'pen' || tool === 'draw'
+      const leavingStroke =
+        (s.tool === 'pen' || s.tool === 'draw') && !enteringStroke
+      if (enteringStroke) {
+        leftTechPass = isTechMode(s.viewMode)
+        const paths = usePathStore.getState()
+        const startInTop = tool === 'draw' || (paths.getPath(paths.activePathId)?.anchors.length ?? 0) === 0
+        return {
+          tool,
+          // Both tools need an editable shaded viewport. Existing Pen paths
+          // keep their current view; only new paths and freehand Draw start Top.
+          cameraView: false,
+          flyRecording: false,
+          lookThroughLivePose: false,
+          viewMode: leftTechPass ? ('clay' as const) : s.viewMode,
+          projection: startInTop ? 'orthographic' as const : s.projection,
+          viewRequest: startInTop ? { view: 'top' as const, n: (s.viewRequest?.n ?? 0) + 1 } : s.viewRequest,
+          viewPoseRestore: tool === 'pen' ? null : s.viewPoseRestore ?? {
+            projection: s.projection,
+            position: [0, 0, 0],
+            target: [0, 0, 0],
+            captured: false,
+          },
+        }
+      }
+      if (leavingStroke && s.viewPoseRestore) {
+        return {
+          tool,
+          projection: s.viewPoseRestore.projection,
+          restoreViewRequest: s.restoreViewRequest + 1,
+        }
+      }
+      return { tool }
+    })
+    if (leftTechPass) {
+      useSceneStore.getState().showNotice('Pen and Draw need shading — switched to Clay')
+    }
+  },
   setProjection: (projection) => set({ projection }),
   select: (selection) => {
     const selectionIds: SelectionMemberId[] =
@@ -315,7 +382,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       cameraPanel:
         selection === 'cinema-camera' && s.workspaceMode === 'compose' && s.cameraPanel === 'closed'
           ? 'adjust'
-          : s.cameraPanel,
+          : selection === 'cinema-camera' ? s.cameraPanel : 'closed',
     }))
     // Empty viewport click and picking anything but the path must drop the
     // spline-point set, otherwise W/E/R stays glued to the last anchors.
@@ -342,6 +409,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       selectionIds,
       selection,
+      cameraPanel: 'closed',
       dummyBone: null,
       selectedKeyframe: null,
     })
@@ -355,18 +423,14 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       selectionIds: selection.startsWith('obj:') ? [selection as `obj:${string}`] : [],
     }),
   setGizmoMode: (gizmoMode) =>
-    set((s) => ({
+    set({
       gizmoMode,
-      // W / E / R is how Transform is invoked — open the numeric panel so the
-      // per-parameter keyframe diamonds are on screen, not only on ObjectBar Move.
-      objectBarPanel:
-        s.selection?.startsWith('obj:') || s.selection === 'env' ? 'transform' : s.objectBarPanel,
-    })),
+    }),
   setPlayMode: (playMode) => set({ playMode }),
   setCameraView: (cameraView) =>
-    set(
+    set((s) =>
       cameraView
-        ? { cameraView }
+        ? { cameraView, tool: disarmStroke(s.tool) }
         : { cameraView, flyRecording: false, lookThroughLivePose: false },
     ),
   setRecording: (recording, kind = 'video') =>
@@ -376,7 +440,13 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setExportAspect: (exportAspect) => set({ exportAspect }),
   setExportRes: (exportRes) => set({ exportRes }),
   setCustomSize: (customSize) => set({ customSize }),
-  setViewMode: (viewMode) => set({ viewMode }),
+  setViewMode: (viewMode) =>
+    set((s) => ({
+      viewMode,
+      // The MP4 exporter cycles every pass and restores the previous one, so
+      // disarming there would let an export pocket the user's tool.
+      tool: isTechMode(viewMode) && !s.recording ? disarmStroke(s.tool) : s.tool,
+    })),
   setShowSceneObjects: (showSceneObjects) => set({ showSceneObjects }),
   toggleShowSceneObjects: () => set((s) => ({ showSceneObjects: !s.showSceneObjects })),
   setDepthNear: (depthNear) => set({ depthNear: Math.max(0.05, depthNear), depthRangeAuto: false }),
@@ -426,7 +496,10 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       addDrawerChip,
     }),
   setObjectBarPanel: (objectBarPanel) => set({ objectBarPanel }),
-  setCameraPanel: (cameraPanel) => set({ cameraPanel }),
+  setCameraPanel: (cameraPanel) => {
+    if (cameraPanel !== 'closed' && get().selection !== 'cinema-camera') get().select('cinema-camera')
+    set({ cameraPanel })
+  },
   setShowImportModal: (showImportModal) => set({ showImportModal }),
   toggleLock: (id) =>
     set((s) => ({
@@ -450,6 +523,23 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   },
   setVisualizeMedia: (visualizeMedia) => set({ visualizeMedia }),
   setDirectorExpanded: (directorExpanded) => set({ directorExpanded }),
+  setDirectorPreference: (directorPreference) => {
+    try {
+      localStorage.setItem('rig-director-preference', directorPreference)
+    } catch {
+      /* private mode */
+    }
+    set({
+      directorPreference,
+      directorExpanded: directorPreference !== 'compact',
+    })
+  },
+  captureViewPose: (pose) =>
+    set((s) =>
+      s.viewPoseRestore && !s.viewPoseRestore.captured
+        ? { viewPoseRestore: { ...s.viewPoseRestore, ...pose, captured: true } }
+        : s,
+    ),
   toggleExportPass: (pass) =>
     set((s) => ({
       exportPasses: s.exportPasses.includes(pass)

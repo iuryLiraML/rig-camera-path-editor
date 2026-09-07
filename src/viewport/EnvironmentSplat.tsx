@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react'
 import * as THREE from 'three'
 import type { ThreeEvent } from '@react-three/fiber'
-import { useEditorStore } from '../state/useEditorStore'
+import { isTechMode, useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { showEnvironmentSplat, SPLAT_INRIA_TO_Y_UP, type EnvironmentFormat } from '../lib/environment'
 import { attachEnvironmentPickProxy } from '../lib/splatPick'
@@ -9,7 +9,6 @@ import { pickKindOf } from '../lib/viewportPick'
 import { useSceneStore } from '../state/useSceneStore'
 import { GizmoControls } from './GizmoControls'
 import { isSceneEditing } from '../lib/workspaceChrome'
-import { isTechMode } from './RenderPasses'
 
 const DEG = Math.PI / 180
 const RAD = 180 / Math.PI

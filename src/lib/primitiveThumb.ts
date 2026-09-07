@@ -4,9 +4,14 @@ import {
   buildPrimitiveGeometry,
   defaultParams,
   type PrimitiveKind,
+  type PrimitiveSpec,
+  primitiveSpecKey,
 } from './primitiveGeometry'
+import { ensureDummyTemplate, type FigureSex } from './dummyCharacter'
+import { clone } from 'three/examples/jsm/utils/SkeletonUtils.js'
 
-const cache: Partial<Record<PrimitiveKind, string | null>> = {}
+const cache = new Map<string, string>()
+const figures = new Map<FigureSex, Promise<string | null>>()
 let renderer: THREE.WebGLRenderer | null | undefined
 
 function getRenderer(): THREE.WebGLRenderer | null {
@@ -32,29 +37,25 @@ function getRenderer(): THREE.WebGLRenderer | null {
   }
 }
 
-function renderOne(gl: THREE.WebGLRenderer, kind: PrimitiveKind, size: number): string {
+function renderOne(gl: THREE.WebGLRenderer, root: THREE.Object3D, kind: string, size: number): string {
   gl.setSize(size, size, false)
   gl.setClearColor(0x000000, 0)
   gl.shadowMap.enabled = true
   gl.shadowMap.type = THREE.PCFSoftShadowMap
-
   const scene = new THREE.Scene()
-  const geo = buildPrimitiveGeometry({ kind, params: defaultParams(kind) })
-  geo.computeBoundingBox()
-  const bounds = geo.boundingBox!
+  root.updateMatrixWorld(true)
+  const bounds = new THREE.Box3().setFromObject(root, true)
   const center = bounds.getCenter(new THREE.Vector3())
   const dim = bounds.getSize(new THREE.Vector3())
-  geo.translate(-center.x, -center.y, -center.z)
-
+  root.position.sub(center)
   const material = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setScalar(0.82),
-    roughness: 0.88,
-    metalness: 0,
+    color: new THREE.Color().setScalar(0.82), roughness: 0.88, metalness: 0,
     side: THREE.DoubleSide,
   })
-  const mesh = new THREE.Mesh(geo, material)
-  mesh.castShadow = true
-  scene.add(mesh)
+  root.traverse((node) => {
+    if (node instanceof THREE.Mesh) { node.material = material; node.castShadow = true }
+  })
+  scene.add(root)
 
   const ground = new THREE.Mesh(
     new THREE.PlaneGeometry(12, 12),
@@ -91,27 +92,46 @@ function renderOne(gl: THREE.WebGLRenderer, kind: PrimitiveKind, size: number): 
 
   gl.render(scene, camera)
   const url = gl.domElement.toDataURL('image/png')
-  geo.dispose()
   material.dispose()
   ground.geometry.dispose()
   ;(ground.material as THREE.Material).dispose()
+  key.shadow.map?.dispose()
   return url
 }
 
-/** Clay thumbnail of the default primitive — same geometry the scene will spawn. */
-export function primitiveThumbUrl(kind: PrimitiveKind, size = 256): string | null {
-  if (kind in cache) return cache[kind] ?? null
+/** Clay thumbnail keyed by the complete spec and output size. */
+export function primitiveThumbUrl(input: PrimitiveKind | PrimitiveSpec, size = 256): string | null {
+  const spec = typeof input === 'string' ? { kind: input, params: defaultParams(input) } : input
+  const key = `${size}:${primitiveSpecKey(spec)}`
+  const cached = cache.get(key)
+  if (cached) return cached
   const gl = getRenderer()
-  if (!gl) {
-    cache[kind] = null
-    return null
-  }
+  if (!gl) return null
+  let geometry: THREE.BufferGeometry | undefined
   try {
-    cache[kind] = renderOne(gl, kind, size)
-  } catch {
-    cache[kind] = null
-  }
-  return cache[kind] ?? null
+    geometry = buildPrimitiveGeometry(spec)
+    const url = renderOne(gl, new THREE.Mesh(geometry), spec.kind, size)
+    cache.set(key, url)
+    if (cache.size > 48) cache.delete(cache.keys().next().value!)
+    return url
+  } catch { return null } finally { geometry?.dispose() }
+}
+
+/** Clone the bundled skinned GLB; never mutate the scene's rig or source materials. */
+export function figureThumbUrl(sex: FigureSex): Promise<string | null> {
+  const cached = figures.get(sex)
+  if (cached) return cached
+  const pending = (async () => {
+    const gl = getRenderer()
+    if (!gl) return null
+    const template = await ensureDummyTemplate(sex)
+    if (!template) return null
+    const root = clone(template.scene)
+    root.traverse((node) => { if (node instanceof THREE.SkinnedMesh) node.skeleton.update() })
+    return renderOne(gl, root, sex, 256)
+  })().catch(() => null).then((url) => { if (!url) figures.delete(sex); return url })
+  figures.set(sex, pending)
+  return pending
 }
 
 export function warmPrimitiveThumbs() {

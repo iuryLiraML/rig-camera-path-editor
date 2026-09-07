@@ -1,26 +1,19 @@
 import { startTransition } from 'react'
 import { useEditorStore, type WorkspaceMode } from '../state/useEditorStore'
-import { CubeIcon, ClapperIcon, WandIcon } from './icons'
-import { useViewportInsets } from './viewportInsets'
 
-const MODES: { value: WorkspaceMode; label: string; icon: typeof WandIcon; title: string }[] = [
-  { value: 'build', label: 'Build', icon: CubeIcon, title: 'Place objects in the scene' },
-  { value: 'compose', label: 'Compose', icon: ClapperIcon, title: 'Frame shots and edit the camera' },
-  { value: 'visualize', label: 'Visualize', icon: WandIcon, title: 'Generate a reference from a prompt' },
+const MODES: { value: WorkspaceMode; label: string; title: string }[] = [
+  { value: 'build', label: 'Build', title: 'Place objects in the scene' },
+  { value: 'compose', label: 'Compose', title: 'Frame shots and edit the camera' },
+  { value: 'visualize', label: 'Visualize', title: 'Generate a reference from a prompt' },
 ]
 
 export function ModeSwitcher() {
   const mode = useEditorStore((s) => s.workspaceMode)
   const setMode = useEditorStore((s) => s.setWorkspaceMode)
-  const insets = useViewportInsets()
 
   return (
-    <div
-      className="panel absolute top-3 z-40 flex -translate-x-1/2 items-center gap-0.5 px-1 py-1"
-      style={{ left: insets.centre }}
-    >
+    <div className="panel flex shrink-0 items-center gap-0.5 px-1 py-1">
       {MODES.map((option) => {
-        const Icon = option.icon
         const active = mode === option.value
         return (
           <button
@@ -32,8 +25,9 @@ export function ModeSwitcher() {
               active ? 'bg-accent text-white' : 'text-ink-dim hover:text-ink'
             }`}
           >
-            <Icon size={13} />
-            <span className="hidden sm:inline">{option.label}</span>
+            {/* The icon only repeated the label, and the row cannot spare the
+                57px it cost at 1024 — the label carries the recognition. */}
+            <span>{option.label}</span>
           </button>
         )
       })}

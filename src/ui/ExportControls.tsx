@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { exportDimensions, exportFrame, exportVideo } from '../lib/recorder'
+import { useCameraReady } from '../state/cameraPathLink'
 import { downloadRigJSON } from '../state/useRigStore'
 import { useEditorStore, type ViewMode } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
@@ -139,14 +141,21 @@ export function ExportPassesMenu() {
   const [open, setOpen] = useState(false)
   const exportPasses = useEditorStore((s) => s.exportPasses)
   const ref = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const rect = ref.current?.getBoundingClientRect()
 
   useEffect(() => {
     if (!open) return
     const close = (e: PointerEvent) => {
-      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+      if (!ref.current?.contains(e.target as Node) && !menuRef.current?.contains(e.target as Node)) setOpen(false)
     }
+    const escape = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
     window.addEventListener('pointerdown', close)
-    return () => window.removeEventListener('pointerdown', close)
+    window.addEventListener('keydown', escape)
+    return () => {
+      window.removeEventListener('pointerdown', close)
+      window.removeEventListener('keydown', escape)
+    }
   }, [open])
 
   const label =
@@ -168,10 +177,11 @@ export function ExportPassesMenu() {
       >
         {label}
       </button>
-      {open && (
-        <div className="panel absolute bottom-8 right-0 z-30 w-40 p-1.5">
+      {open && rect && createPortal(
+        <div ref={menuRef} className="panel fixed z-50 w-40 p-1.5"
+          style={{ left: Math.max(12, Math.min(window.innerWidth - 172, rect.right - 160)), bottom: window.innerHeight - rect.top + 8 }}>
           <ExportPassToggles />
-        </div>
+        </div>, document.body
       )}
     </div>
   )
@@ -187,7 +197,10 @@ export function ExportActions({
   compact?: boolean
 }) {
   const exportPasses = useEditorStore((s) => s.exportPasses)
-  const disabled = exportPasses.length === 0
+  const ready = useCameraReady()
+  const recording = useEditorStore((s) => s.recording)
+  const reason = !ready ? 'Add two path points or choose a Free camera in Compose' : exportPasses.length === 0 ? 'Select at least one export pass' : recording ? 'An export is already in progress' : undefined
+  const disabled = Boolean(reason)
 
   return (
     <div className={compact ? 'flex shrink-0 items-center gap-1.5' : undefined}>
@@ -198,6 +211,7 @@ export function ExportActions({
           void exportVideo()
         }}
         disabled={disabled}
+        title={reason}
         className={
           compact
             ? 'flex items-center gap-1.5 rounded-md bg-accent px-2 py-1 text-[11px] font-medium text-white hover:bg-accent/85 disabled:cursor-not-allowed disabled:bg-panel-3 disabled:text-ink-dim/60'
@@ -215,7 +229,7 @@ export function ExportActions({
           void exportFrame()
         }}
         disabled={disabled}
-        title="Exports the current playhead frame as PNG, one file per pass"
+        title={reason ?? "Exports the current playhead frame as PNG, one file per pass"}
         className={
           compact
             ? 'rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink hover:bg-panel-3 disabled:cursor-not-allowed disabled:text-ink-dim/60'

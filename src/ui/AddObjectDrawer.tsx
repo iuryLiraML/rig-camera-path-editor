@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { PRIMITIVE_DEFS, PRIMITIVE_KINDS, type PrimitiveKind } from '../lib/primitiveGeometry'
 import {
   generateObjectFromImage,
@@ -21,6 +21,8 @@ import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { assetThumbKind, clayThumbForBuffer, type AssetThumbKind } from '../lib/assetThumb'
+import type { ProjectMeshAsset } from '../lib/environment'
 import { ClapperIcon, CubeIcon, FrameIcon, GlobeIcon, ImportIcon, PersonIcon, SearchIcon, WandIcon } from './icons'
 import { FigurePreview, PrimitivePreview } from './PrimitivePreview'
 import { ADD_DRAWER_HEIGHT, GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
@@ -104,6 +106,7 @@ export function AddObjectDrawer() {
       <div className="flex gap-1 px-3 pt-2">
         {(
           [
+            { id: 'figures', label: 'Figures' },
             { id: 'primitives', label: 'Primitives' },
             { id: 'assets', label: 'My assets' },
             { id: 'generate', label: 'Generate' },
@@ -126,14 +129,18 @@ export function AddObjectDrawer() {
         ))}
       </div>
       <div className="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-3 py-3">
-        {chip === 'primitives' ? (
+        {chip === 'figures' ? (
           <div className="flex h-full gap-2">
             {(!q || figureSearchHit(q, 'female')) && <FigureTile sex="female" />}
             {(!q || figureSearchHit(q, 'male')) && <FigureTile sex="male" />}
+            {q && !figureSearchHit(q, 'female') && !figureSearchHit(q, 'male') && <p className="self-center text-[12px] text-ink-dim">No figures match that search.</p>}
+          </div>
+        ) : chip === 'primitives' ? (
+          <div className="flex h-full gap-2">
             {primitives.map((kind) => (
               <PrimitiveTile key={kind} kind={kind} />
             ))}
-            {primitives.length === 0 && q && !figureSearchHit(q, 'female') && !figureSearchHit(q, 'male') && (
+            {primitives.length === 0 && q && (
               <p className="self-center text-[12px] text-ink-dim">No primitives match that search.</p>
             )}
           </div>
@@ -576,14 +583,40 @@ function FigureTile({ sex }: { sex: FigureSex }) {
   )
 }
 
+function ClayAssetPreview({
+  bufferKey,
+  kind,
+}: {
+  bufferKey?: string | null
+  kind: AssetThumbKind
+}) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    if (!bufferKey) return
+    let cancelled = false
+    void clayThumbForBuffer(bufferKey).then((next) => {
+      if (!cancelled) setUrl(next)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [bufferKey])
+  if (url) {
+    return <img src={url} alt="" className="h-[4.5rem] w-full object-contain" />
+  }
+  if (kind === 'person') return <PersonIcon size={28} />
+  if (kind === 'points') return <GlobeIcon size={28} />
+  return <CubeIcon size={28} />
+}
+
 function AssetsPane({
   query,
   unplaced,
   placed,
 }: {
   query: string
-  unplaced: { id: string; name: string }[]
-  placed: { id: string; name: string }[]
+  unplaced: ProjectMeshAsset[]
+  placed: { id: string; name: string; bufferKey: string | null; rigKind?: ProjectMeshAsset['rigKind']; keepPoints?: boolean }[]
 }) {
   const shelf = unplaced.filter((asset) => asset.name.toLowerCase().includes(query))
   return (
@@ -599,7 +632,7 @@ function AssetsPane({
               className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
             >
               <div className="flex flex-1 items-center justify-center text-ink-dim">
-                <CubeIcon size={28} />
+                <ClayAssetPreview bufferKey={asset.bufferKey} kind={assetThumbKind(asset)} />
               </div>
               <span className="truncate text-[11px] text-ink">{asset.name}</span>
             </button>
@@ -620,7 +653,10 @@ function AssetsPane({
               className="flex h-full w-32 shrink-0 flex-col rounded-xl bg-panel-2 p-2 text-left hover:bg-panel-3"
             >
               <div className="flex flex-1 items-center justify-center text-ink-dim">
-                <CubeIcon size={28} />
+                <ClayAssetPreview
+                  bufferKey={object.bufferKey}
+                  kind={assetThumbKind(object)}
+                />
               </div>
               <span className="truncate text-[11px] text-ink">{object.name}</span>
             </button>

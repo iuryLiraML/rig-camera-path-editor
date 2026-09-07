@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as THREE from 'three'
 import { Canvas, useThree } from '@react-three/fiber'
 import { GizmoHelper, GizmoViewport, Grid } from '@react-three/drei'
-import { useEditorStore } from '../state/useEditorStore'
+import { isTechMode, useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import {
   computeRects,
@@ -12,6 +12,7 @@ import {
 } from '../state/useLayoutStore'
 import { useEditorOnly } from '../lib/editorOnly'
 import { isCinemaViewport, isPathEditing, isSceneEditing } from '../lib/workspaceChrome'
+import { penToolShouldMount, strokeCursor } from '../lib/penGesture'
 import { AXIS_GIZMO_RADIUS, bottomLeftStack, useViewportInsets } from '../ui/viewportInsets'
 import { renderBridge } from '../lib/renderBridge'
 import { EditorCamera } from './EditorCamera'
@@ -27,8 +28,9 @@ import { LookAtTarget } from './rig/LookAtTarget'
 import { useRigStore } from '../state/useRigStore'
 import { CameraPreview } from './CameraPreview'
 import { PaneCompositor } from './PaneCompositor'
-import { isTechMode, ViewModeController } from './RenderPasses'
+import { ViewModeController } from './RenderPasses'
 import { filterViewportHits } from '../lib/viewportPick'
+import { cssPointFromClient, ndcFromPane } from '../lib/pointerNdc'
 import { isSpatialView, spatialCameras } from './spatialViews'
 import {
   createViewportGradientTexture,
@@ -47,19 +49,18 @@ function PointerRouting() {
   useEffect(() => {
     setEvents({
       compute: (event, state) => {
-        const size = state.size
-        const leaf = paneAt(event.offsetX, event.offsetY, size.width, size.height)
+        const css = cssPointFromClient(event.clientX, event.clientY, state.gl.domElement)
+        if (!css) return
+        const leaf = paneAt(css.x, css.y, css.width, css.height)
         const rects = computeRects(useLayoutStore.getState().root, {
           x: 0,
           y: 0,
-          w: size.width,
-          h: size.height,
+          w: css.width,
+          h: css.height,
         }).leaves
-        const r = (leaf && rects.get(leaf.id)) ?? { x: 0, y: 0, w: size.width, h: size.height }
-        state.pointer.set(
-          ((event.offsetX - r.x) / Math.max(1, r.w)) * 2 - 1,
-          -((event.offsetY - r.y) / Math.max(1, r.h)) * 2 + 1,
-        )
+        const r = (leaf && rects.get(leaf.id)) ?? { x: 0, y: 0, w: css.width, h: css.height }
+        const ndc = ndcFromPane(css.x, css.y, r)
+        state.pointer.set(ndc.x, ndc.y)
         let cam = state.camera
         if (leaf && isSpatialView(leaf.view)) cam = spatialCameras[leaf.view]
         else if (leaf?.view === 'camera' && cinemaCameraRef.current) cam = cinemaCameraRef.current
@@ -170,13 +171,17 @@ export function Viewport() {
     setLasso({ points, pane })
   }, [])
 
+  // `cursor` inherits, so the canvas picks this up without R3F touching it.
+  const cursor = strokeCursor({ tool, playMode, workspaceMode, tech, cameraView })
+
   return (
     <div
+      data-viewport-surface
       className="absolute"
       style={
         exportSize
-          ? { left: 0, top: 0, width: exportSize[0], height: exportSize[1] }
-          : { inset: 0 }
+          ? { left: 0, top: 0, width: exportSize[0], height: exportSize[1], cursor }
+          : { inset: 0, cursor }
       }
     >
     <Canvas
@@ -230,7 +235,9 @@ export function Viewport() {
       <SceneObjects />
       <EnvironmentSplat />
 
-      {tool === 'pen' && isPathEditing(playMode, workspaceMode) && !staticCamera && !tech && <PenTool />}
+      {(penToolShouldMount({ tool, playMode, workspaceMode, staticCamera, tech, cameraView }) || (tool === 'select' && !playMode && workspaceMode === 'compose' && !tech && !cameraView)) && (
+        <PenTool />
+      )}
       {tool === 'draw' && isPathEditing(playMode, workspaceMode) && !cameraView && !tech && <DrawTool />}
       <InactivePaths />
       <PathEditor />

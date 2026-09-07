@@ -6,7 +6,8 @@ import { openComposeTimeline } from '../lib/editorShortcuts'
 import { AddObjectMenu } from './AddObjectMenu'
 import { ExportActions, ExportFormatFields, ExportPassToggles } from './ExportControls'
 import { ClockIcon, CursorIcon, DrawPathIcon, PenIcon, PlayIcon, TargetIcon } from './icons'
-import { toolbarSlot, useViewportInsets, useWindowSize } from './viewportInsets'
+import { useChromeLayout } from './viewportInsets'
+import { undo, redo } from '../lib/history'
 
 function ToolButton({
   children,
@@ -129,9 +130,8 @@ export function Toolbar() {
   const zoomPct = useEditorStore((s) => s.zoomPct)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const hasPath = useCameraReady()
-  const insets = useViewportInsets()
-  const win = useWindowSize()
-  const slot = toolbarSlot(insets, win.w)
+  const { tier } = useChromeLayout()
+  const compact = tier !== 'full'
   const scaleLocked = selection === 'cinema-camera'
   const sceneTools = workspaceMode !== 'visualize'
   const composeTools = workspaceMode === 'compose'
@@ -147,96 +147,139 @@ export function Toolbar() {
     useEditorStore.getState().setGizmoMode(mode)
   }
 
+  const gizmoRow = (
+    <div className="flex items-center gap-px px-0.5">
+      <ToolButton
+        title="Move (W)"
+        active={tool === 'select' && gizmoMode === 'translate'}
+        onClick={() => pickGizmo('translate')}
+      >
+        <span className="text-[10px] font-semibold">W</span>
+      </ToolButton>
+      <ToolButton
+        title="Rotate (E)"
+        active={tool === 'select' && gizmoMode === 'rotate'}
+        onClick={() => pickGizmo('rotate')}
+      >
+        <span className="text-[10px] font-semibold">E</span>
+      </ToolButton>
+      <ToolButton
+        title={scaleLocked ? 'Scale does not apply to the camera' : 'Scale (R)'}
+        active={tool === 'select' && gizmoMode === 'scale'}
+        disabled={scaleLocked}
+        onClick={() => pickGizmo('scale')}
+      >
+        <span className="text-[10px] font-semibold">R</span>
+      </ToolButton>
+    </div>
+  )
+
+  const framingRow =
+    workspaceMode !== 'visualize' ? (
+      <>
+        <ToolButton
+          title="Center the view on the world origin (H)"
+          onClick={() => useEditorStore.getState().requestHome()}
+        >
+          <TargetIcon />
+        </ToolButton>
+        <button
+          title="Click to frame the scene (F)"
+          onClick={() => useEditorStore.getState().requestFrame()}
+          className="w-11 px-1 text-center text-[11px] tabular-nums text-ink-dim hover:text-ink"
+        >
+          {zoomPct}%
+        </button>
+        <ToolButton
+          title="Timeline (T)"
+          active={workspaceMode === 'compose'}
+          onClick={() => openComposeTimeline()}
+        >
+          <ClockIcon />
+        </ToolButton>
+      </>
+    ) : null
+
   return (
-    <div
-      className="panel absolute top-3 z-20 flex w-max items-center justify-center gap-0.5 px-1.5 py-1"
-      style={{ right: slot.right }}
-    >
+    <div className="panel relative z-20 flex w-max shrink-0 items-center justify-center gap-0.5 px-1.5 py-1">
       {sceneTools && (
         <>
-          {composeTools && (
+          {composeTools && !compact && (
             <AddObjectMenu includePath title="Add a shape, path, or import a model" />
           )}
-          {composeTools && <Divider />}
+          {composeTools && !compact && <Divider />}
           <ToolButton title="Select (V)" active={tool === 'select'} onClick={() => setTool('select')}>
             <CursorIcon />
           </ToolButton>
           {composeTools && (
             <>
+              {(tool === 'pen' || !compact) && (
+                <ToolButton
+                  title="Pen — click to place path points (P)"
+                  active={tool === 'pen'}
+                  onClick={() => setTool('pen')}
+                >
+                  <PenIcon />
+                </ToolButton>
+              )}
+              {(tool === 'draw' || !compact) && (
+                <ToolButton
+                  title="Draw — stroke a new camera path from the top view (D)"
+                  active={tool === 'draw'}
+                  onClick={() => setTool('draw')}
+                >
+                  <DrawPathIcon />
+                </ToolButton>
+              )}
+            </>
+          )}
+          {!compact && (
+            <>
+              <Divider />
+              {gizmoRow}
+              {tool === 'pen' && composeTools && (
+                <>
+                  <Divider />
+                  <SnapControls />
+                </>
+              )}
+              <Divider />
+            </>
+          )}
+        </>
+      )}
+      {!compact && framingRow}
+      <ToolButton title="Undo (Ctrl+Z)" onClick={() => undo()}>
+        <span className="text-[11px]">↶</span>
+      </ToolButton>
+      <ToolButton title="Redo (Ctrl+Shift+Z)" onClick={() => redo()}>
+        <span className="text-[11px]">↷</span>
+      </ToolButton>
+      {compact && (
+        <ToolbarMore>
+          {composeTools && <AddObjectMenu includePath title="Add a shape, path, or import a model" />}
+          {composeTools && tool !== 'pen' && (
             <ToolButton
               title="Pen — click to place path points (P)"
-              active={tool === 'pen'}
+              active={false}
               onClick={() => setTool('pen')}
             >
               <PenIcon />
             </ToolButton>
+          )}
+          {composeTools && tool !== 'draw' && (
             <ToolButton
               title="Draw — stroke a new camera path from the top view (D)"
-              active={tool === 'draw'}
+              active={false}
               onClick={() => setTool('draw')}
             >
               <DrawPathIcon />
             </ToolButton>
-            </>
           )}
-          <Divider />
-          <div className="flex items-center gap-px px-0.5">
-          <ToolButton
-            title="Move (W)"
-            active={tool === 'select' && gizmoMode === 'translate'}
-            onClick={() => pickGizmo('translate')}
-          >
-            <span className="text-[10px] font-semibold">W</span>
-          </ToolButton>
-          <ToolButton
-            title="Rotate (E)"
-            active={tool === 'select' && gizmoMode === 'rotate'}
-            onClick={() => pickGizmo('rotate')}
-          >
-            <span className="text-[10px] font-semibold">E</span>
-          </ToolButton>
-          <ToolButton
-            title={scaleLocked ? 'Scale does not apply to the camera' : 'Scale (R)'}
-            active={tool === 'select' && gizmoMode === 'scale'}
-            disabled={scaleLocked}
-            onClick={() => pickGizmo('scale')}
-          >
-            <span className="text-[10px] font-semibold">R</span>
-          </ToolButton>
-          </div>
-          {tool === 'pen' && composeTools && (
-            <>
-              <Divider />
-              <SnapControls />
-            </>
-          )}
-          <Divider />
-        </>
-      )}
-      {workspaceMode !== 'visualize' && (
-        <>
-          <ToolButton
-            title="Center the view on the world origin (H)"
-            onClick={() => useEditorStore.getState().requestHome()}
-          >
-            <TargetIcon />
-          </ToolButton>
-          <button
-            title="Click to frame the scene (F)"
-            onClick={() => useEditorStore.getState().requestFrame()}
-            className="w-11 px-1 text-center text-[11px] tabular-nums text-ink-dim hover:text-ink"
-          >
-            {zoomPct}%
-          </button>
-          <Divider />
-          <ToolButton
-            title="Timeline (T)"
-            active={workspaceMode === 'compose'}
-            onClick={() => openComposeTimeline()}
-          >
-            <ClockIcon />
-          </ToolButton>
-        </>
+          {gizmoRow}
+          {tool === 'pen' && composeTools && <SnapControls />}
+          {framingRow}
+        </ToolbarMore>
       )}
       <ExportMenu disabled={!hasPath} />
       {workspaceMode !== 'visualize' && (
@@ -247,6 +290,31 @@ export function Toolbar() {
         >
           <PlayIcon />
         </ToolButton>
+      )}
+    </div>
+  )
+}
+
+function ToolbarMore({ children }: { children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (e: PointerEvent) => {
+      if (!ref.current?.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('pointerdown', close)
+    return () => window.removeEventListener('pointerdown', close)
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
+      <ToolButton title="More" active={open} onClick={() => setOpen((value) => !value)}>
+        <span className="text-[11px]">⋯</span>
+      </ToolButton>
+      {open && (
+        <div className="panel absolute right-0 top-9 z-30 flex items-center gap-0.5 p-1">
+          {children}
+        </div>
       )}
     </div>
   )

@@ -298,6 +298,8 @@ export function VisualizeBar() {
   const win = useWindowSize()
   const band = chromeBand(insets, win.w)
 
+  const compact = band.width < 800
+
   return (
     <>
       <VisualizeLetterbox />
@@ -311,7 +313,7 @@ export function VisualizeBar() {
           height: VISUALIZE_DOCK_HEIGHT,
         }}
       >
-        <div className="flex h-11 min-w-0 items-center gap-2">
+        <div className={compact ? "grid shrink-0 grid-cols-[auto_1fr] items-center gap-x-2 gap-y-1" : "flex h-11 min-w-0 shrink-0 items-center gap-2"}>
           <div className="flex shrink-0 items-center gap-1.5">
             <button
               type="button"
@@ -338,11 +340,12 @@ export function VisualizeBar() {
               {formatTimecode(t, duration)} / {formatTimecode(1, duration)}
             </span>
           </div>
-          <BarRule />
+          {!compact && <BarRule />}
+          {compact && <div className="justify-self-end"><ExportActions compact includeRig={false} /></div>}
           <Segmented
             className="w-[9.25rem] shrink-0"
             options={[
-              { value: 'shots', label: 'Shots' },
+              { value: 'shots', label: 'Storyboard' },
               { value: 'cameras', label: 'Cameras' },
             ]}
             value={picker}
@@ -377,8 +380,7 @@ export function VisualizeBar() {
               ))
             )}
           </div>
-          <BarRule />
-          <ExportActions compact includeRig={false} />
+          {!compact && <><BarRule /><ExportActions compact includeRig={false} /></>}
         </div>
 
         <VisualizeScrubber />

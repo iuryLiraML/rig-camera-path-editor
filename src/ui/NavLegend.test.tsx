@@ -35,7 +35,9 @@ describe('viewport home chrome', () => {
 
   it('opens the shortcut overlay from the Compose footer help chip', () => {
     useEditorStore.setState({ workspaceMode: 'compose', cameraView: false })
-    const { getByTitle } = render(<ViewportFooter />)
+    const { getByTitle, queryByRole } = render(<ViewportFooter />)
+    const views = queryByRole('button', { name: 'Views' })
+    if (views) fireEvent.click(views)
     fireEvent.click(getByTitle('Keyboard shortcuts (?)'))
     expect(useEditorStore.getState().showShortcuts).toBe(true)
   })

@@ -180,11 +180,20 @@ describe('applyDeleteShortcut', () => {
 describe('shortcut handlers', () => {
   it('lists the Compose cheat-sheet rows', () => {
     expect(SHORTCUT_ROWS.map((row) => row.keys)).toEqual([
+      'MMB drag',
+      'Shift+MMB drag',
+      'Ctrl+MMB drag / Wheel',
+      'LMB click / drag',
       'I',
       'Delete',
       'WASD / arrows',
       'Space',
       'P',
+      '1 / 2 / 3 / 4',
+      'Ctrl+click curve',
+      'Alt+drag point / handle',
+      'X / Y / Z during drag',
+      'Enter / Escape',
       'D',
       'Shift+drag',
       'W E R',

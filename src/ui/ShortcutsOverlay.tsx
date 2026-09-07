@@ -10,7 +10,7 @@ export function ShortcutsOverlay() {
       onClick={() => useEditorStore.getState().setShowShortcuts(false)}
     >
       <div
-        className="panel w-[min(92vw,420px)] p-5"
+        className="panel max-h-[calc(100dvh-32px)] w-[min(92vw,420px)] overflow-y-auto p-5"
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-label="Keyboard shortcuts"

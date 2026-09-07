@@ -3,7 +3,7 @@ import { useEditorStore } from '../state/useEditorStore'
 import { useCameraAnchorCount } from '../state/cameraPathLink'
 import { useSceneStore } from '../state/useSceneStore'
 import { PenIcon, PlusIcon } from './icons'
-import { useViewportInsets } from './viewportInsets'
+import { chromeBand, useWindowSize, useViewportInsets } from './viewportInsets'
 
 /** First-run guide — copy depends on Build / Compose / Visualize. */
 export function OnboardingCard() {
@@ -33,7 +33,7 @@ export function OnboardingCard() {
     return (
       <Guide
         title="Describe the shot"
-        body="The Director builds the camera move from a prompt. Type in the bar at the bottom, then send. Edit Shot takes you back to Compose."
+        body="The Director builds the camera move from a prompt. Open the Director chat on the right, describe your shot, then send. Edit Shot takes you back to Compose."
         actionLabel="Open Settings"
         onAction={() => useEditorStore.getState().setShowSettings(true)}
       />
@@ -72,10 +72,12 @@ function Guide({
   icon?: ReactNode
 }) {
   const insets = useViewportInsets()
+  const win = useWindowSize()
+  const band = chromeBand(insets, win.w)
   return (
     <div
-      className="panel absolute left-1/2 z-20 w-[420px] -translate-x-1/2 p-4"
-      style={{ bottom: insets.contentBottom }}
+      className="panel absolute z-20 -translate-x-1/2 p-4"
+      style={{ bottom: insets.contentBottom, left: band.left + band.width / 2, width: Math.min(420, band.width) }}
     >
       <div className="flex items-start justify-between">
         <h2 className="text-sm font-semibold text-ink">{title}</h2>
