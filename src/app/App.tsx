@@ -23,7 +23,7 @@ import { ProjectsWorkspace } from '../ui/ProjectsWorkspace'
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { isTeamCloudApp } from '../lib/cloud/client'
 import { reloadActiveProjectFromCloud } from '../lib/projects'
-import { syncActiveProjectToCloud } from '../lib/cloud/sync'
+import { syncProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
 import { redo, undo, historyIsDirty } from '../lib/history'
 import { insertKeyframeAtPlayhead, lookAtKeyGroup } from '../lib/insertKeyframe'
@@ -380,7 +380,7 @@ function SaveConflictDialog() {
           <button
             type="button"
             onClick={() => {
-              void reloadActiveProjectFromCloud().catch((error) => {
+              void reloadActiveProjectFromCloud(conflict.projectId).catch((error) => {
                 console.error(error)
               })
             }}
@@ -391,7 +391,7 @@ function SaveConflictDialog() {
           <button
             type="button"
             onClick={() => {
-              void syncActiveProjectToCloud({ ifMatch: conflict.updatedAt }).catch((error) => {
+              void syncProjectToCloud(conflict.projectId, { ifMatch: conflict.updatedAt }).catch((error) => {
                 console.error(error)
               })
             }}

@@ -6,6 +6,8 @@ import { useProjectStore } from '../state/useProjectStore'
 import { HomeIcon, ListIcon } from './icons'
 import { AccountMenu } from './AccountMenu'
 import { SceneSwitcher } from './SceneSwitcher'
+import { syncProjectToCloud } from '../lib/cloud/sync'
+import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { TOP_ROW_HEIGHT } from './viewportInsets'
 
 const SAVE_CHIP: Record<'saved' | 'saving' | 'dirty', { label: string; className: string }> = {
@@ -20,9 +22,12 @@ export function ProjectChip({ variant = 'pill' }: { variant?: 'pill' | 'header' 
   const showOutliner = useEditorStore((s) => s.showOutliner)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
   const saveStatus = useSaveStatusStore((s) => s.status)
+  const cloud = useSaveStatusStore((s) => s.cloud[projectId])
+  const signedIn = useCloudAuthStore((s) => s.status === 'signed-in')
   const canToggleOutliner = workspaceMode !== 'visualize'
   const draft = !projectId && saveStatus === 'saved'
-  const chip = draft ? { label: 'Draft', className: 'text-ink-dim' } : SAVE_CHIP[saveStatus]
+  const cloudChip = signedIn && saveStatus === 'saved' && cloud ? { label: cloud === 'saved' ? 'Synced' : cloud === 'error' ? 'Saved locally · Sync failed' : 'Saved locally · Syncing…', className: 'text-ink-dim' } : null
+  const chip = cloudChip ?? (draft ? { label: 'Draft', className: 'text-ink-dim' } : SAVE_CHIP[saveStatus])
   const [editingName, setEditingName] = useState(false)
   const [nameDraft, setNameDraft] = useState(name)
   const nameInputRef = useRef<HTMLInputElement>(null)
@@ -125,10 +130,11 @@ export function ProjectChip({ variant = 'pill' }: { variant?: 'pill' | 'header' 
       <span
         data-save-status={saveStatus}
         className={`shrink-0 text-[10px] ${chip.className}`}
-        title={draft ? 'Temporary session — changes will save this project locally' : saveStatus === 'saved' ? 'Saved in this browser' : chip.label}
+        title={cloudChip ? cloudChip.label : draft ? 'Temporary session — changes will save this project locally' : saveStatus === 'saved' ? 'Saved in this browser' : chip.label}
       >
         {chip.label}
       </span>
+      {signedIn && cloud === 'error' && <button type="button" className="text-[10px] text-ink underline" onClick={() => void syncProjectToCloud(projectId).catch(() => {})}>Retry sync</button>}
       <AccountMenu />
     </div>
   )

@@ -174,9 +174,10 @@ function IconBtn({
 function NamePopover({ objectId }: { objectId: string }) {
   const object = useSceneStore((s) => s.objects.find((o) => o.id === objectId))
   const shade = object?.shade ?? 0.7
+  const insets = useViewportInsets()
   if (!object) return null
   return (
-    <div className="panel max-h-[70vh] w-80 overflow-y-auto p-3">
+    <div className="panel w-80 overflow-y-auto p-3" style={{ maxHeight: `calc(100dvh - ${insets.contentBottom + insets.top + 52}px)` }}>
       <div className="flex items-center justify-between">
         <span className="text-[12px] font-semibold text-ink">{object.primitive ? 'Shape' : 'Object'}</span>
         <button

@@ -1,6 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { Plugin } from 'vite'
 import { handleAgentApi, type ProxyEnv } from './agentApi'
+import { handleAuthApi } from './authApi'
 
 async function toWebRequest(req: IncomingMessage): Promise<Request> {
   const headers = new Headers()
@@ -15,12 +16,14 @@ async function toWebRequest(req: IncomingMessage): Promise<Request> {
     for await (const chunk of req) chunks.push(chunk as Buffer)
     body = Buffer.concat(chunks)
   }
-  return new Request(`http://localhost${req.url ?? '/'}`, { method, headers, body })
+  return new Request(`http://${req.headers.host ?? 'localhost'}${req.url ?? '/'}`, { method, headers, body })
 }
 
 async function writeWebResponse(res: ServerResponse, response: Response): Promise<void> {
   res.statusCode = response.status
-  response.headers.forEach((value, name) => res.setHeader(name, value))
+  response.headers.forEach((value, name) => { if (name !== 'set-cookie') res.setHeader(name, value) })
+  const cookies = response.headers.getSetCookie()
+  if (cookies.length) res.setHeader('set-cookie', cookies)
   if (response.body) {
     const reader = response.body.getReader()
     for (;;) {
@@ -46,7 +49,7 @@ export function agentApiDevPlugin(env: ProxyEnv): Plugin {
       server.middlewares.use((req, res, next) => {
         void (async () => {
           const request = await toWebRequest(req)
-          const response = await handleAgentApi(request, env)
+          const response = await handleAuthApi(request, env) ?? await handleAgentApi(request, env)
           if (!response) {
             next()
             return

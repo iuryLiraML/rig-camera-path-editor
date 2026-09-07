@@ -285,6 +285,8 @@ export function ProjectCard({
           )}
           <p className="mt-0.5 text-xs text-ink-dim">
             {project.scenes.length} {project.scenes.length === 1 ? 'scene' : 'scenes'} ·{' '}
+            {project.objectCount !== undefined && <>{project.objectCount} {project.objectCount === 1 ? 'object' : 'objects'} · </>}
+            {Boolean(project.pathCount) && <>{project.pathCount} {project.pathCount === 1 ? 'path' : 'paths'} · </>}
             {project.shotCount} {project.shotCount === 1 ? 'shot' : 'shots'} ·{' '}
             {relativeTime(project.updatedAt)}
           </p>

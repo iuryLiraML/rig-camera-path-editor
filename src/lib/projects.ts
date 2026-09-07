@@ -1,4 +1,4 @@
-import { useProjectStore, type CustomSkill, type DirectorChatEntry, type SavedPrompt, type Shot } from '../state/useProjectStore'
+import { useProjectStore, type CustomSkill, type DirectorChatEntry, type SavedPrompt, type Shot, type ProjectSummary } from '../state/useProjectStore'
 import { useSceneStore, makeSceneId } from '../state/useSceneStore'
 import { applyRigSnapshot, getRigSnapshot, useRigStore, type RigSnapshot } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore, type MotionPath } from '../state/usePathStore'
@@ -12,8 +12,8 @@ import {
   useCameraOptionsStore,
   type CameraOption,
 } from '../state/useCameraOptionsStore'
-import { idbDelete, idbGet, idbGetAll, idbPut, STORES } from './idb'
-import { CloudConflictError, createCloudProject, isTeamCloudApp, listCloudProjects } from './cloud/client'
+import { idbDelete, idbGet, idbGetAll, idbPut, idbUpdate, STORES } from './idb'
+import { CloudConflictError, isTeamCloudApp, listCloudProjects } from './cloud/client'
 import { hydrateCloudProject, syncActiveProjectToCloud, syncProjectToCloud } from './cloud/sync'
 import { liveSceneMetas, loadSceneFromMetas, readLegacyMetas, sweepOrphanBuffers, type ObjectMeta } from './sceneIO'
 import { hydrateEnvironmentFromRecord, loadLiveEnvironmentBuffer } from './environmentJobs'
@@ -24,7 +24,6 @@ import { resetHistory, setHistorySuspended } from './history'
 import { renderBridge } from './renderBridge'
 import { captureShotStill } from './recorder'
 import {
-  PROJECT_WORKFLOW_VERSION,
   createLegacyProjectWorkflow,
   isProjectEditorReady,
   migrateProjectWorkflow,
@@ -72,6 +71,8 @@ export interface ProjectRecord {
   updatedAt?: number
   cloudProjectId?: string
   cloudUpdatedAt?: string
+  contentRevision?: string
+  cloudSyncedRevision?: string
   bufferAssets?: Record<string, ProjectAssetRef>
   stillAssets?: Record<string, ProjectAssetRef>
   /** folder on the Projects home; missing on records written before folders */
@@ -98,6 +99,8 @@ interface LegacyProjectRecord {
   updatedAt?: number
   cloudProjectId?: string
   cloudUpdatedAt?: string
+  contentRevision?: string
+  cloudSyncedRevision?: string
   bufferAssets?: Record<string, ProjectAssetRef>
   stillAssets?: Record<string, ProjectAssetRef>
   folderId?: string | null
@@ -232,7 +235,7 @@ function buildActiveRecord(id: string, createdAt: number, previous?: ProjectReco
 }
 
 const createdAtById = new Map<string, number>()
-let creatingUntitled: Promise<string | null> | null = null
+
 
 function restoreDirectorChat() {
   useAgentStore.getState().clearChat()
@@ -244,115 +247,126 @@ function restoreDirectorChat() {
  * "New project", which starts from an empty rig. Used when autosave/unload
  * runs before the user has ever named a project.
  */
-async function createUntitledFromCurrent(): Promise<string | null> {
+function ensureActiveProjectId(createIfMissing: boolean): string | null {
   const current = useProjectStore.getState()
-  const name = current.name.trim() || 'Untitled'
-  let id = makeSceneId('proj')
-  let cloudUpdatedAt: string | undefined
-  if (isCloudFirst()) {
-    const accessToken = useCloudAuthStore.getState().accessToken
-    if (accessToken) {
-      const created = await createCloudProject(accessToken, {
-        name,
-        workflowVersion: PROJECT_WORKFLOW_VERSION,
-        workflow: current.workflow,
-        editorState: {},
-      })
-      id = created.id
-      cloudUpdatedAt = created.updatedAt
-    }
+  if (current.projectId) return current.projectId
+  if (!createIfMissing || useEditorStore.getState().appView === 'projects') return null
+  const id = makeSceneId('proj')
+  const activeSceneId = current.activeSceneId || makeSceneId('scene')
+  const sceneName = current.sceneName.trim() || 'Scene 1'
+  // Identity assignment is bookkeeping; it must not create another authored edit.
+  const suspended = autosaveSuspended
+  autosaveSuspended = true
+  try {
+    useProjectStore.setState({
+      projectId: id,
+      activeSceneId,
+      sceneName,
+      scenes: current.scenes.length ? current.scenes : [{ id: activeSceneId, name: sceneName }],
+    })
+  } finally {
+    autosaveSuspended = suspended
   }
   createdAtById.set(id, Date.now())
-  let activeSceneId = current.activeSceneId
-  let sceneName = current.sceneName.trim() || 'Scene 1'
-  let scenes = current.scenes
-  if (!activeSceneId) {
-    activeSceneId = makeSceneId('scene')
-    scenes = [{ id: activeSceneId, name: sceneName }]
-  }
-  current.loadProject({
-    projectId: id,
-    name,
-    workflow: current.workflow,
-    guidelines: current.guidelines,
-    savedPrompts: current.savedPrompts,
-    skills: current.skills,
-    activeSceneId,
-    sceneName,
-    scenes,
-    shots: current.shots,
-    directorChat: current.directorChat,
-    directorLessons: current.directorLessons,
-    folderId: current.folderId,
-  })
   localStorage.setItem(ACTIVE_KEY, id)
-  if (cloudUpdatedAt) {
-    const createdAt = createdAtById.get(id) ?? Date.now()
-    await idbPut(STORES.projects, {
-      ...buildActiveRecord(id, createdAt),
-      cloudProjectId: id,
-      cloudUpdatedAt,
-    })
-  }
-  await refreshProjectList()
   return id
 }
 
-async function ensureActiveProjectId(createIfMissing: boolean): Promise<string | null> {
-  const existing = useProjectStore.getState().projectId
-  if (existing) return existing
-  if (!createIfMissing) return null
-  // Projects home with no open session — do not spawn an untitled on tab hide.
-  if (useEditorStore.getState().appView === 'projects') return null
-  if (creatingUntitled) return creatingUntitled
-  creatingUntitled = createUntitledFromCurrent().finally(() => {
-    creatingUntitled = null
+const localSaves = new Map<string, Promise<void>>()
+let authoredRevision = 0
+
+/** Editor snapshots and Projects card actions share the same per-project write order. */
+function enqueueProjectWrite<T>(projectId: string, write: () => Promise<T>): Promise<T> {
+  const pending = (localSaves.get(projectId) ?? Promise.resolve()).catch(() => {}).then(write)
+  const settled = pending.then(() => {}, () => {})
+  localSaves.set(projectId, settled)
+  void settled.then(() => {
+    if (localSaves.get(projectId) === settled) localSaves.delete(projectId)
   })
-  return creatingUntitled
+  return pending
 }
 
-/** Persists the active project (debounced by watchers, immediate on switch). */
-export async function saveActiveProject(options?: { createIfMissing?: boolean }) {
-  const createIfMissing = options?.createIfMissing ?? true
-  useSaveStatusStore.getState().setStatus('saving')
-  try {
-    const projectId = await ensureActiveProjectId(createIfMissing)
-    if (!projectId) {
-      // Projects home has nothing to persist. An editor session without an id
-      // failed to create — do not show Saved.
-      const idle = useEditorStore.getState().appView === 'projects'
-      useSaveStatusStore.getState().setStatus(idle ? 'saved' : 'dirty')
-      return
+function requestProjectSync(projectId: string) {
+  if (isCloudFirst()) useSaveStatusStore.getState().setCloudStatus(projectId, 'pending')
+  void syncProjectToCloud(projectId).catch((error) => {
+    if (error instanceof CloudConflictError) {
+      useCloudAuthStore.getState().setSaveConflict({ projectId, updatedAt: error.updatedAt })
     }
-    const createdAt = createdAtById.get(projectId) ?? Date.now()
-    createdAtById.set(projectId, createdAt)
+    console.error('Cloud sync failed', error)
+  })
+}
+
+/** Persist an authored mutation against the latest record, keeping cloud acknowledgements intact. */
+function editProjectRecord(projectId: string, edit: (record: ProjectRecord) => ProjectRecord) {
+  return enqueueProjectWrite(projectId, async () => {
+    let changed = false
+    const updated = await idbUpdate<ProjectRecord>(STORES.projects, projectId, (current) => {
+      const record = normalizeProjectRecord(current)
+      const next = edit(record)
+      if (next === record) return current
+      changed = true
+      return { ...next, contentRevision: crypto.randomUUID(), updatedAt: Date.now() }
+    })
+    if (updated && changed) {
+      upsertProjectSummary(updated)
+      requestProjectSync(projectId)
+    }
+    return updated
+  })
+}
+
+/** Capture before any await, then serialize writes for this project in invocation order. */
+export async function saveActiveProject(options?: { createIfMissing?: boolean }) {
+  const projectId = ensureActiveProjectId(options?.createIfMissing ?? true)
+  if (!projectId) {
+    useSaveStatusStore.getState().setStatus('saved')
+    return
+  }
+  clearTimeout(saveTimer)
+  const revision = authoredRevision
+  const createdAt = createdAtById.get(projectId) ?? Date.now()
+  const snapshot = structuredClone(buildActiveRecord(projectId, createdAt))
+  const contentRevision = crypto.randomUUID()
+  const isCurrent = () => useProjectStore.getState().projectId === projectId
+    && useProjectStore.getState().activeSceneId === snapshot.activeSceneId
+    && authoredRevision === revision
+  useSaveStatusStore.getState().setStatus('saving')
+  const pending = enqueueProjectWrite(projectId, async () => {
     const previous = await getProjectRecord(projectId)
-    const record: ProjectRecord = {
-      ...buildActiveRecord(projectId, createdAt, previous),
-      cloudProjectId: previous?.cloudProjectId ?? (isCloudFirst() ? projectId : undefined),
+    const scene = snapshot.scenes[0]
+    const mergeScene = (stored: SceneRecord[]) => stored.some((s) => s.id === scene.id)
+      ? stored.map((s) => s.id === scene.id ? { ...scene, order: s.order, createdAt: s.createdAt, thumbnail: s.thumbnail } : s)
+      : [...stored, { ...scene, order: stored.length }]
+    const scenes = mergeScene(previous?.scenes ?? [])
+    let record: ProjectRecord = {
+      ...snapshot,
+      createdAt: previous?.createdAt ?? createdAt,
+      scenes,
+      contentRevision,
+      cloudSyncedRevision: previous?.cloudSyncedRevision,
+      cloudProjectId: previous?.cloudProjectId,
       cloudUpdatedAt: previous?.cloudUpdatedAt,
       bufferAssets: previous?.bufferAssets,
       stillAssets: previous?.stillAssets,
     }
-    await idbPut(STORES.projects, record)
-    useSaveStatusStore.getState().setStatus('saved')
-    void syncActiveProjectToCloud().catch((error) => {
-      if (error instanceof CloudConflictError) {
-        useCloudAuthStore.getState().setSaveConflict({
-          projectId,
-          updatedAt: error.updatedAt,
-        })
-        return
-      }
-      console.error('Cloud sync failed', error)
-      if (isCloudFirst()) {
-        useSceneStore.getState().showNotice(
-          error instanceof Error ? error.message : 'Cloud save failed. The project is not durable offline.',
-        )
-      }
-    })
+    if (previous) {
+      const updated = await idbUpdate<ProjectRecord>(STORES.projects, projectId, (latest) => ({
+        ...record, scenes: mergeScene(normalizeProjectRecord(latest).scenes), cloudProjectId: latest.cloudProjectId, cloudUpdatedAt: latest.cloudUpdatedAt,
+        cloudSyncedRevision: latest.cloudSyncedRevision, bufferAssets: latest.bufferAssets, stillAssets: latest.stillAssets,
+      }))
+      if (!updated) return
+      record = updated
+    } else {
+      await idbPut(STORES.projects, record)
+    }
+    upsertProjectSummary(record)
+    if (isCurrent()) useSaveStatusStore.getState().setStatus('saved')
+    requestProjectSync(projectId)
+  })
+  try {
+    await pending
   } catch (error) {
-    useSaveStatusStore.getState().setStatus('dirty')
+    if (isCurrent()) useSaveStatusStore.getState().setStatus('dirty')
     throw error
   }
 }
@@ -394,67 +408,58 @@ async function refreshFolderList() {
   return folders
 }
 
+function projectSummary(record: ProjectRecord): ProjectSummary {
+  const scenes = [...record.scenes].sort((a, b) => a.order - b.order)
+  const shots = scenes.flatMap((s) => s.shots ?? [])
+  return {
+    id: record.id,
+    name: record.name,
+    setupStatus: isProjectEditorReady(migrateProjectWorkflow(record.workflow, record.name)) ? 'ready' : 'draft',
+    folderId: record.folderId ?? null,
+    shotCount: shots.length,
+    objectCount: scenes.reduce((n, s) => n + s.sceneMeta.length, 0),
+    pathCount: scenes.reduce((n, s) => n + (s.paths ?? []).filter((p) => p.anchors.length > 0).length, 0),
+    updatedAt: record.updatedAt ?? record.createdAt,
+    thumbnail: scenes[0]?.thumbnail ?? [...shots].sort((a, b) => a.order - b.order)[0]?.thumbnail ?? undefined,
+    scenes: sceneSummaries(scenes),
+  }
+}
+
+function upsertProjectSummary(record: ProjectRecord) {
+  const current = useProjectStore.getState().projectList
+  useProjectStore.getState().setProjectList(
+    [...current.filter((p) => p.id !== record.id), projectSummary(record)].sort((a, b) => b.updatedAt - a.updatedAt),
+  )
+}
+
 async function refreshProjectList() {
   await refreshFolderList()
-  if (isCloudFirst()) {
-    const accessToken = useCloudAuthStore.getState().accessToken
-    if (!accessToken) {
-      useProjectStore.getState().setProjectList([])
-      return []
-    }
-    const cloud = await listCloudProjects(accessToken)
-    const local = await getAllProjectRecords()
-    const localById = new Map(local.map((record) => [record.id, record]))
-    cloud.forEach((project) => {
-      const createdAt = Date.parse(project.updatedAt) || Date.now()
-      createdAtById.set(project.id, createdAt)
-    })
-    useProjectStore.getState().setProjectList(
-      cloud.map((project) => {
-        const workflow = migrateProjectWorkflow(project.workflow, project.name)
-        const scenes = scenesFromUnknownEditorState(project.editorState)
-        return {
-          id: project.id,
-          name: project.name,
-          setupStatus: isProjectEditorReady(workflow) ? 'ready' : 'draft',
-          folderId: localById.get(project.id)?.folderId ?? null,
-          shotCount: shotCountFromUnknownEditorState(project.editorState),
-          updatedAt: Date.parse(project.updatedAt) || Date.now(),
-          scenes: scenes
-            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-            .map((s) => ({ id: s.id, name: s.name })),
-        }
-      }),
-    )
-    return [] as ProjectRecord[]
-  }
-
   const records = await getAllProjectRecords()
   records.forEach((r) => createdAtById.set(r.id, r.createdAt))
-  // most recently touched first: that is the order you actually look for
-  const byRecency = [...records].sort(
-    (a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt),
-  )
-  useProjectStore.getState().setProjectList(
-    byRecency.map((record) => {
-      const workflow = migrateProjectWorkflow(record.workflow, record.name)
-      const scenes = [...record.scenes].sort((a, b) => a.order - b.order)
-      const allShots = scenes.flatMap((s) => s.shots ?? [])
-      return {
-        id: record.id,
-        name: record.name,
-        setupStatus: isProjectEditorReady(workflow) ? 'ready' : 'draft',
-        folderId: record.folderId ?? null,
-        shotCount: allShots.length,
-        updatedAt: record.updatedAt ?? record.createdAt,
-        thumbnail:
-          scenes[0]?.thumbnail ?? [...allShots].sort((a, b) => a.order - b.order)[0]?.thumbnail ?? undefined,
-        scenes: sceneSummaries(scenes),
+  const summaries = new Map(records.map((record) => [record.id, projectSummary(record)]))
+  if (isCloudFirst()) {
+    const accessToken = useCloudAuthStore.getState().accessToken
+    if (accessToken) {
+      const cloud = await listCloudProjects(accessToken).catch((error) => {
+        console.error('Cloud project discovery failed', error)
+        return []
+      })
+      for (const project of cloud) {
+        const local = records.find((r) => (r.cloudProjectId ?? r.id) === project.id)
+        if (local) continue
+        const scenes = scenesFromUnknownEditorState(project.editorState)
+        summaries.set(project.id, {
+          id: project.id, name: project.name, folderId: null,
+          setupStatus: isProjectEditorReady(migrateProjectWorkflow(project.workflow, project.name)) ? 'ready' : 'draft',
+          shotCount: shotCountFromUnknownEditorState(project.editorState),
+          updatedAt: Date.parse(project.updatedAt) || Date.now(),
+          scenes: scenes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0)).map((s) => ({ id: s.id, name: s.name })),
+        })
       }
-    }),
-  )
-  records.sort((a, b) => a.createdAt - b.createdAt)
-  return records
+    }
+  }
+  useProjectStore.getState().setProjectList([...summaries.values()].sort((a, b) => b.updatedAt - a.updatedAt))
+  return records.sort((a, b) => a.createdAt - b.createdAt)
 }
 
 /** Replace a Scene's paths, including transient anchor selection, before restoring its cameras. */
@@ -518,10 +523,11 @@ let persistFlushInstalled = false
 
 export function scheduleAutosave() {
   if (autosaveSuspended) return
+  authoredRevision += 1
   useSaveStatusStore.getState().setStatus('dirty')
   clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
-    void saveActiveProject().catch((error) => console.error('Failed to autosave project', error))
+    void saveActiveProject({ createIfMissing: true }).catch((error) => console.error('Failed to autosave project', error))
   }, AUTOSAVE_MS)
 }
 
@@ -555,33 +561,64 @@ function watchForAutosave() {
     void flushActiveProject({ createIfMissing }).catch((error) => console.error('Failed to flush project', error))
   })
   installPersistFlush()
-  useSceneStore.subscribe(scheduleAutosave)
-  useRigStore.subscribe((s) => {
-    if (!s.playing) scheduleAutosave() // playback t updates are not worth writes
+  useSceneStore.subscribe((s, before) => {
+    if (s.objects !== before.objects) scheduleAutosave()
   })
-  usePathStore.subscribe(scheduleAutosave) // path geometry lives here now
-  useCameraOptionsStore.subscribe(scheduleAutosave)
-  useProjectStore.subscribe(scheduleAutosave)
-  useEnvironmentStore.subscribe(scheduleAutosave)
+  useRigStore.subscribe((s, before) => {
+    // Time, playback and selection never affect the persisted rig.
+    const { t: _t, playing: _playing, ...content } = s
+    const { t: _oldT, playing: _oldPlaying, ...oldContent } = before
+    if (Object.keys(content).some((key) => content[key as keyof typeof content] !== oldContent[key as keyof typeof content])) scheduleAutosave()
+  })
+  usePathStore.subscribe((s, before) => {
+    if (s.paths !== before.paths || s.drawPlaneY !== before.drawPlaneY) scheduleAutosave()
+  })
+  useCameraOptionsStore.subscribe((s, before) => {
+    if (s.options !== before.options || s.activeOptionId !== before.activeOptionId) scheduleAutosave()
+  })
+  useProjectStore.subscribe((s, before) => {
+    const keys = ['name', 'workflow', 'guidelines', 'savedPrompts', 'skills', 'sceneName', 'shots', 'directorChat', 'directorLessons', 'folderId'] as const
+    if (keys.some((key) => s[key] !== before[key])) scheduleAutosave()
+  })
+  useEnvironmentStore.subscribe((s, before) => {
+    const keys = ['environments', 'unplacedAssets', 'environmentId', 'environmentTransform'] as const
+    if (keys.some((key) => s[key] !== before[key])) scheduleAutosave()
+  })
 }
 
 async function openHydratedRecord(record: ProjectRecord) {
-  applyRecord(record)
-  await loadSceneFromMetas(activeSceneOf(record).sceneMeta, true)
-  restoreDirectorChat()
+  const suspended = autosaveSuspended
+  autosaveSuspended = true
+  try {
+    applyRecord(record)
+    await loadSceneFromMetas(activeSceneOf(record).sceneMeta, true)
+    restoreDirectorChat()
+  } finally {
+    autosaveSuspended = suspended
+    clearTimeout(saveTimer)
+  }
 }
 
-async function loadCloudRecord(projectId: string): Promise<ProjectRecord> {
-  const record = await hydrateCloudProject(projectId)
+async function loadCloudRecord(projectId: string, force = false): Promise<ProjectRecord> {
+  const local = await getProjectRecord(projectId)
+  if (!force && local && (!local.cloudProjectId || local.contentRevision !== local.cloudSyncedRevision)) {
+    void syncProjectToCloud(projectId).catch((error) => console.error('Cloud retry failed', error))
+    return local
+  }
+  const hydrated = await hydrateCloudProject(local?.cloudProjectId ?? projectId)
+  const revision = force ? crypto.randomUUID() : local?.contentRevision
+  const record = { ...hydrated, id: projectId, contentRevision: revision, cloudSyncedRevision: revision }
   createdAtById.set(record.id, record.createdAt)
   await idbPut(STORES.projects, record)
+  upsertProjectSummary(record)
+  useSaveStatusStore.getState().setCloudStatus(projectId, 'saved')
   return record
 }
 
-export async function reloadActiveProjectFromCloud() {
-  const projectId = useProjectStore.getState().projectId
+export async function reloadActiveProjectFromCloud(projectId = useProjectStore.getState().projectId) {
   if (!projectId) return
-  const record = await loadCloudRecord(projectId)
+  await localSaves.get(projectId)
+  const record = await loadCloudRecord(projectId, true)
   await openHydratedRecord(record)
   useCloudAuthStore.getState().setSaveConflict(null)
 }
@@ -727,7 +764,13 @@ let projectTransition = Promise.resolve()
 let pendingProjectTransitions = 0
 
 function serializeProjectTransition<T>(operation: () => Promise<T>): Promise<T> {
-  const run = projectTransition.then(operation, operation)
+  const hydrate = async () => {
+    const suspended = autosaveSuspended
+    autosaveSuspended = true
+    try { return await operation() }
+    finally { autosaveSuspended = suspended; clearTimeout(saveTimer) }
+  }
+  const run = projectTransition.then(hydrate, hydrate)
   projectTransition = run.then(
     () => undefined,
     () => undefined,
@@ -746,7 +789,8 @@ async function switchProjectNow(id: string) {
   const { projectId } = useProjectStore.getState()
   if (id === projectId) return
   clearTimeout(saveTimer)
-  await saveActiveProject({ createIfMissing: false })
+  await saveActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
+  await localSaves.get(id)
   resetEditorChrome()
 
   if (isCloudFirst()) {
@@ -778,7 +822,7 @@ async function switchSceneNow(sceneId: string) {
   const { projectId, activeSceneId } = useProjectStore.getState()
   if (!projectId || sceneId === activeSceneId) return
   clearTimeout(saveTimer)
-  await saveActiveProject({ createIfMissing: false })
+  await saveActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
   resetEditorChrome()
 
   const record = await getProjectRecord(projectId)
@@ -801,7 +845,7 @@ async function createSceneNow(name: string): Promise<string | null> {
   const { projectId } = useProjectStore.getState()
   if (!projectId) return null
   clearTimeout(saveTimer)
-  await saveActiveProject({ createIfMissing: false })
+  await saveActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
   resetEditorChrome()
 
   const record = await getProjectRecord(projectId)
@@ -822,8 +866,10 @@ async function createSceneNow(name: string): Promise<string | null> {
     directorChat: [],
     directorLessons: [],
   }
-  const updated: ProjectRecord = { ...record, activeSceneId: sceneId, scenes: [...record.scenes, newScene] }
-  await idbPut(STORES.projects, updated)
+  const updated = await editProjectRecord(projectId, (current) => ({
+    ...current, activeSceneId: sceneId, scenes: [...current.scenes, { ...newScene, order: current.scenes.length }],
+  }))
+  if (!updated) return null
 
   applyRecord(updated) // hydrates the rig too, via useCameraOptionsStore.loadOptions
   await loadSceneFromMetas([], true) // fresh scene with the sample shape, matches New project
@@ -853,12 +899,11 @@ export async function renameScene(sceneId: string, name: string, projectId?: str
     await refreshProjectList()
     return
   }
-  const record = await getProjectRecord(targetProjectId)
-  if (!record) return
-  const scenes = record.scenes.map((s) => (s.id === sceneId ? { ...s, name: next } : s))
-  await idbPut(STORES.projects, { ...record, scenes, updatedAt: Date.now() })
-  if (isActiveProject) {
-    useProjectStore.getState().setScenes(sceneSummaries(scenes))
+  const updated = await editProjectRecord(targetProjectId, (record) => ({
+    ...record, scenes: record.scenes.map((s) => s.id === sceneId ? { ...s, name: next } : s),
+  }))
+  if (updated && useProjectStore.getState().projectId === targetProjectId) {
+    useProjectStore.getState().setScenes(sceneSummaries(updated.scenes))
   }
   await refreshProjectList()
 }
@@ -866,23 +911,23 @@ export async function renameScene(sceneId: string, name: string, projectId?: str
 async function deleteSceneNow(sceneId: string) {
   const { projectId, activeSceneId } = useProjectStore.getState()
   if (!projectId) return
-  const record = await getProjectRecord(projectId)
-  // a project always keeps at least one scene
-  if (!record || record.scenes.length <= 1) return
-  const remaining = record.scenes.filter((s) => s.id !== sceneId)
-  if (remaining.length === record.scenes.length) return
+  await saveActiveProject({ createIfMissing: false })
+  const updated = await editProjectRecord(projectId, (record) => {
+    const remaining = record.scenes.filter((s) => s.id !== sceneId)
+    // A stale card or a concurrent deletion must never remove the last scene.
+    if (!remaining.length || remaining.length === record.scenes.length) return record
+    return { ...record, scenes: remaining, activeSceneId: record.activeSceneId === sceneId ? remaining[0].id : record.activeSceneId }
+  })
+  if (!updated || updated.scenes.some((s) => s.id === sceneId)) return
 
   if (activeSceneId === sceneId) {
-    const updated: ProjectRecord = { ...record, scenes: remaining, activeSceneId: remaining[0].id }
-    await idbPut(STORES.projects, updated)
     resetEditorChrome()
     applyRecord(updated)
-    await loadSceneFromMetas(remaining[0].sceneMeta, true)
+    await loadSceneFromMetas(activeSceneOf(updated).sceneMeta, true)
     restoreDirectorChat()
     resetHistory()
   } else {
-    await idbPut(STORES.projects, { ...record, scenes: remaining, updatedAt: Date.now() })
-    useProjectStore.getState().setScenes(sceneSummaries(remaining))
+    useProjectStore.getState().setScenes(sceneSummaries(updated.scenes))
   }
   useSceneStore.getState().showNotice('Scene deleted')
 }
@@ -894,24 +939,10 @@ export function deleteScene(sceneId: string) {
 
 async function createProjectNow(name: string, saveCurrent: boolean, folderId: string | null = null) {
   clearTimeout(saveTimer)
-  if (saveCurrent) await saveActiveProject({ createIfMissing: false })
+  if (saveCurrent) await saveActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
 
-  let id = makeSceneId('proj')
-  let cloudUpdatedAt: string | undefined
+  const id = makeSceneId('proj')
   const workflow = createLegacyProjectWorkflow(name)
-  if (isCloudFirst()) {
-    const accessToken = useCloudAuthStore.getState().accessToken
-    if (!accessToken) throw new Error('Sign in before creating a cloud project.')
-    const created = await createCloudProject(accessToken, {
-      name,
-      workflowVersion: PROJECT_WORKFLOW_VERSION,
-      workflow,
-      editorState: {},
-    })
-    id = created.id
-    cloudUpdatedAt = created.updatedAt
-  }
-
   createdAtById.set(id, Date.now())
   const sceneId = makeSceneId('scene')
   useProjectStore.getState().loadProject({
@@ -937,14 +968,6 @@ async function createProjectNow(name: string, saveCurrent: boolean, folderId: st
   useEditorStore.getState().select(null)
   restoreDirectorChat()
   resetHistory()
-  if (cloudUpdatedAt) {
-    const createdAt = createdAtById.get(id) ?? Date.now()
-    await idbPut(STORES.projects, {
-      ...buildActiveRecord(id, createdAt),
-      cloudProjectId: id,
-      cloudUpdatedAt,
-    })
-  }
   await saveActiveProject()
   await refreshProjectList()
   useSceneStore.getState().showNotice(`Project "${name}" created`)
@@ -964,9 +987,7 @@ export async function renameProject(projectId: string, name: string) {
     await refreshProjectList()
     return
   }
-  const record = await getProjectRecord(projectId)
-  if (!record) return
-  await idbPut(STORES.projects, { ...record, name: next, updatedAt: Date.now() })
+  await editProjectRecord(projectId, (record) => ({ ...record, name: next }))
   await refreshProjectList()
 }
 
@@ -978,19 +999,16 @@ export async function moveProjectToFolder(projectId: string, folderId: string | 
     await refreshProjectList()
     return
   }
-  const record = await getProjectRecord(projectId)
-  if (!record) return
-  await idbPut(STORES.projects, { ...record, folderId, updatedAt: Date.now() })
+  await editProjectRecord(projectId, (record) => ({ ...record, folderId }))
   await refreshProjectList()
 }
 
 export async function removeFolder(folderId: string) {
   const records = await getAllProjectRecords()
-  const now = Date.now()
   await Promise.all(
     records
       .filter((record) => record.folderId === folderId)
-      .map((record) => idbPut(STORES.projects, { ...record, folderId: null, updatedAt: now })),
+      .map((record) => editProjectRecord(record.id, (current) => ({ ...current, folderId: null }))),
   )
   const store = useProjectStore.getState()
   if (store.folderId === folderId) store.setFolderId(null)
@@ -1003,6 +1021,7 @@ export type { FolderRecord } from './folders'
 
 async function deleteProjectNow(id: string) {
   clearTimeout(saveTimer)
+  await localSaves.get(id)
   await idbDelete(STORES.projects, id)
   createdAtById.delete(id)
   if (isCloudFirst()) {
@@ -1025,7 +1044,8 @@ async function deleteProjectNow(id: string) {
       resetHistory()
     } else {
       useProjectStore.setState({ projectId: '' })
-      await createProjectNow('Untitled', false)
+      await initializeBlankProjectSession()
+      useEditorStore.getState().setAppView('projects')
     }
   }
 }
@@ -1102,11 +1122,24 @@ export function duplicateShotAsCameraOption(shot: Shot) {
 
 export async function goToProjectsHome() {
   try {
-    await flushActiveProject()
+    await flushActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
     if (useSaveStatusStore.getState().status === 'dirty') {
       useSceneStore.getState().showNotice('Could not save. Stay in the editor and try again.')
       return false
     }
+    const { projectId, activeSceneId } = useProjectStore.getState()
+    if (projectId && useSceneStore.getState().objects.length > 0) {
+      const thumbnail = await captureThumbnail().catch(() => null)
+      if (thumbnail) {
+        const updated = await idbUpdate<ProjectRecord>(STORES.projects, projectId, (record) => ({
+          ...record, scenes: record.scenes.map((s) => s.id === activeSceneId ? { ...s, thumbnail } : s),
+        }))
+        if (updated) upsertProjectSummary(updated)
+      }
+    }
+    // Local persistence already upserts summaries; discover other tabs without requiring cloud availability.
+    const records = await getAllProjectRecords()
+    for (const record of records) upsertProjectSummary(record)
     useEditorStore.getState().setAppView('projects')
     return true
   } catch (error) {
@@ -1121,7 +1154,7 @@ export async function listUnsyncedProjects(): Promise<{ id: string; name: string
   if (!isCloudFirst()) return []
   const records = await idbGetAll<ProjectRecord>(STORES.projects)
   return records
-    .filter((record) => !record.cloudUpdatedAt)
+    .filter((record) => !record.cloudUpdatedAt || record.contentRevision !== record.cloudSyncedRevision)
     .map((record) => ({ id: record.id, name: record.name }))
 }
 
@@ -1141,7 +1174,7 @@ export async function downloadProjectJson(id: string) {
 export async function beginSignOut() {
   const auth = useCloudAuthStore.getState()
   if (auth.status !== 'signed-in' || !auth.session) return
-  await flushActiveProject({ createIfMissing: false })
+  await flushActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
   try {
     await syncActiveProjectToCloud()
   } catch (error) {

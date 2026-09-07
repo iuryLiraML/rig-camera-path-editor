@@ -12,7 +12,8 @@
     "build": "tsc --noEmit && vite build",
     "build:web": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "playwright test --project=chromium"
   },
   "dependencies": {
     "@fal-ai/client": "^1.10.1",
@@ -43,6 +44,7 @@
     "tailwindcss": "^4.1.11",
     "typescript": "~5.8.3",
     "vite": "^7.0.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@playwright/test": "^1.63.0"
   }
 }

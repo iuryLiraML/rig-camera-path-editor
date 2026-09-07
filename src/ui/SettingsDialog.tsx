@@ -14,6 +14,9 @@ import type { VisionMode } from '../state/useAgentStore'
 import type { SamImageVersion } from '../lib/fal/models'
 import { Row, Section, Segmented } from './primitives'
 import { GoogleSignInButton } from './GoogleSignInButton'
+import { navigateToSiteAuth } from '../lib/siteSession'
+import { useSiteSession } from './useSiteSession'
+import { isTeamCloudApp } from '../lib/cloud/client'
 
 const PROVIDER_OPTIONS = (Object.keys(PROVIDERS) as ProviderKind[]).map((k) => ({
   value: k,
@@ -37,6 +40,13 @@ export function SettingsDialog() {
   const [modelsError, setModelsError] = useState<string | null>(null)
   const [vaultBusy, setVaultBusy] = useState(false)
   const [vaultMessage, setVaultMessage] = useState<string | null>(null)
+  const site = useSiteSession()
+  const [siteError, setSiteError] = useState<string | null>(null)
+  const siteNavigate = (action: 'login' | 'logout') => {
+    setSiteError(null)
+    void navigateToSiteAuth(action).catch(() => setSiteError('Your changes could not be saved. Please try again before leaving.'))
+  }
+  const cloudError = useCloudAuthStore((s) => s.error)
   const cloudStatus = useCloudAuthStore((s) => s.status)
   const credentialId = useCloudAuthStore((s) => s.credentialIds?.[provider])
 
@@ -101,12 +111,23 @@ export function SettingsDialog() {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-        {cloudStatus !== 'signed-in' && (
+        <Section title="Account">
+          {siteError && <p role="alert" className="px-4 pb-2 text-[11px] text-ink">{siteError}</p>}
+          {cloudStatus === 'signed-in' && cloudError && <p role="alert" className="px-4 pb-2 text-[11px] text-ink">{cloudError}</p>}
+          <div className="px-4 pb-3 text-[11px] leading-5 text-ink-dim">
+            {site.session?.email ? <p>{site.session.email}</p> : site.session?.loginConfigured ? (
+              <button type="button" className="text-ink underline" onClick={() => siteNavigate('login')}>Sign in with Google</button>
+            ) : <p>{site.error ?? (site.session ? 'Google sign-in is not configured on this deployment.' : 'Checking sign-in…')}</p>}
+            {site.session?.email && <button type="button" className="text-ink underline" onClick={() => siteNavigate('logout')}>Sign out of Rig</button>}
+          </div>
+        </Section>
+        {isTeamCloudApp() && cloudStatus !== 'signed-in' && (
           <Section title="Cloud account">
             <p className="px-4 pb-2 text-[11px] leading-5 text-ink-dim">
               Sign in to sync projects. Local sessions stay on this machine until you connect.
             </p>
             <div className="px-4 pb-3">
+              {cloudError && <p role="alert" className="mb-2 text-ink">{cloudError}</p>}
               <GoogleSignInButton
                 onCredential={(credential) => {
                   void useCloudAuthStore.getState().setAccessToken(credential)

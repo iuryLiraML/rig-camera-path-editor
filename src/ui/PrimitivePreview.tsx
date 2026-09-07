@@ -115,12 +115,16 @@ export function FigurePreview({ sex }: { sex: FigureSex }) {
 
 export function PrimitivePreview({ kind, spec }: { kind: PrimitiveKind; spec?: PrimitiveSpec }) {
   const key = spec ? primitiveSpecKey(spec) : kind
-  const [preview, setPreview] = useState<{ key: string; url: string } | null>(null)
+  const [preview, setPreview] = useState<{ kind: PrimitiveKind; url: string } | null>(null)
   useEffect(() => {
-    const url = primitiveThumbUrl(spec ?? kind)
-    if (url) setPreview({ key, url })
+    // Coalesce slider input; retain the previous raster while its replacement warms.
+    const timer = setTimeout(() => {
+      const url = primitiveThumbUrl(spec ?? kind)
+      if (url) setPreview({ kind, url })
+    }, spec ? 80 : 0)
+    return () => clearTimeout(timer)
   }, [kind, key, spec])
-  return preview?.key === key
+  return preview?.kind === kind
     ? <img src={preview.url} alt="" data-primitive-preview={kind} className="h-full w-full object-contain" />
     : <Fallback kind={kind} />
 }

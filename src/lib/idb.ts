@@ -71,6 +71,30 @@ export async function idbPut(store: string, value: unknown, key?: string) {
   })
 }
 
+/** Read and merge in one transaction, including writes from other tabs. Missing records stay deleted. */
+export async function idbUpdate<T>(store: string, key: string, update: (current: T) => T): Promise<T | undefined> {
+  const db = await openDB()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(store, 'readwrite')
+    const objectStore = tx.objectStore(store)
+    const request = objectStore.get(key)
+    let result: T | undefined
+    request.onsuccess = () => {
+      if (request.result === undefined) return
+      try {
+        result = update(request.result as T)
+        objectStore.put(result as never)
+      } catch (error) {
+        tx.abort()
+        reject(error)
+      }
+    }
+    tx.oncomplete = () => resolve(result)
+    tx.onerror = () => reject(tx.error)
+    tx.onabort = () => reject(tx.error ?? new Error('Project update aborted'))
+  })
+}
+
 export async function idbGet<T>(store: string, key: string): Promise<T | undefined> {
   const db = await openDB()
   return new Promise((resolve, reject) => {

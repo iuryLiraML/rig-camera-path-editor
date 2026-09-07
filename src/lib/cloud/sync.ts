@@ -1,4 +1,4 @@
-import { idbGet, idbPut, STORES } from '../idb'
+import { idbGet, idbUpdate, STORES } from '../idb'
 import { persistModelBuffer } from '../readModelFile'
 import {
   createCloudProject,
@@ -20,6 +20,7 @@ import { useCloudAuthStore } from '../../state/useCloudAuthStore'
 import { useProjectStore, type Shot } from '../../state/useProjectStore'
 import { migrateProjectWorkflow } from '../projectWorkflow'
 import type { ProjectRecord } from '../projects'
+import { useSaveStatusStore } from '../saveStatus'
 
 export async function hydrateCloudProject(projectId: string): Promise<ProjectRecord> {
   const accessToken = useCloudAuthStore.getState().accessToken
@@ -165,41 +166,63 @@ async function uploadDirtyAssets(
   return assets
 }
 
-export async function syncProjectToCloud(
-  projectId: string,
-  options?: { ifMatch?: string },
-): Promise<void> {
-  const accessToken = useCloudAuthStore.getState().accessToken
-  if (!accessToken || useCloudAuthStore.getState().status !== 'signed-in') return
+const syncs = new Map<string, { promise: Promise<void>; again: boolean; token: string }>()
 
-  const record = await idbGet<ProjectRecord>(STORES.projects, projectId)
-  if (!record) return
-
-  const payload = defaultWorkflowPayload(record.workflow)
-  const editorStateSeed = toCloudEditorState(record, emptyAssetMap())
-
-  if (!record.cloudProjectId) {
-    const created = await createCloudProject(accessToken, {
-      name: record.name,
-      workflowVersion: payload.workflowVersion,
-      workflow: payload.workflow,
-      editorState: editorStateSeed,
-    })
-    const withCloud: ProjectRecord = {
-      ...record,
-      cloudProjectId: created.id,
-      cloudUpdatedAt: created.updatedAt,
-    }
-    await idbPut(STORES.projects, withCloud)
-    await pushSnapshot(accessToken, created.id, withCloud, created.updatedAt)
-    return
+/** One drain per account/project. Overlapping callers share creation, uploads and acknowledgements. */
+export function syncProjectToCloud(projectId: string, options?: { ifMatch?: string }): Promise<void> {
+  const auth = useCloudAuthStore.getState()
+  const accessToken = auth.accessToken
+  if (!accessToken || auth.status !== 'signed-in') return Promise.resolve()
+  const key = `${auth.session?.tenantId ?? ''}:${auth.session?.userId ?? ''}:${projectId}`
+  const running = syncs.get(key)
+  if (running?.token === accessToken) {
+    running.again = true
+    return running.promise
   }
-
-  const ifMatch = options?.ifMatch ?? record.cloudUpdatedAt
-  if (!ifMatch) {
-    throw new Error('Cloud save is missing a version matcher. Reload the project and try again.')
-  }
-  await pushSnapshot(accessToken, record.cloudProjectId, record, ifMatch)
+  const entry = { promise: Promise.resolve(), again: false, token: accessToken }
+  const currentSession = () => useCloudAuthStore.getState().accessToken === accessToken
+    && useCloudAuthStore.getState().status === 'signed-in'
+  useSaveStatusStore.getState().setCloudStatus(projectId, 'syncing')
+  entry.promise = (async () => {
+    let matcher = options?.ifMatch
+    do {
+      entry.again = false
+      let record = await idbGet<ProjectRecord>(STORES.projects, projectId)
+      if (!record || !currentSession()) return
+      if (!matcher && record.contentRevision && record.contentRevision === record.cloudSyncedRevision) break
+      if (!record.cloudProjectId) {
+        const payload = defaultWorkflowPayload(record.workflow)
+        const created = await createCloudProject(accessToken, {
+          name: record.name,
+          workflowVersion: payload.workflowVersion,
+          workflow: payload.workflow,
+          editorState: toCloudEditorState(record, emptyAssetMap()),
+          idempotencyKey: record.id,
+        })
+        if (!currentSession()) return
+        record = await idbUpdate<ProjectRecord>(STORES.projects, projectId, (latest) => ({
+          ...latest, cloudProjectId: created.id, cloudUpdatedAt: created.updatedAt,
+        }))
+        if (!record) return
+      }
+      const ifMatch = matcher ?? record.cloudUpdatedAt
+      matcher = undefined
+      if (!ifMatch) throw new Error('Cloud save is missing a version matcher. Reload the project and try again.')
+      await pushSnapshot(accessToken, record.cloudProjectId!, record, ifMatch, currentSession)
+      if (!currentSession()) return
+      const latest = await idbGet<ProjectRecord>(STORES.projects, projectId)
+      if (!latest) return
+      entry.again ||= latest.contentRevision !== record.contentRevision || latest.updatedAt !== record.updatedAt
+    } while (entry.again)
+    useSaveStatusStore.getState().setCloudStatus(projectId, 'saved')
+  })().catch((error) => {
+    useSaveStatusStore.getState().setCloudStatus(projectId, 'error')
+    throw error
+  }).finally(() => {
+    if (syncs.get(key) === entry) syncs.delete(key)
+  })
+  syncs.set(key, entry)
+  return entry.promise
 }
 
 export async function syncActiveProjectToCloud(options?: { ifMatch?: string }): Promise<void> {
@@ -213,8 +236,10 @@ async function pushSnapshot(
   cloudProjectId: string,
   record: ProjectRecord,
   ifMatch: string,
+  currentSession: () => boolean,
 ): Promise<void> {
   const assets = await uploadDirtyAssets(accessToken, cloudProjectId, record)
+  if (!currentSession()) return
   const payload = defaultWorkflowPayload(record.workflow)
   const updated = await updateCloudProject(
     accessToken,
@@ -226,12 +251,16 @@ async function pushSnapshot(
     },
     ifMatch,
   )
-  await idbPut(STORES.projects, {
-    ...record,
+  if (!currentSession()) return
+  await idbUpdate<ProjectRecord>(STORES.projects, record.id, (latest) => ({
+    ...latest,
     cloudProjectId,
     cloudUpdatedAt: updated.updatedAt,
-    bufferAssets: assets.bufferAssets,
-    stillAssets: assets.stillAssets,
-  })
-  useCloudAuthStore.getState().setSaveConflict(null)
+    cloudSyncedRevision: record.contentRevision,
+    bufferAssets: { ...latest.bufferAssets, ...assets.bufferAssets },
+    stillAssets: { ...latest.stillAssets, ...assets.stillAssets },
+  }))
+  if (useCloudAuthStore.getState().saveConflict?.projectId === record.id) {
+    useCloudAuthStore.getState().setSaveConflict(null)
+  }
 }

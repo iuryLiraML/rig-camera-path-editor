@@ -14,6 +14,7 @@ import { useEditorStore } from './useEditorStore'
 import { useProjectStore } from './useProjectStore'
 
 const TOKEN_KEY = CLOUD_ACCESS_TOKEN_KEY
+let authRequest = 0
 
 export type VaultProvider = ProviderKind | 'fal'
 
@@ -53,12 +54,14 @@ function clearAgentSecrets() {
   agent.setFalKey('')
 }
 
-async function hydrateVaultSecrets(accessToken: string) {
+async function hydrateVaultSecrets(accessToken: string, current: () => boolean) {
   const listed = await listOwnCredentials(accessToken)
   const credentialIds: Partial<Record<VaultProvider, string>> = {}
   const agent = useAgentStore.getState()
   for (const row of listed) {
+    if (!current()) return {}
     const retrieved = await retrieveOwnCredential(accessToken, row.id)
+    if (!current()) return {}
     if (retrieved.provider === 'anthropic' || retrieved.provider === 'kimi') {
       agent.setKey(retrieved.provider, retrieved.secret)
       credentialIds[retrieved.provider] = retrieved.id
@@ -88,6 +91,7 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
   },
 
   async setAccessToken(token) {
+    const request = ++authRequest
     if (!token?.trim()) {
       localStorage.removeItem(TOKEN_KEY)
       set({
@@ -106,9 +110,15 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
     set({ accessToken: trimmed, status: 'checking', error: null })
     try {
       const session = await fetchCloudSession(trimmed)
-      const credentialIds = await hydrateVaultSecrets(trimmed)
-      set({ session, status: 'signed-in', error: null, credentialIds })
+      if (request !== authRequest) return
+      let credentialIds: Partial<Record<VaultProvider, string>> = {}
+      let vaultError: string | null = null
+      try { credentialIds = await hydrateVaultSecrets(trimmed, () => request === authRequest) }
+      catch { vaultError = 'Signed in, but saved API keys could not be loaded. Reload to try again.' }
+      if (request !== authRequest) return
+      set({ session, status: 'signed-in', error: vaultError, credentialIds })
     } catch (error) {
+      if (request !== authRequest) return
       localStorage.removeItem(TOKEN_KEY)
       set({
         accessToken: null,
@@ -132,6 +142,8 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
   },
 
   async signOut() {
+    authRequest += 1
+    set({ accessToken: null, session: null, status: 'signed-out' })
     localStorage.removeItem(TOKEN_KEY)
     clearAgentSecrets()
     await idbClear().catch((error) => console.error('Failed to wipe project cache', error))

@@ -744,7 +744,7 @@ export const useSceneStore = create<SceneState>()(
               base.material.color.set(clayColor)
               base.wireframeMaterial.color.set(clayColor)
               objectGraveyard.delete(snap.id)
-              // rebuild the primitive geometry if its params changed
+              // Rebuild only when the authored seed or operations changed.
               let primitive = base.primitive
               if (snap.primitive && base.primitive && primitiveSpecKey(snap.primitive) !== primitiveSpecKey(base.primitive)) {
                 const mesh = base.root.children.find((c): c is THREE.Mesh => c instanceof THREE.Mesh)
@@ -764,6 +764,7 @@ export const useSceneStore = create<SceneState>()(
                 clayColor,
                 name: snap.name,
                 primitive,
+                triangleCount: primitive ? countRenderedTriangles(base.root) : base.triangleCount,
                 follow: snap.follow,
                 bonePose: 'bonePose' in snap ? snap.bonePose : base.bonePose,
                 boneTranslate: 'boneTranslate' in snap ? snap.boneTranslate : base.boneTranslate,

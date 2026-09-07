@@ -7,6 +7,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { agentApiDevPlugin } from './api/_lib/vitePlugin'
 
 export default defineConfig(({ mode }) => ({
+  // Keep the browser test server's optimizer separate from a running editor.
+  cacheDir: process.env.RIG_VITE_CACHE_DIR,
+  resolve: { dedupe: ['react', 'react-dom'] },
   // site keys for the agent proxy come from .env.local (never VITE_-prefixed)
   plugins: [react(), tailwindcss(), agentApiDevPlugin({ ...process.env, ...loadEnv(mode, process.cwd(), '') })],
   build: { target: 'es2022' },

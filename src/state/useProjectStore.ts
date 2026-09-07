@@ -25,6 +25,8 @@ export interface ProjectSummary {
   folderId: string | null
   /** number of saved shots */
   shotCount: number
+  objectCount?: number
+  pathCount?: number
   /** last save (falls back to creation time for projects saved before this) */
   updatedAt: number
   /** first shot's still, used as the card preview */

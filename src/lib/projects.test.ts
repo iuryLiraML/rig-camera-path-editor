@@ -15,6 +15,13 @@ import { LEGACY_META_KEY } from './sceneIO'
 const memory = new Map<string, { id: string; name: string; [key: string]: unknown }>()
 
 vi.mock('./idb', () => ({
+  idbUpdate: vi.fn(async (_store: string, id: string, update: (value: any) => any) => {
+    const current = memory.get(id)
+    if (!current) return undefined
+    const next = structuredClone(update(structuredClone(current)))
+    memory.set(id, next)
+    return next
+  }),
   STORES: { buffers: 'model-buffers', projects: 'projects', folders: 'folders' },
   idbPut: vi.fn(async (_store: string, value: { id: string; name: string }) => {
     memory.set(value.id, value)

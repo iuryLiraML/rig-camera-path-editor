@@ -146,6 +146,7 @@ export async function createCloudProject(
     workflowVersion: number
     workflow: unknown
     editorState?: unknown
+    idempotencyKey?: string
   },
 ): Promise<CloudProjectSummary> {
   const response = await cloudFetch('/v1/projects', {

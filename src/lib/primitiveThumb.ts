@@ -128,7 +128,11 @@ export function figureThumbUrl(sex: FigureSex): Promise<string | null> {
     if (!template) return null
     const root = clone(template.scene)
     root.traverse((node) => { if (node instanceof THREE.SkinnedMesh) node.skeleton.update() })
-    return renderOne(gl, root, sex, 256)
+    try { return renderOne(gl, root, sex, 256) } finally {
+      const skeletons = new Set<THREE.Skeleton>()
+      root.traverse((node) => { if (node instanceof THREE.SkinnedMesh) skeletons.add(node.skeleton) })
+      skeletons.forEach((skeleton) => skeleton.dispose())
+    }
   })().catch(() => null).then((url) => { if (!url) figures.delete(sex); return url })
   figures.set(sex, pending)
   return pending

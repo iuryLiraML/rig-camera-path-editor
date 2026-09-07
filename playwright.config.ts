@@ -49,6 +49,7 @@ export default defineConfig({
   },
   webServer: {
     command: `npm run dev -- --host 127.0.0.1 --port ${PORT}`,
+    env: { RIG_VITE_CACHE_DIR: 'node_modules/.vite-playwright' },
     url: `http://127.0.0.1:${PORT}`,
     reuseExistingServer: false,
     timeout: 120_000,

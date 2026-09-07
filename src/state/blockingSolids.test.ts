@@ -6,6 +6,8 @@ import { loadSceneFromMetas, liveSceneMetas, resetScene } from '../lib/sceneIO'
 import { booleanPrimitive, primitiveMesh } from '../lib/solidEditing'
 import { buildPrimitiveGeometry, defaultParams, PRIMITIVE_KINDS, primitiveEvaluationCount, primitiveTopology, buildPrimitiveSeedGeometry, type PrimitiveSpec } from '../lib/primitiveGeometry'
 import { evalObjectWorldTransform } from '../lib/objectMotion'
+import { resetHistory, undo, redo } from '../lib/history'
+import { executeTool, TOOL_DEFS, buildSceneContext } from '../lib/agent/tools'
 
 const scene = () => useSceneStore.getState()
 const boxSpec = (width = 4): PrimitiveSpec => ({ kind: 'box', params: { width, height: 4, depth: 2, corner: 0 } })
@@ -62,12 +64,17 @@ describe('blocking solids through scene editing and persistence', () => {
 
   it('does not re-evaluate solids when scrubbing t and evaluating animated TRS', () => {
     const { wall } = cutWall()
+    scene().addObjectKey(wall, 0, 'position')
+    scene().setTransform(wall, 'position', 0, 5)
+    scene().addObjectKey(wall, 1, 'position')
     const mesh = primitiveMesh(object(wall))
     const geometry = mesh.geometry
     const count = primitiveEvaluationCount()
     for (const t of [0, 0.5, 1, 0.25, 0]) {
       useRigStore.getState().setT(t)
-      evalObjectWorldTransform(t, object(wall), null, useRigStore.getState().ease)
+      const pose = evalObjectWorldTransform(t, object(wall), null, useRigStore.getState().ease)
+      expect(pose.position[0]).toBeGreaterThanOrEqual(0)
+      expect(pose.position[0]).toBeLessThanOrEqual(5)
       expect(primitiveMesh(object(wall)).geometry).toBe(geometry)
     }
     expect(primitiveEvaluationCount()).toBe(count)
@@ -116,6 +123,45 @@ describe('blocking solids through scene editing and persistence', () => {
     const restored = buildPrimitiveGeometry(saved)
     expect(restored.userData.cadVolume).toBeCloseTo(30, 4)
     restored.dispose()
+  })
+
+  it('restores an edited solid with Undo and Redo, including its triangle count', () => {
+    const { wall } = cutWall()
+    resetHistory()
+    scene().updatePrimitiveParams(wall, { width: 7 })
+    expect(volume(wall)).toBeCloseTo(54, 4)
+    expect(undo()).toBe(true)
+    expect(volume(wall)).toBeCloseTo(30, 4)
+    expect(holeHits(wall)).toBe(0)
+    expect(redo()).toBe(true)
+    expect(volume(wall)).toBeCloseTo(54, 4)
+    expect(object(wall).triangleCount).toBe(primitiveMesh(object(wall)).geometry.index!.count / 3)
+  })
+
+  it('extrudes a face with an opening without filling the opening', () => {
+    const { wall } = cutWall()
+    const face = primitiveTopology(primitiveMesh(object(wall)).geometry).faces.find((f) => f.normal[2] > 0.99)!
+    scene().appendPrimitiveOp(wall, { type: 'extrude', face: face.ref, distance: 1 })
+    expect(volume(wall)).toBeCloseTo(45, 4)
+    expect(holeHits(wall)).toBe(0)
+  })
+
+  it('keeps legacy seed dimensions outside slider ranges readable', () => {
+    const id = add({ kind: 'box', params: { width: 20, height: 0.05, depth: 2, corner: 0 } })
+    expect(volume(id)).toBeCloseTo(2, 5)
+  })
+
+  it('exposes only implemented spec operations to Director', async () => {
+    const id = add(boxSpec())
+    const context = JSON.parse(buildSceneContext())
+    expect(context.objects[0].primitive.kind).toBe('box')
+    expect(context.objects[0].planar_faces).toHaveLength(6)
+    expect(TOOL_DEFS.some((tool) => /dummy|figure/.test(tool.name))).toBe(false)
+    expect(await executeTool('slice_primitive', { object_id: id, normal: [0, 1, 0], offset: 0, keep: 'positive' })).toContain('Updated solid')
+    expect(volume(id)).toBeCloseTo(16, 4)
+    const before = primitiveMesh(object(id)).geometry
+    expect(await executeTool('extrude_primitive', { object_id: id, distance: 2 })).not.toContain('Updated solid')
+    expect(primitiveMesh(object(id)).geometry).toBe(before)
   })
 
   it('leaves new and empty restored scenes free of seeded knots', async () => {

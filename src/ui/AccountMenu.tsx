@@ -9,6 +9,8 @@ import {
   CHROME_MENU_SEP,
 } from './chromeMenu'
 import { PersonIcon } from './icons'
+import { useSiteSession } from './useSiteSession'
+import { navigateToSiteAuth } from '../lib/siteSession'
 
 function initials(name?: string | null, email?: string | null) {
   const source = name?.trim() || email?.trim() || ''
@@ -21,11 +23,13 @@ function initials(name?: string | null, email?: string | null) {
 export function AccountMenu() {
   const status = useCloudAuthStore((s) => s.status)
   const session = useCloudAuthStore((s) => s.session)
-  const signedIn = status === 'signed-in' && Boolean(session)
+  const site = useSiteSession()
+  const cloudSignedIn = status === 'signed-in' && Boolean(session)
+  const signedIn = cloudSignedIn || Boolean(site.session?.email)
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
-  const displayName = session?.name || session?.email || session?.userId || 'Account'
-  const letters = initials(session?.name, session?.email)
+  const displayName = session?.name || session?.email || session?.userId || site.session?.email || 'Account'
+  const letters = initials(session?.name, session?.email ?? site.session?.email)
 
   useEffect(() => {
     if (!open) return
@@ -106,13 +110,19 @@ export function AccountMenu() {
               className={CHROME_MENU_ITEM_DANGER}
               onClick={() => {
                 setOpen(false)
-                void beginSignOut()
+                if (cloudSignedIn) void beginSignOut()
+                else void navigateToSiteAuth('logout')
+                  .catch(() => useEditorStore.getState().setShowSettings(true))
               }}
             >
               Sign out
             </button>
           ) : (
-            <button type="button" role="menuitem" className={CHROME_MENU_ITEM} onClick={openSettings}>
+            <button type="button" role="menuitem" className={CHROME_MENU_ITEM} onClick={() => {
+              if (!site.session?.loginConfigured) { openSettings(); return }
+              void navigateToSiteAuth('login')
+                .catch(() => useEditorStore.getState().setShowSettings(true))
+            }}>
               Sign in
             </button>
           )}
