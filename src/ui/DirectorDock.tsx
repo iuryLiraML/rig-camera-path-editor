@@ -73,10 +73,11 @@ export function DirectorDock() {
   const editingPoint = usePathStore(s => s.selectedAnchorId !== null) && workspaceMode === 'compose'
   const insets = useViewportInsets()
   const dock = directorDockSlot(insets)
-  const { directorCompact } = useChromeLayout()
+  const { directorCompact, tier } = useChromeLayout()
   const win = useWindowSize()
   const [chatOpen, setChatOpen] = useState(false)
-  const compact = directorCompact && !chatOpen
+  const overlayOpen = chatOpen && directorCompact && tier !== 'full'
+  const compact = directorCompact && !overlayOpen
   const [input, setInput] = useState('')
   const [showSkills, setShowSkills] = useState(false)
   const [pendingImage, setPendingImage] = useState<File | null>(null)
@@ -109,7 +110,7 @@ export function DirectorDock() {
 
   return (
     <div
-      className="panel absolute z-30 flex min-h-0 flex-col overflow-hidden"
+      className={`panel absolute ${overlayOpen ? 'z-40' : 'z-30'} flex min-h-0 flex-col overflow-hidden`}
       onKeyDown={(e) => {
         if (e.key === 'Escape' && chatOpen) {
           e.stopPropagation()
@@ -118,7 +119,7 @@ export function DirectorDock() {
       }}
       style={{
         right: dock.right,
-        width: chatOpen && directorCompact ? Math.min(360, win.w - GUTTER * 2) : dock.width,
+        width: overlayOpen ? Math.min(360, win.w - GUTTER * 2) : dock.width,
         // Below the global top row: at the top gutter the rail covered the
         // toolbar's own band and ate the pills painted over it.
         top: insets.top,
@@ -135,8 +136,13 @@ export function DirectorDock() {
               title={compact ? 'Expand Director' : 'Collapse Director'}
               aria-expanded={!compact}
               onClick={() => {
-                if (directorCompact) setChatOpen(!chatOpen)
-                else useEditorStore.getState().setDirectorPreference('compact')
+                if (tier === 'full') {
+                  // Desktop expansion must update the space reserved by every dock.
+                  setChatOpen(false)
+                  useEditorStore.getState().setDirectorPreference(compact ? 'expanded' : 'compact')
+                } else {
+                  setChatOpen(!chatOpen)
+                }
               }}
               className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
             >
