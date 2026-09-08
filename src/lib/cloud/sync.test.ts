@@ -12,17 +12,19 @@ vi.mock('../../lib/idb', () => ({
   }),
   STORES: { projects: 'projects', buffers: 'buffers' },
   idbGet: vi.fn(async (store: string, id: string) => store === 'buffers' ? new Uint8Array([1, 2, 3]).buffer : structuredClone(memory.get(id))),
+  idbDelete: vi.fn(async (_store: string, id: string) => { memory.delete(id) }),
   idbPut: vi.fn(async (_store: string, record: ProjectRecord) => { memory.set(record.id, structuredClone(record)) }),
 }))
 vi.mock('../../lib/cloud/client', async (original) => ({
   ...await original<typeof import('../../lib/cloud/client')>(),
+  deleteCloudProject: vi.fn(async () => undefined),
   createCloudProject: vi.fn(async () => ({ id: `cloud-${Math.random()}`, updatedAt: 'v1' })),
   updateCloudProject: vi.fn(async () => ({ updatedAt: 'v2' })),
   uploadCloudBytes: vi.fn(async () => ({ assetId: `asset-${Math.random()}`, sha256: 'same-content-hash' })),
   sha256Hex: vi.fn(async () => 'same-content-hash'),
 }))
-import { syncProjectToCloud } from '../../lib/cloud/sync'
-import { createCloudProject, updateCloudProject, uploadCloudBytes } from '../../lib/cloud/client'
+import { deleteSyncedProject, syncProjectToCloud } from '../../lib/cloud/sync'
+import { createCloudProject, deleteCloudProject, updateCloudProject, uploadCloudBytes } from '../../lib/cloud/client'
 import { useCloudAuthStore } from '../../state/useCloudAuthStore'
 import { createLegacyProjectWorkflow } from '../../lib/projectWorkflow'
 import { makeEmptyRigSnapshot } from '../../state/useCameraOptionsStore'
@@ -106,4 +108,26 @@ describe('Cloud sync audit: mocked network, real sync coordinator', () => {
     await syncProjectToCloud(stored.id)
     expect(uploadCloudBytes).toHaveBeenCalledTimes(1)
   })
+})
+
+
+it('waits for an in-flight create before deleting its remote identity and local record', async () => {
+  memory.set('local-audit', record())
+  let release!: (value: any) => void
+  let started!: () => void
+  const entered = new Promise<void>((resolve) => { started = resolve })
+  vi.mocked(createCloudProject).mockImplementationOnce(async () => {
+    started()
+    return new Promise((resolve) => { release = resolve })
+  })
+  const saving = syncProjectToCloud('local-audit')
+  await entered
+  const removing = deleteSyncedProject('local-audit')
+  await syncProjectToCloud('local-audit')
+  expect(deleteCloudProject).not.toHaveBeenCalled()
+  release({ id: 'remote-in-flight', updatedAt: 'v1' })
+  await Promise.all([saving, removing])
+  expect(createCloudProject).toHaveBeenCalledOnce()
+  expect(deleteCloudProject).toHaveBeenCalledWith(useCloudAuthStore.getState().accessToken, 'remote-in-flight')
+  expect(memory.has('local-audit')).toBe(false)
 })

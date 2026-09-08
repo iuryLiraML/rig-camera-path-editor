@@ -20,6 +20,7 @@ vi.mock('../lib/idb', () => ({
   idbDelete: vi.fn(async (_store: string, id: string) => { memory.delete(id) }),
 }))
 vi.mock('../lib/cloud/sync', () => ({
+  deleteSyncedProject: vi.fn(async (id: string) => { memory.delete(id) }),
   hydrateCloudProject: vi.fn(),
   syncActiveProjectToCloud: vi.fn(async () => undefined),
   syncProjectToCloud: vi.fn(async () => undefined),
@@ -32,7 +33,7 @@ vi.mock('../lib/cloud/client', async (original) => ({
 
 import {
   bootProjects, goToProjectsHome, saveActiveProject, switchProject, createProject, deleteProject,
-  initializeBlankProjectSession, renameProject, renameScene, deleteScene, beginSignOut, AUTOSAVE_MS, type ProjectRecord,
+  initializeBlankProjectSession, openBlankProjectSession, renameProject, renameScene, deleteScene, beginSignOut, AUTOSAVE_MS, type ProjectRecord,
 } from '../lib/projects'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
@@ -138,6 +139,15 @@ describe('Projects autosave audit: expected product behavior', () => {
     expect(memory.size).toBe(2)
     const original = [...memory.values()].find((r) => (r as ProjectRecord).name === 'Untitled') as ProjectRecord
     expect(original.scenes[0].sceneMeta).toHaveLength(1)
+  })
+
+  it('persists the current draft before browser navigation opens a blank session', async () => {
+    useSceneStore.getState().addPrimitive('box')
+    await openBlankProjectSession()
+    expect(memory.size).toBe(1)
+    expect(([...memory.values()][0] as ProjectRecord).scenes[0].sceneMeta).toHaveLength(1)
+    expect(useProjectStore.getState().projectId).toBe('')
+    expect(useSceneStore.getState().objects).toHaveLength(0)
   })
 
   it('does not replace the last deleted project with a new empty project', async () => {

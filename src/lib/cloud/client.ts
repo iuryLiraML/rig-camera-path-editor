@@ -139,6 +139,16 @@ export async function fetchCloudProject(
   return body.project
 }
 
+export async function deleteCloudProject(accessToken: string, projectId: string): Promise<void> {
+  try {
+    await cloudFetch(`/v1/projects/${projectId}`, { method: 'DELETE', accessToken })
+  } catch (error) {
+    // An already removed record is success; an unavailable DELETE route is not.
+    if (error instanceof CloudApiError && error.status === 404 && error.code === 'project_not_found') return
+    throw error
+  }
+}
+
 export async function createCloudProject(
   accessToken: string,
   input: {

@@ -35,6 +35,7 @@ vi.mock('./idb', () => ({
 }))
 
 vi.mock('./cloud/sync', () => ({
+  deleteSyncedProject: vi.fn(async (id: string) => { memory.delete(id) }),
   hydrateCloudProject: vi.fn(),
   syncActiveProjectToCloud: vi.fn(async () => undefined),
   syncProjectToCloud: vi.fn(async () => undefined),

@@ -10,7 +10,6 @@
  * Routes:
  *   GET  /api/agent-config          -> which vendors have a site key (booleans only)
  *   *    /api/anthropic/<path>      -> https://api.anthropic.com/<path>   (x-api-key)
- *   *    /api/kimi/<path>           -> https://api.moonshot.ai/<path>     (Bearer)
  *   *    /api/fal/proxy             -> x-fal-target-url on *.fal.ai / *.fal.run (Key)
  *
  * The LLM paths are allowlisted so a shared key cannot be used to reach other
@@ -21,11 +20,10 @@ export type ProxyEnv = Partial<Record<string, string>>
 
 export const ENV_VARS = {
   anthropic: 'ANTHROPIC_API_KEY',
-  kimi: 'KIMI_API_KEY',
   fal: 'FAL_KEY',
 } as const
 
-export type LlmProvider = 'anthropic' | 'kimi'
+export type LlmProvider = 'anthropic'
 
 interface LlmVendor {
   base: string
@@ -34,25 +32,24 @@ interface LlmVendor {
   authHeaders: (key: string) => Record<string, string>
 }
 
+/**
+ * The vendor paths the shared key may reach. Each one needs a matching static
+ * route file under api/anthropic/ — see api/routes.test.ts, which enforces it.
+ */
+export const ALLOWED_LLM_PATHS = ['v1/models', 'v1/messages'] as const
+
 const LLM_VENDORS: Record<LlmProvider, LlmVendor> = {
   anthropic: {
     base: 'https://api.anthropic.com',
     envVar: ENV_VARS.anthropic,
-    allowedPaths: ['v1/models', 'v1/messages'],
+    allowedPaths: ALLOWED_LLM_PATHS,
     authHeaders: (key) => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01' }),
-  },
-  kimi: {
-    base: 'https://api.moonshot.ai',
-    envVar: ENV_VARS.kimi,
-    allowedPaths: ['v1/models', 'v1/chat/completions'],
-    authHeaders: (key) => ({ authorization: `Bearer ${key}` }),
   },
 }
 
-export function agentConfig(env: ProxyEnv): { anthropic: boolean; kimi: boolean; fal: boolean } {
+export function agentConfig(env: ProxyEnv): { anthropic: boolean; fal: boolean } {
   return {
     anthropic: Boolean(env[ENV_VARS.anthropic]?.trim()),
-    kimi: Boolean(env[ENV_VARS.kimi]?.trim()),
     fal: Boolean(env[ENV_VARS.fal]?.trim()),
   }
 }
@@ -138,7 +135,7 @@ export async function handleAgentApi(request: Request, env: ProxyEnv): Promise<R
     })
   }
 
-  for (const provider of ['anthropic', 'kimi'] as const) {
+  for (const provider of ['anthropic'] as const) {
     const prefix = `/api/${provider}/`
     if (!path.startsWith(prefix)) continue
     if (!LLM_METHODS.includes(request.method)) return errorResponse(405, 'Method not allowed.')

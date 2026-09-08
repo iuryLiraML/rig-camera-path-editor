@@ -11,6 +11,7 @@ import { usePathStore } from './state/usePathStore'
 import { useLayoutStore } from './state/useLayoutStore'
 import { useProjectStore } from './state/useProjectStore'
 import { useAgentStore } from './state/useAgentStore'
+import { installRouter } from './lib/router'
 import { initHistory } from './lib/history'
 import { loadServerKeys } from './lib/agent/serverKeys'
 import { generateRacingDroneCameras } from './lib/cameraBatch/generateRacingDroneCameras'
@@ -43,6 +44,8 @@ function maybeGenerateRacingDroneCamerasFromQuery() {
 const runtime = resolveRuntime()
 
 if (runtime === 'clay') {
+  const lifecycle = new AbortController()
+  import.meta.hot?.dispose(() => lifecycle.abort())
   // Which vendors have a shared site key on this deployment (booleans only).
   void loadServerKeys().then((keys) => useAgentStore.getState().setServerKeys(keys))
 
@@ -52,6 +55,7 @@ if (runtime === 'clay') {
     .bootstrap()
     .then(() => bootProjects())
     .then(initHistory)
+    .then(() => installRouter({ signal: lifecycle.signal }))
     .then(maybeGenerateRacingDroneCamerasFromQuery)
     .catch((error) => {
       console.error('Project storage failed to initialize', error)

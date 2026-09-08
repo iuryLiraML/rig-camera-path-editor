@@ -1,7 +1,8 @@
-import { idbGet, idbUpdate, STORES } from '../idb'
+import { idbDelete, idbGet, idbUpdate, STORES } from '../idb'
 import { persistModelBuffer } from '../readModelFile'
 import {
   createCloudProject,
+  deleteCloudProject,
   defaultWorkflowPayload,
   downloadCloudAsset,
   fetchCloudProject,
@@ -167,13 +168,41 @@ async function uploadDirtyAssets(
 }
 
 const syncs = new Map<string, { promise: Promise<void>; again: boolean; token: string }>()
+const deleting = new Set<string>()
+
+function syncKey(projectId: string): string {
+  const { session } = useCloudAuthStore.getState()
+  return `${session?.tenantId ?? ''}:${session?.userId ?? ''}:${projectId}`
+}
+
+/** Finish an existing upload, remove its remote identity, then remove the local copy. */
+export async function deleteSyncedProject(projectId: string, options?: { localOnly?: boolean }): Promise<void> {
+  const key = syncKey(projectId)
+  const { accessToken, status } = useCloudAuthStore.getState()
+  deleting.add(key)
+  try {
+    await syncs.get(key)?.promise.catch(() => {})
+    const record = await idbGet<ProjectRecord>(STORES.projects, projectId)
+    const remoteId = record?.cloudProjectId ?? (!record && status === 'signed-in' ? projectId : null)
+    if (remoteId && !options?.localOnly) {
+      if (!accessToken || status !== 'signed-in') throw new Error('Sign in to delete this cloud project.')
+      if (useCloudAuthStore.getState().accessToken !== accessToken) throw new Error('The account changed. Try deleting the project again.')
+      await deleteCloudProject(accessToken, remoteId)
+      if (useCloudAuthStore.getState().accessToken !== accessToken) throw new Error('The account changed during deletion.')
+    }
+    await idbDelete(STORES.projects, projectId)
+  } finally {
+    deleting.delete(key)
+  }
+}
 
 /** One drain per account/project. Overlapping callers share creation, uploads and acknowledgements. */
 export function syncProjectToCloud(projectId: string, options?: { ifMatch?: string }): Promise<void> {
   const auth = useCloudAuthStore.getState()
   const accessToken = auth.accessToken
   if (!accessToken || auth.status !== 'signed-in') return Promise.resolve()
-  const key = `${auth.session?.tenantId ?? ''}:${auth.session?.userId ?? ''}:${projectId}`
+  const key = syncKey(projectId)
+  if (deleting.has(key)) return Promise.resolve()
   const running = syncs.get(key)
   if (running?.token === accessToken) {
     running.again = true

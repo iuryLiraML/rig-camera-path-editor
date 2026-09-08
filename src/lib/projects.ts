@@ -12,9 +12,9 @@ import {
   useCameraOptionsStore,
   type CameraOption,
 } from '../state/useCameraOptionsStore'
-import { idbDelete, idbGet, idbGetAll, idbPut, idbUpdate, STORES } from './idb'
+import { idbGet, idbGetAll, idbPut, idbUpdate, STORES } from './idb'
 import { CloudConflictError, isTeamCloudApp, listCloudProjects } from './cloud/client'
-import { hydrateCloudProject, syncActiveProjectToCloud, syncProjectToCloud } from './cloud/sync'
+import { deleteSyncedProject, hydrateCloudProject, syncActiveProjectToCloud, syncProjectToCloud } from './cloud/sync'
 import { liveSceneMetas, loadSceneFromMetas, readLegacyMetas, sweepOrphanBuffers, type ObjectMeta } from './sceneIO'
 import { hydrateEnvironmentFromRecord, loadLiveEnvironmentBuffer } from './environmentJobs'
 import type { ProjectEnvironment, ProjectMeshAsset } from './environment'
@@ -273,6 +273,7 @@ function ensureActiveProjectId(createIfMissing: boolean): string | null {
 }
 
 const localSaves = new Map<string, Promise<void>>()
+const deletingProjects = new Set<string>()
 let authoredRevision = 0
 
 /** Editor snapshots and Projects card actions share the same per-project write order. */
@@ -318,6 +319,7 @@ function editProjectRecord(projectId: string, edit: (record: ProjectRecord) => P
 /** Capture before any await, then serialize writes for this project in invocation order. */
 export async function saveActiveProject(options?: { createIfMissing?: boolean }) {
   const projectId = ensureActiveProjectId(options?.createIfMissing ?? true)
+  if (projectId && deletingProjects.has(projectId)) return
   if (!projectId) {
     useSaveStatusStore.getState().setStatus('saved')
     return
@@ -675,6 +677,15 @@ export async function initializeBlankProjectSession() {
   }
 }
 
+/** Leave a draft through the same persistence boundary as project switching. */
+export function openBlankProjectSession(signal?: AbortSignal) {
+  return serializeProjectTransition(async () => {
+    if (signal?.aborted) return
+    await flushActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
+    if (!signal?.aborted) await initializeBlankProjectSession()
+  })
+}
+
 /** Boot saved-project discovery, then open a pristine local editor session. */
 export async function bootProjects() {
   if (isTeamCloudApp() && !isCloudFirst()) {
@@ -785,7 +796,8 @@ function serializeProjectTransition<T>(operation: () => Promise<T>): Promise<T> 
   return run
 }
 
-async function switchProjectNow(id: string) {
+async function switchProjectNow(id: string, signal?: AbortSignal) {
+  if (signal?.aborted) return
   const { projectId } = useProjectStore.getState()
   if (id === projectId) return
   clearTimeout(saveTimer)
@@ -795,6 +807,7 @@ async function switchProjectNow(id: string) {
 
   if (isCloudFirst()) {
     const record = await loadCloudRecord(id)
+    if (signal?.aborted) return
     await openHydratedRecord(record)
     resetHistory()
     useSceneStore.getState().showNotice(`Switched to "${record.name}"`)
@@ -803,22 +816,23 @@ async function switchProjectNow(id: string) {
 
   const records = await getAllProjectRecords()
   const record = records.find((r) => r.id === id)
-  if (!record) return
+  if (!record || signal?.aborted) return
 
   await openHydratedRecord(record)
   resetHistory()
   useSceneStore.getState().showNotice(`Switched to "${record.name}"`)
 }
 
-export function switchProject(id: string) {
-  return serializeProjectTransition(() => switchProjectNow(id))
+export function switchProject(id: string, signal?: AbortSignal) {
+  return serializeProjectTransition(() => switchProjectNow(id, signal))
 }
 
 // ---------------------------------------------------------------------------
 // Scenes — places within the active project
 // ---------------------------------------------------------------------------
 
-async function switchSceneNow(sceneId: string) {
+async function switchSceneNow(sceneId: string, signal?: AbortSignal) {
+  if (signal?.aborted) return
   const { projectId, activeSceneId } = useProjectStore.getState()
   if (!projectId || sceneId === activeSceneId) return
   clearTimeout(saveTimer)
@@ -827,7 +841,7 @@ async function switchSceneNow(sceneId: string) {
 
   const record = await getProjectRecord(projectId)
   const scene = record?.scenes.find((s) => s.id === sceneId)
-  if (!record || !scene) return
+  if (!record || !scene || signal?.aborted) return
 
   applyRecord({ ...record, activeSceneId: sceneId })
   await loadSceneFromMetas(scene.sceneMeta, true)
@@ -837,8 +851,8 @@ async function switchSceneNow(sceneId: string) {
 }
 
 /** Switch which scene (place) is active within the current project. */
-export function switchScene(sceneId: string) {
-  return serializeProjectTransition(() => switchSceneNow(sceneId))
+export function switchScene(sceneId: string, signal?: AbortSignal) {
+  return serializeProjectTransition(() => switchSceneNow(sceneId, signal))
 }
 
 async function createSceneNow(name: string): Promise<string | null> {
@@ -1019,34 +1033,24 @@ export async function removeFolder(folderId: string) {
 export { createFolder, renameFolder, listFolders } from './folders'
 export type { FolderRecord } from './folders'
 
-async function deleteProjectNow(id: string) {
+async function deleteProjectNow(id: string, localOnly = false) {
   clearTimeout(saveTimer)
-  await localSaves.get(id)
-  await idbDelete(STORES.projects, id)
-  createdAtById.delete(id)
-  if (isCloudFirst()) {
-    await refreshProjectList()
-    if (useProjectStore.getState().projectId === id) {
-      const remaining = useProjectStore.getState().projectList
-      if (remaining.length > 0) {
-        await switchProjectNow(remaining[0].id)
-      } else {
-        useProjectStore.setState({ projectId: '' })
-        useEditorStore.getState().setAppView('projects')
-      }
+  deletingProjects.add(id)
+  try {
+    const activeId = useProjectStore.getState().projectId
+    if (activeId !== id && useSaveStatusStore.getState().status === 'dirty') {
+      await saveActiveProject({ createIfMissing: true })
     }
-    return
-  }
-  const records = await refreshProjectList()
-  if (useProjectStore.getState().projectId === id) {
-    if (records.length > 0) {
-      await openHydratedRecord(records[0])
-      resetHistory()
-    } else {
-      useProjectStore.setState({ projectId: '' })
+    await enqueueProjectWrite(id, () => deleteSyncedProject(id, { localOnly }))
+    createdAtById.delete(id)
+    if (useProjectStore.getState().projectId === id) {
+      // Do not use save-before-switch navigation after deleting its source.
       await initializeBlankProjectSession()
       useEditorStore.getState().setAppView('projects')
     }
+    await refreshProjectList()
+  } finally {
+    deletingProjects.delete(id)
   }
 }
 
@@ -1120,9 +1124,11 @@ export function duplicateShotAsCameraOption(shot: Shot) {
   return id
 }
 
-export async function goToProjectsHome() {
+export async function goToProjectsHome(signal?: AbortSignal) {
   try {
+    if (signal?.aborted) return false
     await flushActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
+    if (signal?.aborted) return false
     if (useSaveStatusStore.getState().status === 'dirty') {
       useSceneStore.getState().showNotice('Could not save. Stay in the editor and try again.')
       return false
@@ -1140,6 +1146,7 @@ export async function goToProjectsHome() {
     // Local persistence already upserts summaries; discover other tabs without requiring cloud availability.
     const records = await getAllProjectRecords()
     for (const record of records) upsertProjectSummary(record)
+    if (signal?.aborted) return false
     useEditorStore.getState().setAppView('projects')
     return true
   } catch (error) {
@@ -1216,7 +1223,7 @@ export async function backupUnsyncedProject(id: string) {
 
 /** Discard one parked local copy, then sign out when none remain. */
 export async function discardUnsyncedProject(id: string) {
-  await deleteProject(id)
+  await serializeProjectTransition(() => deleteProjectNow(id, true))
   dropPendingSignOut(id)
 }
 

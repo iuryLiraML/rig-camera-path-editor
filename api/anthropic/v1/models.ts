@@ -1,4 +1,5 @@
-import { handleAgentApi } from '../_lib/agentApi'
+/** See ./messages.ts — one static file per allowlisted vendor path. */
+import { handleAgentApi } from '../../_lib/agentApi'
 
 export const config = { runtime: 'edge' }
 

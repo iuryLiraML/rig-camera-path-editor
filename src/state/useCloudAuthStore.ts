@@ -8,7 +8,6 @@ import {
   storeProviderCredential,
 } from '../lib/cloud/client'
 import { idbClear } from '../lib/idb'
-import type { ProviderKind } from '../lib/agent/providers'
 import { useAgentStore } from './useAgentStore'
 import { useEditorStore } from './useEditorStore'
 import { useProjectStore } from './useProjectStore'
@@ -16,7 +15,8 @@ import { useProjectStore } from './useProjectStore'
 const TOKEN_KEY = CLOUD_ACCESS_TOKEN_KEY
 let authRequest = 0
 
-export type VaultProvider = ProviderKind | 'fal'
+// Director credentials stay on the deployment; only Fal uses the personal vault.
+export type VaultProvider = 'fal'
 
 export interface CloudSaveConflict {
   projectId: string
@@ -49,8 +49,6 @@ interface CloudAuthState {
 
 function clearAgentSecrets() {
   const agent = useAgentStore.getState()
-  agent.setKey('anthropic', '')
-  agent.setKey('kimi', '')
   agent.setFalKey('')
 }
 
@@ -60,12 +58,10 @@ async function hydrateVaultSecrets(accessToken: string, current: () => boolean) 
   const agent = useAgentStore.getState()
   for (const row of listed) {
     if (!current()) return {}
+    if (row.provider !== 'fal') continue
     const retrieved = await retrieveOwnCredential(accessToken, row.id)
     if (!current()) return {}
-    if (retrieved.provider === 'anthropic' || retrieved.provider === 'kimi') {
-      agent.setKey(retrieved.provider, retrieved.secret)
-      credentialIds[retrieved.provider] = retrieved.id
-    } else if (retrieved.provider === 'fal') {
+    if (retrieved.provider === 'fal') {
       agent.setFalKey(retrieved.secret)
       credentialIds.fal = retrieved.id
     }

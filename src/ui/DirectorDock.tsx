@@ -62,9 +62,7 @@ export function DirectorDock() {
   const taskProgress = useAgentStore((s) => s.taskProgress)
   const error = useAgentStore((s) => s.error)
   const failChips = useAgentStore((s) => s.failChips)
-  const hasKey = useAgentStore(
-    (s) => (s.keys[s.provider] ?? '').trim().length > 0 || s.serverKeys[s.provider],
-  )
+  const hasKey = useAgentStore((s) => s.serverKeys[s.provider])
   const provider = useAgentStore((s) => s.provider)
   const forcedSkill = useAgentStore((s) => s.forcedSkill)
   const liftPhotoName = useAgentStore((s) => s.liftPhotoName)
@@ -180,7 +178,7 @@ export function DirectorDock() {
             (!hasKey ? (
             <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-6 text-center">
               <p className="text-[12px] leading-relaxed text-ink-dim">
-                The Director builds camera moves from a prompt. Add your API key to start.
+                The Director builds camera moves from a prompt. This deployment's Anthropic key is not configured — see Settings.
               </p>
               <button
                 type="button"
@@ -284,7 +282,7 @@ export function DirectorDock() {
               <button
                 type="button"
                 onClick={() => useEditorStore.getState().setShowSettings(true)}
-                title="Provider and keys"
+                title="Director model"
                 className="ml-auto shrink-0 text-[10px] text-ink-dim hover:text-ink"
               >
                 {PROVIDERS[provider].label}
