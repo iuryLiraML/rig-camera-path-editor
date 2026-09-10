@@ -4,8 +4,8 @@ test.use({ viewport: { width: 1440, height: 900 } })
 test.setTimeout(60_000)
 
 async function prepare(page: Page, parented = false) {
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
   await page.evaluate(async (parented) => {
     const { usePathStore } = await import('/src/state/usePathStore.ts')
     const { useEditorStore } = await import('/src/state/useEditorStore.ts')

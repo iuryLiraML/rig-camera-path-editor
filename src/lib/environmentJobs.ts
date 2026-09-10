@@ -32,9 +32,19 @@ export async function loadLiveEnvironmentBuffer() {
     env.setSourceImage(null)
     return
   }
+  const { resolveLibraryAsset } = await import('./library')
+  const asset = await resolveLibraryAsset(id)
+  if (asset && asset.kind === 'location') {
+    // A location always has bytes; the kind check guarantees it. The guard is for the type.
+    const buffer = asset.bufferKey ? await idbGet<ArrayBuffer>(STORES.buffers, asset.bufferKey) : undefined
+    env.setLiveBuffer(buffer ?? null, asset.format as 'ply' | 'splat')
+    env.setSourceImage(null)
+    return
+  }
   const record = env.environments.find((item) => item.id === id)
   if (!record) {
     env.setLiveBuffer(null, null)
+    env.setSourceImage(null)
     return
   }
   const buffer = await idbGet<ArrayBuffer>(STORES.buffers, record.bufferKey)

@@ -7,10 +7,12 @@ import { useSceneStore } from '../state/useSceneStore'
 vi.mock('./projects', () => ({
   switchProject: vi.fn(async (id: string) => { useProjectStore.setState({ projectId: id, activeSceneId: `scene-${id}` }) }),
   switchScene: vi.fn(async (id: string) => { useProjectStore.setState({ activeSceneId: id }) }),
-  goToProjectsHome: vi.fn(async () => { useEditorStore.getState().setAppView('projects'); return true }),
+  goHome: vi.fn(async () => { useEditorStore.getState().setAppView('home'); return true }),
+  goLibrary: vi.fn(async () => { useEditorStore.getState().setAppView('library'); return true }),
+  goProjects: vi.fn(async () => { useEditorStore.getState().setAppView('projects'); return true }),
   openBlankProjectSession: vi.fn(async () => { useProjectStore.setState({ projectId: '', activeSceneId: '' }) }),
 }))
-import { goToProjectsHome, openBlankProjectSession, switchProject } from './projects'
+import { goHome, goLibrary, goProjects, openBlankProjectSession, switchProject } from './projects'
 import { installRouter } from './router'
 
 let dispose: (() => void) | undefined
@@ -29,15 +31,29 @@ async function navigate(hash: string) {
   await vi.advanceTimersByTimeAsync(0)
 }
 
+it('uses the save-aware Home transition for browser navigation', async () => {
+  dispose = await installRouter()
+  await navigate('#/home')
+  expect(goHome).toHaveBeenCalledOnce()
+  expect(useEditorStore.getState().appView).toBe('home')
+})
+
+it('uses the save-aware Library transition for browser navigation', async () => {
+  dispose = await installRouter()
+  await navigate('#/library')
+  expect(goLibrary).toHaveBeenCalledOnce()
+  expect(useEditorStore.getState().appView).toBe('library')
+})
+
 it('uses the save-aware Projects transition for browser navigation', async () => {
   dispose = await installRouter()
   await navigate('#/projects')
-  expect(goToProjectsHome).toHaveBeenCalledOnce()
+  expect(goProjects).toHaveBeenCalledOnce()
   expect(useEditorStore.getState().appView).toBe('projects')
 })
 
 it('keeps the editor and restores its URL when Projects cannot save', async () => {
-  vi.mocked(goToProjectsHome).mockResolvedValueOnce(false)
+  vi.mocked(goProjects).mockResolvedValueOnce(false)
   dispose = await installRouter()
   await navigate('#/projects')
   expect(useEditorStore.getState().appView).toBe('editor')
@@ -116,4 +132,15 @@ it('does not record the intermediate stores of a busy project transition', async
   useProjectStore.setState({ projectBusy: false, activeSceneId: 'scene-B' })
   await vi.advanceTimersByTimeAsync(100)
   expect(window.location.hash).toBe('#/p/B/scene-B/build')
+})
+
+it('does not overwrite a new browser URL while its hashchange event is still pending', async () => {
+  dispose = await installRouter()
+  useEditorStore.getState().setWorkspaceMode('compose')
+  window.history.replaceState(null, '', '/#/projects')
+  await vi.advanceTimersByTimeAsync(100)
+  expect(window.location.hash).toBe('#/projects')
+  window.dispatchEvent(new HashChangeEvent('hashchange'))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(useEditorStore.getState().appView).toBe('projects')
 })

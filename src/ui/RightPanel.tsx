@@ -1,3 +1,4 @@
+import { CharacterPosePanel } from './CharacterPosePanel'
 import { PrimitiveShapeControls } from './SolidControls'
 import { useState } from 'react'
 
@@ -40,12 +41,6 @@ import { applyCameraPreset, PRESETS } from '../lib/presets'
 import { animateSelectedPerson } from '../lib/animatePerson'
 import {
   applyDummyBonePose,
-  DUMMY_BONE_LABELS,
-  dummyRestPose,
-  isDummyBoneName,
-  listDummyPoseBones,
-  resetDummyBonePose,
-  setDummyBoneAxis,
 } from '../lib/dummyCharacter'
 import {
   ColorField,
@@ -400,7 +395,6 @@ function FollowSection({ objectId }: { objectId: string }) {
 
 function ObjectSections({ objectId }: { objectId: string }) {
   const object = useSceneStore((s) => s.objects.find((o) => o.id === objectId))
-  const dummyBone = useEditorStore((s) => s.dummyBone)
   const t = useRigStore((s) => s.t)
   const duration = useRigStore((s) => s.duration)
   const scene = useSceneStore.getState()
@@ -450,7 +444,7 @@ function ObjectSections({ objectId }: { objectId: string }) {
               onClick={() => scene.clearObjectKeys(object.id)}
             />
           )}
-          {object.clips.length > 0 && (
+          {object.rigKind !== 'dummy' && object.clips.length > 0 && (
             <Row label="File clips">
               <Segmented
                 options={[
@@ -468,50 +462,6 @@ function ObjectSections({ objectId }: { objectId: string }) {
               />
             </Row>
           )}
-          {object.rigKind === 'dummy' && object.clips.length > 1 && (
-            <Row label="Clip">
-              <Segmented
-                options={object.clips.map((clip) => ({ value: clip.name, label: clip.name }))}
-                value={object.activeClip ?? 'Idle'}
-                onChange={(name) => scene.setActiveClip(object.id, name)}
-              />
-            </Row>
-          )}
-          {object.rigKind === 'dummy' && (
-            <>
-              <Row label="Bone">
-                <select
-                  value={dummyBone ?? ''}
-                  onChange={(e) => {
-                    const name = e.target.value
-                    useEditorStore.getState().setDummyBone(name || null)
-                    if (name) scene.setPlayClips(object.id, false)
-                  }}
-                  className="w-full min-w-0 rounded-md bg-panel-2 px-2 py-1 text-[11px] text-ink outline-none"
-                >
-                  <option value="">Whole figure</option>
-                  {listDummyPoseBones(object.root).map((name) => (
-                    <option key={name} value={name}>
-                      {DUMMY_BONE_LABELS[name]}
-                    </option>
-                  ))}
-                </select>
-              </Row>
-              {dummyBone && isDummyBoneName(dummyBone) && (
-                <Row label="Joint">
-                  <XYZInput
-                    value={object.bonePose?.[dummyBone] ?? dummyRestPose(object.root)[dummyBone]}
-                    step={1}
-                    onChange={(axis, value) => setDummyBoneAxis(object.id, dummyBone, axis, value)}
-                  />
-                </Row>
-              )}
-              <PanelButton label="Reset pose" onClick={() => resetDummyBonePose(object.id)} />
-              <p className="text-[10px] text-ink-dim">
-                File clips Off, click a joint sphere, then W to move or E to rotate that bone.
-              </p>
-            </>
-          )}
           {object.rigKind === 'sam-person' && (
             <PanelButton
               label="Animate"
@@ -521,6 +471,7 @@ function ObjectSections({ objectId }: { objectId: string }) {
           )}
         </Section>
       )}
+      {object.rigKind === 'dummy' && <CharacterPosePanel key={object.id} objectId={object.id} />}
       <FollowSection objectId={object.id} />
       {object.primitive && (
         <Section title="Shape">

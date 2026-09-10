@@ -32,6 +32,10 @@ import {
 import { deleteFolder as deleteFolderRecord, listFolders } from './folders'
 import { setPersistFlusher } from './persistFlush'
 import { useSaveStatusStore } from './saveStatus'
+import { libraryBufferKeys, listLibraryAssets, listLibraryCollections } from './library'
+import { createProductionList, reconcileProductionList } from './productionWorkflow'
+import type { ProductionBreakdown } from './agent/productionBreakdown'
+import type { ProductionList } from './productionWorkflow'
 
 const ACTIVE_KEY = 'rig-active-project'
 export const AUTOSAVE_MS = 800
@@ -250,7 +254,8 @@ function restoreDirectorChat() {
 function ensureActiveProjectId(createIfMissing: boolean): string | null {
   const current = useProjectStore.getState()
   if (current.projectId) return current.projectId
-  if (!createIfMissing || useEditorStore.getState().appView === 'projects') return null
+  const view = useEditorStore.getState().appView
+  if (!createIfMissing || view === 'projects' || view === 'home' || view === 'library') return null
   const id = makeSceneId('proj')
   const activeSceneId = current.activeSceneId || makeSceneId('scene')
   const sceneName = current.sceneName.trim() || 'Scene 1'
@@ -314,6 +319,21 @@ function editProjectRecord(projectId: string, edit: (record: ProjectRecord) => P
     }
     return updated
   })
+}
+
+/** Apply an asynchronous production result to its owning project, even after navigation. */
+export async function updateProjectProduction(projectId: string, edit: (list: ProductionList) => ProductionList) {
+  if (deletingProjects.has(projectId)) return
+  const current = useProjectStore.getState()
+  if (current.projectId === projectId) {
+    current.setProduction(edit(current.workflow.production))
+    await saveActiveProject({ createIfMissing: false })
+  } else {
+    await editProjectRecord(projectId, (record) => {
+      const workflow = migrateProjectWorkflow(record.workflow, record.name)
+      return { ...record, workflow: { ...workflow, production: edit(workflow.production) } }
+    })
+  }
 }
 
 /** Capture before any await, then serialize writes for this project in invocation order. */
@@ -691,7 +711,7 @@ export async function bootProjects() {
   if (isTeamCloudApp() && !isCloudFirst()) {
     useProjectStore.getState().setProjectList([])
     useProjectStore.setState({ projectId: '' })
-    useEditorStore.getState().setAppView('projects')
+    useEditorStore.getState().setAppView('home')
     watchForAutosave()
     useProjectStore.getState().setBooted(true)
     return
@@ -699,16 +719,11 @@ export async function bootProjects() {
 
   if (isCloudFirst()) {
     await refreshProjectList()
-    const list = useProjectStore.getState().projectList
-    if (list.length === 0) {
-      useProjectStore.setState({ projectId: '' })
-      useEditorStore.getState().setAppView('projects')
-    } else {
-      const activeId = localStorage.getItem(ACTIVE_KEY)
-      const summary = list.find((project) => project.id === activeId) ?? list[0]
-      const record = await loadCloudRecord(summary.id)
-      await openHydratedRecord(record)
-    }
+    useProjectStore.setState({ projectId: '' })
+    await initializeBlankProjectSession()
+    useEditorStore.getState().setAppView('home')
+    await listLibraryAssets().catch(() => undefined)
+    await listLibraryCollections().catch(() => undefined)
     watchForAutosave()
     useProjectStore.getState().setBooted(true)
     return
@@ -745,7 +760,10 @@ export async function bootProjects() {
 
   useProjectStore.getState().setBooted(true)
   await initializeBlankProjectSession()
+  useEditorStore.getState().setAppView('home')
   watchForAutosave()
+  await listLibraryAssets().catch(() => undefined)
+  await listLibraryCollections().catch(() => undefined)
 
   // sweep buffers no scene, in any project, references anymore
   void sweepOrphanBuffers(liveBufferKeys(await getAllProjectRecords(), liveSceneMetas()))
@@ -768,6 +786,7 @@ export function liveBufferKeys(records: ProjectRecord[], liveMetas: ObjectMeta[]
     if (environment.sourceImageKey) keys.add(environment.sourceImageKey)
   }
   for (const asset of useEnvironmentStore.getState().unplacedAssets) keys.add(asset.bufferKey)
+  for (const key of libraryBufferKeys()) keys.add(key)
   return keys
 }
 
@@ -992,6 +1011,48 @@ export function createProject(name = 'New project', folderId: string | null = nu
   return serializeProjectTransition(() => createProjectNow(name, true, folderId))
 }
 
+/** Commit the reviewed intake as one complete project; analysis itself never creates records. */
+export function createGuidedProject(draft: ProductionBreakdown, source: string, folderId: string | null = null) {
+  const input = structuredClone(draft)
+  return serializeProjectTransition(async () => {
+    if (!input.proposal.scenes.length || input.proposal.scenes.some((scene) => !scene.name.trim())) {
+      throw new Error('Name at least one scene before creating the project.')
+    }
+    await saveActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
+    const id = makeSceneId('proj')
+    const now = Date.now()
+    const production = reconcileProductionList(createProductionList(), input.proposal).list
+    const workflow = createLegacyProjectWorkflow(input.name)
+    workflow.production = production
+    workflow.briefSource = { ...workflow.briefSource, status: 'ready', contentType: 'text/plain', extractedText: source, parsedAt: new Date(now).toISOString() }
+    const skillId = `production-guidelines-${crypto.randomUUID()}`
+    workflow.guidelines = { status: 'approved', draft: input.guidelines, skillBody: input.guidelines, skillName: 'Project production guidelines', skillId, approvedAt: new Date(now).toISOString() }
+    const scenes: SceneRecord[] = production.scenes.map((scene, order) => ({
+      id: scene.id, name: scene.name, order, createdAt: now,
+      sceneMeta: [], rig: makeEmptyRigSnapshot(),
+      paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
+      shots: [], directorChat: [], directorLessons: [],
+    }))
+    const record: ProjectRecord = {
+      id, name: input.name.trim() || 'New project', createdAt: now, updatedAt: now,
+      contentRevision: crypto.randomUUID(), folderId, workflow,
+      guidelines: input.guidelines, savedPrompts: [],
+      skills: [{ id: skillId, name: 'Project production guidelines', description: 'Approved visual direction for production assets.', body: input.guidelines }],
+      activeSceneId: scenes[0].id, scenes,
+    }
+    await enqueueProjectWrite(id, () => idbPut(STORES.projects, record))
+    createdAtById.set(id, now)
+    upsertProjectSummary(record)
+    resetEditorChrome()
+    await openHydratedRecord(record)
+    localStorage.setItem(ACTIVE_KEY, id)
+    resetHistory()
+    useSaveStatusStore.getState().setStatus('saved')
+    requestProjectSync(id)
+    return id
+  })
+}
+
 export async function renameProject(projectId: string, name: string) {
   const next = name.trim() || 'Untitled'
   const store = useProjectStore.getState()
@@ -1046,7 +1107,7 @@ async function deleteProjectNow(id: string, localOnly = false) {
     if (useProjectStore.getState().projectId === id) {
       // Do not use save-before-switch navigation after deleting its source.
       await initializeBlankProjectSession()
-      useEditorStore.getState().setAppView('projects')
+      useEditorStore.getState().setAppView('home')
     }
     await refreshProjectList()
   } finally {
@@ -1124,7 +1185,10 @@ export function duplicateShotAsCameraOption(shot: Shot) {
   return id
 }
 
-export async function goToProjectsHome(signal?: AbortSignal) {
+export async function leaveEditorTo(
+  view: 'home' | 'library' | 'projects',
+  signal?: AbortSignal,
+) {
   try {
     if (signal?.aborted) return false
     await flushActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
@@ -1147,7 +1211,7 @@ export async function goToProjectsHome(signal?: AbortSignal) {
     const records = await getAllProjectRecords()
     for (const record of records) upsertProjectSummary(record)
     if (signal?.aborted) return false
-    useEditorStore.getState().setAppView('projects')
+    useEditorStore.getState().setAppView(view)
     return true
   } catch (error) {
     useSceneStore.getState().showNotice(
@@ -1155,6 +1219,18 @@ export async function goToProjectsHome(signal?: AbortSignal) {
     )
     return false
   }
+}
+
+export async function goHome(signal?: AbortSignal) {
+  return leaveEditorTo('home', signal)
+}
+
+export async function goLibrary(signal?: AbortSignal) {
+  return leaveEditorTo('library', signal)
+}
+
+export async function goProjects(signal?: AbortSignal) {
+  return leaveEditorTo('projects', signal)
 }
 
 export async function listUnsyncedProjects(): Promise<{ id: string; name: string }[]> {

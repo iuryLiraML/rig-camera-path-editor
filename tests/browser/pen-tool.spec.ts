@@ -25,8 +25,8 @@ async function anchorCount(page: Page): Promise<number> {
 
 /** Isolate canvas authoring; the toolbar activation route is tested separately. */
 async function openCompose(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
   await page.evaluate(async () => {
     const mod = await import('/src/state/useEditorStore.ts')
     mod.useEditorStore.getState().setWorkspaceMode('compose')
@@ -98,8 +98,8 @@ test.describe('Pen places points on the grid', () => {
   })
 
   test('the Pen activated from the toolbar button places on the first click', async ({ page }) => {
-    await page.goto('/')
-    await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+    await page.goto('/#/build')
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
     await page.evaluate(async () => {
       const mod = await import('/src/state/useEditorStore.ts')
       mod.useEditorStore.getState().setWorkspaceMode('compose')
@@ -114,8 +114,8 @@ test.describe('Pen places points on the grid', () => {
   test('picking the Pen while looking through the camera still places a point', async ({
     page,
   }) => {
-    await page.goto('/')
-    await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+    await page.goto('/#/build')
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
     await page.evaluate(async () => {
       const mod = await import('/src/state/useEditorStore.ts')
       const editor = mod.useEditorStore.getState()
@@ -131,8 +131,8 @@ test.describe('Pen places points on the grid', () => {
   })
 
   test('picking the Pen from a Depth pass still places a point', async ({ page }) => {
-    await page.goto('/')
-    await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+    await page.goto('/#/build')
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
     await page.evaluate(async () => {
       const mod = await import('/src/state/useEditorStore.ts')
       const editor = mod.useEditorStore.getState()
@@ -444,7 +444,7 @@ test.describe('Bézier editing after finishing the Pen stroke', () => {
     })
     await page.screenshot({ path: '/tmp/rig-bezier-editing.png' })
     await page.reload()
-    await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
     await page.evaluate(async (id) => {
       const { switchProject } = await import('/src/lib/projects.ts')
       const { useEditorStore } = await import('/src/state/useEditorStore.ts')

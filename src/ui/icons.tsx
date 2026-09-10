@@ -22,6 +22,13 @@ export const PlusIcon = (p: IconProps) => (
   </svg>
 )
 
+export const EditIcon = (p: IconProps) => (
+  <svg {...base(p)}>
+    <path d="M9.7 3.3l3 3L6 13l-3.4.4L3 10l6.7-6.7z" />
+    <path d="M8.6 4.4l3 3" />
+  </svg>
+)
+
 export const CursorIcon = (p: IconProps) => (
   <svg {...base(p)}>
     <path d="M4 2.5l8 5.2-3.6.9-.9 3.9L4 2.5z" />

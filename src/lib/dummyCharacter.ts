@@ -325,8 +325,23 @@ function hideDummyExtras(root: THREE.Object3D) {
  * `primeBindPose`). Must run on an untouched clone — a later snapshot
  * would treat a posed arm as rest and explode the skin.
  */
+const restoredBindRoots = new WeakSet<THREE.Object3D>()
 export function primeBindPose(root: THREE.Object3D) {
-  if (root.userData.dummyBindPrimed) return
+  if (root.userData.dummyBindPrimed) {
+    if (restoredBindRoots.has(root)) return
+    // Object3D cloning JSON-copies userData. Restore typed bind snapshots,
+    // never capture the currently posed transforms as a new bind pose.
+    root.traverse((node) => {
+      const q = node.userData.dummyBindQuat
+      if (Array.isArray(q) && q.length === 4) node.userData.dummyBindQuat = new THREE.Quaternion().fromArray(q)
+      for (const key of ['dummyBindPos', 'dummyBindScale']) {
+        const value = node.userData[key]
+        if (value && !(value instanceof THREE.Vector3)) node.userData[key] = new THREE.Vector3(value.x, value.y, value.z)
+      }
+    })
+    restoredBindRoots.add(root)
+    return
+  }
   root.traverse((node) => {
     if (!(node instanceof THREE.Bone)) return
     const pose = DUMMY_GLB_TO_POSE[node.name] ?? (isDummyBoneName(node.name) ? node.name : null)
@@ -336,6 +351,7 @@ export function primeBindPose(root: THREE.Object3D) {
     node.userData.dummyBindScale = node.scale.clone()
   })
   root.userData.dummyBindPrimed = true
+  restoredBindRoots.add(root)
 }
 
 function bindQuat(bone: THREE.Bone): THREE.Quaternion {

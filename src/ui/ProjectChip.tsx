@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { goToProjectsHome } from '../lib/projects'
+import { goHome } from '../lib/projects'
 import { useSaveStatusStore } from '../lib/saveStatus'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
@@ -78,13 +78,23 @@ export function ProjectChip({ variant = 'pill' }: { variant?: 'pill' | 'header' 
       )}
       <button
         type="button"
-        title="Back to projects"
-        onClick={() => void goToProjectsHome()}
+        title="Back to Home"
+        onClick={() => void goHome()}
         className="flex shrink-0 items-center gap-1 rounded-md px-1 py-0.5 text-[11px] text-ink-dim hover:bg-panel-2 hover:text-ink"
       >
         <HomeIcon size={13} />
-        Projects
+        Home
       </button>
+      {projectId && (
+        <button
+          type="button"
+          title="Production list"
+          onClick={() => useEditorStore.getState().setShowProduction(true)}
+          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-ink-dim hover:bg-panel-2 hover:text-ink"
+        >
+          <ListIcon size={14} />
+        </button>
+      )}
     </div>
   )
 

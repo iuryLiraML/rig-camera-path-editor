@@ -7,7 +7,7 @@ import {
   retrieveOwnCredential,
   storeProviderCredential,
 } from '../lib/cloud/client'
-import { idbClear } from '../lib/idb'
+import { idbClear, idbClearPreservingLibrary } from '../lib/idb'
 import { useAgentStore } from './useAgentStore'
 import { useEditorStore } from './useEditorStore'
 import { useProjectStore } from './useProjectStore'
@@ -142,10 +142,16 @@ export const useCloudAuthStore = create<CloudAuthState>((set, get) => ({
     set({ accessToken: null, session: null, status: 'signed-out' })
     localStorage.removeItem(TOKEN_KEY)
     clearAgentSecrets()
-    await idbClear().catch((error) => console.error('Failed to wipe project cache', error))
+    if (isTeamCloudApp()) {
+      await idbClear().catch((error) => console.error('Failed to wipe project cache', error))
+      const { useLibraryStore } = await import('../lib/library')
+      useLibraryStore.setState({ assets: [], collections: [], selectedId: null })
+    } else {
+      await idbClearPreservingLibrary().catch((error) => console.error('Failed to wipe project cache', error))
+    }
     useProjectStore.getState().setProjectList([])
     useProjectStore.setState({ projectId: '' })
-    useEditorStore.getState().setAppView('projects')
+    useEditorStore.getState().setAppView('home')
     set({
       accessToken: null,
       session: null,

@@ -9,7 +9,7 @@ test.beforeEach(async ({ page }) => {
 for (const width of [1884, 1024]) {
   test(`Add Object clears the reopened Director chat at ${width}px`, async ({ page }, testInfo) => {
     await page.setViewportSize({ width, height: 1061 })
-    await page.goto('/')
+    await page.goto('/#/build')
     await expect(page.getByTitle('Collapse Director')).toBeVisible()
     if (width === 1884) await page.getByRole('button', { name: 'Outliner', exact: true }).click()
     await page.getByTitle('Collapse Director').click()
@@ -29,7 +29,7 @@ for (const width of [1884, 1024]) {
 // Compact mode intentionally overlays the viewport; the composer must remain on top.
 test('compact chat stays clickable above the Add Object tray', async ({ page }) => {
   await page.setViewportSize({ width: 768, height: 600 })
-  await page.goto('/')
+  await page.goto('/#/build')
   await page.getByTitle('Expand Director').click()
   const input = page.getByPlaceholder('Describe a scene, watch AI build it in 3D')
   await input.click()
@@ -42,7 +42,7 @@ test('compact chat stays clickable above the Add Object tray', async ({ page }) 
 
 test('a compact overlay cannot keep an unreserved width after resizing to desktop', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  await page.goto('/')
+  await page.goto('/#/build')
   await page.getByTitle('Collapse Director').click()
   await page.setViewportSize({ width: 768, height: 600 })
   await page.getByTitle('Expand Director').click()

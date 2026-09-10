@@ -1,4 +1,6 @@
-export const PROJECT_WORKFLOW_VERSION = 1 as const
+import { createProductionList, migrateProductionList, type ProductionList } from './productionWorkflow'
+
+export const PROJECT_WORKFLOW_VERSION = 2 as const
 
 export type ArtifactStatus =
   | 'missing'
@@ -146,6 +148,7 @@ export interface ProjectWorkflow {
   guidelines: GuidelinesArtifact
   prd: PrdArtifact
   shotList: ShotListArtifact
+  production: ProductionList
 }
 
 export type RequiredProjectAction =
@@ -470,7 +473,7 @@ export function migrateProjectWorkflow(value: unknown, projectName: string): Pro
   if (typeof value !== 'object' || value === null || !('schemaVersion' in value)) {
     return createProjectWorkflow(projectName)
   }
-  if (value.schemaVersion !== PROJECT_WORKFLOW_VERSION) return createProjectWorkflow(projectName)
+  if (value.schemaVersion !== 1 && value.schemaVersion !== PROJECT_WORKFLOW_VERSION) return createProjectWorkflow(projectName)
 
   const candidate = value as Partial<ProjectWorkflow>
   const foundation = candidate.foundation
@@ -547,6 +550,7 @@ export function migrateProjectWorkflow(value: unknown, projectName: string): Pro
     guidelines: guidelinesArtifact(candidate.guidelines),
     prd: prdArtifact(candidate.prd),
     shotList: shotListArtifact(candidate.shotList),
+    production: migrateProductionList(candidate.production),
   }
 }
 
@@ -566,6 +570,7 @@ export function createProjectWorkflow(_projectName: string): ProjectWorkflow {
       targetDurationSeconds: null,
     },
     ...emptyArtifacts(),
+    production: createProductionList(),
   }
 }
 

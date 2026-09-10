@@ -33,7 +33,7 @@ describe('TopChrome', () => {
     expect(tools.style.top).toBe(`${GUTTER}px`)
     expect(left.querySelector('[data-project-chip-slot]')).toBeTruthy()
     expect(left.querySelector('[data-mode-switcher-slot]')).toBeTruthy()
-    expect(getByText('Projects')).toBeTruthy()
+    expect(getByText('Home')).toBeTruthy()
     expect(getByTitle('Place objects in the scene')).toBeTruthy()
     expect(getByTitle('Select (V)')).toBeTruthy()
   })

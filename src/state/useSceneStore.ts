@@ -43,6 +43,8 @@ import {
 } from '../lib/assetDisplay'
 import { countRenderedTriangles } from '../lib/geometryStats'
 import type { ModelFormat } from '../lib/modelCodec'
+import { buildPlanGroup } from '../lib/planGeometry'
+import type { StoredPlan } from '../lib/floorPlanModel'
 
 export type { ModelFormat } from '../lib/modelCodec'
 
@@ -155,6 +157,10 @@ export interface SceneObject {
   modelFormat?: ModelFormat
   /** parametric primitive descriptor (serializable); absent for GLB imports */
   primitive?: PrimitiveSpec
+  /** A floor plan's wall graph, copied from the Library asset at insert (ADR 0003).
+   *  The object rebuilds its geometry from this copy on load, so editing the
+   *  Library plan later never reshapes a scene that already used it. */
+  plan?: StoredPlan
   transform: Transform
   /** pose keyframes on the shared timeline */
   keys: ModelKey[]
@@ -237,7 +243,7 @@ export function makeObject(
   options: Partial<
     Pick<
       SceneObject,
-      'id' | 'shade' | 'clayColor' | 'bufferKey' | 'sourceFormat' | 'modelFormat' | 'primitive' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'remeshed' | 'rigKind' | 'keepDenseMesh' | 'keepTexture' | 'keepPoints' | 'bonePose' | 'boneTranslate' | 'figureSex' | 'displayMode'
+      'id' | 'shade' | 'clayColor' | 'bufferKey' | 'sourceFormat' | 'modelFormat' | 'primitive' | 'plan' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'remeshed' | 'rigKind' | 'keepDenseMesh' | 'keepTexture' | 'keepPoints' | 'bonePose' | 'boneTranslate' | 'figureSex' | 'displayMode'
     >
   > = {},
 ): SceneObject {
@@ -257,6 +263,7 @@ export function makeObject(
     sourceFormat: options.sourceFormat,
     modelFormat: options.modelFormat,
     primitive: options.primitive,
+    plan: options.plan,
     transform: options.transform ?? identityTransform,
     keys: options.keys ?? [],
     clips: options.clips ?? [],
@@ -292,6 +299,23 @@ export function makePrimitive(
   const { params: _p, ...rest } = options
   void _p
   return makeObject(PRIMITIVE_DEFS[kind].label, group, { ...rest, bufferKey: null, primitive: spec })
+}
+
+/**
+ * Build a scene object from a floor plan's wall graph. The graph is copied onto
+ * the object — not referenced — so editing the Library plan later never reshapes
+ * a scene that already used it (ADR 0003). Geometry comes from the shared
+ * buildPlanGroup: the same extrusion the preview and the thumbnail render.
+ */
+export function makePlanObject(
+  name: string,
+  plan: StoredPlan,
+  options: Parameters<typeof makeObject>[2] = {},
+): SceneObject {
+  const group = buildPlanGroup(plan)
+  // A copy, never the record's own object: the editor mutates plans in place,
+  // and none of that may reach a scene that already inserted it (FR-035).
+  return makeObject(name, group, { ...options, bufferKey: null, plan: structuredClone(plan) })
 }
 
 /** Build first, then swap, so failed operations leave both spec and mesh intact. */

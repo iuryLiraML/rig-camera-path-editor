@@ -201,7 +201,7 @@ Generate chip when the user wants a reconstruction without chat.`,
 const sceneBlock: AgentSkill = {
   name: 'scene-block',
   description:
-    'Block the attached still as posed clay people/props. Propose a mask list; the user confirms Place in scene. Palco is the Environment chip, not this command.',
+    'Block the attached still as posed clay people/props. Propose a mask list; the user confirms Place in scene. A Location is the Environment chip, not this command.',
   body: `# Scene block
 
 The user attached a still and wants to **block this scene** (also: "block this shot", "quero blocar essa cena").

@@ -12,6 +12,8 @@
  * the server, so this needs no hosting change and cannot 404.
  *
  * Grammar:
+ *   #/home                           the Home workspace
+ *   #/library                        the Account Library
  *   #/projects                       the projects list
  *   #/<mode>                         editor, no project open (blank session)
  *   #/p/<projectId>                  editor, project, Build
@@ -26,14 +28,16 @@
 import { useEditorStore, type WorkspaceMode } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { useSceneStore } from '../state/useSceneStore'
-import { goToProjectsHome, openBlankProjectSession, switchProject, switchScene } from './projects'
+import { goHome, goLibrary, goProjects, openBlankProjectSession, switchProject, switchScene } from './projects'
 import { CloudApiError } from './cloud/client'
 
 export interface Route {
-  view: 'projects' | 'editor'
+  view: 'home' | 'library' | 'projects' | 'editor' | 'plan'
   projectId: string | null
   sceneId: string | null
   mode: WorkspaceMode
+  /** The Library plan open in the floor-plan editor, when view is 'plan'. */
+  planId: string | null
 }
 
 const MODES = ['build', 'compose', 'visualize'] as const
@@ -59,12 +63,22 @@ export function parseHash(hash: string): Route | null {
   if (segments.length === 0) return null
 
   if (segments[0] === 'projects') {
-    return { view: 'projects', projectId: null, sceneId: null, mode: 'build' }
+    return { view: 'projects', projectId: null, sceneId: null, mode: 'build', planId: null }
+  }
+  if (segments[0] === 'home') {
+    return { view: 'home', projectId: null, sceneId: null, mode: 'build', planId: null }
+  }
+  // #/library/plan/<id> — the floor-plan editor on a Library plan
+  if (segments[0] === 'library' && segments[1] === 'plan' && segments[2]) {
+    return { view: 'plan', projectId: null, sceneId: null, mode: 'build', planId: segments[2] }
+  }
+  if (segments[0] === 'library') {
+    return { view: 'library', projectId: null, sceneId: null, mode: 'build', planId: null }
   }
 
   // #/<mode> — the editor with no project open
   if (segments.length === 1 && isMode(segments[0])) {
-    return { view: 'editor', projectId: null, sceneId: null, mode: segments[0] }
+    return { view: 'editor', projectId: null, sceneId: null, mode: segments[0], planId: null }
   }
 
   if (segments[0] !== 'p' || !segments[1]) return null
@@ -72,18 +86,22 @@ export function parseHash(hash: string): Route | null {
   const projectId = segments[1]
   // #/p/<id>/<mode> vs #/p/<id>/<sceneId>
   if (segments.length === 3 && isMode(segments[2])) {
-    return { view: 'editor', projectId, sceneId: null, mode: segments[2] }
+    return { view: 'editor', projectId, sceneId: null, mode: segments[2], planId: null }
   }
   return {
     view: 'editor',
     projectId,
     sceneId: segments[2] ?? null,
     mode: isMode(segments[3]) ? segments[3] : 'build',
+    planId: null,
   }
 }
 
 export function formatRoute(route: Route): string {
+  if (route.view === 'home') return '#/home'
+  if (route.view === 'library') return '#/library'
   if (route.view === 'projects') return '#/projects'
+  if (route.view === 'plan') return `#/library/plan/${encodeURIComponent(route.planId ?? '')}`
   const enc = encodeURIComponent
   if (!route.projectId) return `#/${route.mode}`
   const scene = route.sceneId ? `/${enc(route.sceneId)}` : ''
@@ -94,12 +112,19 @@ export function formatRoute(route: Route): string {
 export function routeFromState(): Route {
   const editor = useEditorStore.getState()
   const project = useProjectStore.getState()
+  if (editor.appView === 'plan') {
+    return { view: 'plan', projectId: null, sceneId: null, mode: 'build', planId: editor.planId }
+  }
   return {
     // 'board' is never a resting value — setAppView maps it to editor+compose
-    view: editor.appView === 'projects' ? 'projects' : 'editor',
+    view:
+      editor.appView === 'home' || editor.appView === 'library' || editor.appView === 'projects'
+        ? editor.appView
+        : 'editor',
     projectId: project.projectId || null,
     sceneId: project.activeSceneId || null,
     mode: editor.workspaceMode,
+    planId: null,
   }
 }
 
@@ -131,10 +156,16 @@ export async function installRouter(options?: { signal?: AbortSignal }): Promise
   function scheduleWrite() {
     clearTimeout(writeTimer)
     if (disposed || applying || useProjectStore.getState().projectBusy) return
-    writeTimer = setTimeout(() => writeUrl(false), WRITE_DELAY_MS)
+    const scheduledHash = window.location.hash
+    writeTimer = setTimeout(() => {
+      // Browser navigation can change the URL before hashchange is delivered.
+      // A pending editor write must not replace that newer navigation intent.
+      if (window.location.hash === scheduledHash && !applying && !useProjectStore.getState().projectBusy) writeUrl(false)
+    }, WRITE_DELAY_MS)
   }
 
   function adopt(route: Route) {
+    const adoptedHash = window.location.hash
     const request = ++revision
     navigation?.abort()
     const controller = new AbortController()
@@ -146,8 +177,22 @@ export async function installRouter(options?: { signal?: AbortSignal }): Promise
     const run = queue.then(async () => {
       if (!current()) return
       try {
+        if (route.view === 'home') {
+          await goHome(signal)
+          return
+        }
+        if (route.view === 'library') {
+          await goLibrary(signal)
+          return
+        }
         if (route.view === 'projects') {
-          await goToProjectsHome(signal)
+          await goProjects(signal)
+          return
+        }
+        if (route.view === 'plan') {
+          // The floor-plan editor: flush the project, then open the named plan.
+          const { goPlan } = await import('./planEditor')
+          await goPlan(route.planId, signal)
           return
         }
         if (!route.projectId) {
@@ -156,7 +201,7 @@ export async function installRouter(options?: { signal?: AbortSignal }): Promise
           await switchProject(route.projectId, signal)
           if (!current()) return
           if (useProjectStore.getState().projectId !== route.projectId) {
-            await goToProjectsHome(signal)
+            await goProjects(signal)
             if (current()) useSceneStore.getState().showNotice('That project link could not be opened')
             return
           }
@@ -172,7 +217,7 @@ export async function installRouter(options?: { signal?: AbortSignal }): Promise
       } catch (error) {
         if (!current()) return
         if (error instanceof CloudApiError && error.status === 404 && error.code === 'project_not_found') {
-          await goToProjectsHome(signal)
+          await goProjects(signal)
           if (current()) useSceneStore.getState().showNotice('That project link could not be opened')
         } else {
           useSceneStore.getState().showNotice(`Could not open that page: ${error instanceof Error ? error.message : 'Please try again.'}`)
@@ -180,7 +225,7 @@ export async function installRouter(options?: { signal?: AbortSignal }): Promise
       } finally {
         if (current()) {
           applying = false
-          writeUrl(true)
+          if (window.location.hash === adoptedHash) writeUrl(true)
         }
       }
     })

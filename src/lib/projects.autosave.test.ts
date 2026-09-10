@@ -32,7 +32,7 @@ vi.mock('../lib/cloud/client', async (original) => ({
 }))
 
 import {
-  bootProjects, goToProjectsHome, saveActiveProject, switchProject, createProject, deleteProject,
+  bootProjects, goProjects, saveActiveProject, switchProject, createProject, deleteProject,
   initializeBlankProjectSession, openBlankProjectSession, renameProject, renameScene, deleteScene, beginSignOut, AUTOSAVE_MS, type ProjectRecord,
 } from '../lib/projects'
 import { useEditorStore } from '../state/useEditorStore'
@@ -54,6 +54,7 @@ beforeEach(async () => {
   useEditorStore.setState({ appView: 'editor' })
   await initializeBlankProjectSession()
   await bootProjects()
+  useEditorStore.setState({ appView: 'editor' })
   vi.mocked(idbPut).mockClear()
 })
 afterEach(async () => {
@@ -154,19 +155,19 @@ describe('Projects autosave audit: expected product behavior', () => {
     await createProject('Delete this fixture')
     await deleteProject(useProjectStore.getState().projectId)
     expect(memory.size).toBe(0)
-    expect(useEditorStore.getState().appView).toBe('projects')
+    expect(useEditorStore.getState().appView).toBe('home')
   })
   it('does not persist an untouched blank session when opening Projects', async () => {
     expect(memory.size).toBe(0)
     expect(useSaveStatusStore.getState().status).toBe('saved')
-    await goToProjectsHome()
+    await goProjects()
     expect(memory.size).toBe(0)
   })
 
   it('does not accumulate empty projects across three launch-to-Projects visits', async () => {
     for (let visit = 0; visit < 3; visit++) {
       await bootProjects()
-      await goToProjectsHome()
+      await goProjects()
     }
     expect(memory.size).toBe(0)
   })
@@ -188,7 +189,7 @@ describe('Projects autosave audit: expected product behavior', () => {
     await saveActiveProject()
     const id = useProjectStore.getState().projectId
     for (let visit = 0; visit < 3; visit++) {
-      await goToProjectsHome()
+      await goProjects()
       await switchProject(id)
       useEditorStore.getState().setAppView('editor')
       await saveActiveProject()
@@ -199,7 +200,7 @@ describe('Projects autosave audit: expected product behavior', () => {
   it('includes the just-autosaved project in Projects immediately', async () => {
     useSceneStore.getState().addPrimitive('box')
     await vi.advanceTimersByTimeAsync(AUTOSAVE_MS + 1)
-    await goToProjectsHome()
+    await goProjects()
     expect(memory.size).toBe(1)
     expect(useProjectStore.getState().projectList.map((p) => p.id)).toEqual([...memory.keys()])
   })

@@ -25,17 +25,26 @@ afterEach(() => {
 })
 
 describe('ProjectChip', () => {
+  it('opens the project production list', () => {
+    useProjectStore.setState({ projectId: 'project-1', name: 'Film' })
+    useEditorStore.setState({ showProduction: false })
+    const { getByTitle } = render(<ProjectChip />)
+
+    fireEvent.click(getByTitle('Production list'))
+
+    expect(useEditorStore.getState().showProduction).toBe(true)
+  })
   it('labels an unpersisted blank session as Draft', () => {
     useProjectStore.setState({ projectId: '' })
     const { getByText, queryByText } = render(<ProjectChip />)
     expect(getByText('Draft')).toBeTruthy()
     expect(queryByText('Saved')).toBeNull()
   })
-  it('puts the outliner toggle next to Projects in Build', () => {
+  it('puts the outliner toggle next to Home in Build', () => {
     useEditorStore.setState({ workspaceMode: 'build', showOutliner: false })
     const { getByTitle, getByText } = render(<ProjectChip />)
     expect(getByTitle('Outliner')).toBeTruthy()
-    expect(getByText('Projects')).toBeTruthy()
+    expect(getByText('Home')).toBeTruthy()
     fireEvent.click(getByTitle('Outliner'))
     expect(useEditorStore.getState().showOutliner).toBe(true)
   })
@@ -71,7 +80,7 @@ describe('ProjectChip', () => {
     useEditorStore.setState({ workspaceMode: 'visualize' })
     const { queryByTitle, getByText } = render(<ProjectChip />)
     expect(queryByTitle('Outliner')).toBeNull()
-    expect(getByText('Projects')).toBeTruthy()
+    expect(getByText('Home')).toBeTruthy()
   })
 
   it('shows Saved, Saving… and Not saved next to the project name', () => {
@@ -87,10 +96,10 @@ describe('ProjectChip', () => {
     expect(getByText('Not saved')).toBeTruthy()
   })
 
-  it('keeps an Account control next to Projects', () => {
+  it('keeps an Account control next to Home', () => {
     const { getByTitle } = render(<ProjectChip />)
     expect(getByTitle('Account')).toBeTruthy()
-    expect(getByTitle('Back to projects')).toBeTruthy()
+    expect(getByTitle('Back to Home')).toBeTruthy()
   })
 
   it('caps at max-content when the outliner is closed', () => {
@@ -99,7 +108,7 @@ describe('ProjectChip', () => {
     const chip = container.firstElementChild as HTMLElement
     expect(chip.className).toMatch(/\bpanel\b/)
     expect(chip.style.width).toBe('max-content')
-    expect(getByText('Projects')).toBeTruthy()
+    expect(getByText('Home')).toBeTruthy()
     expect(queryByText('Account')).toBeNull()
     expect(getByTitle('Account').className).toMatch(/shrink-0/)
     const name = getByTitle('Project name')
@@ -138,7 +147,7 @@ describe('ProjectChip', () => {
       const chip = container.firstElementChild as HTMLElement
       expect(chip.className).toMatch(/w-full/)
       expect(chip.className).not.toMatch(/\bpanel\b/)
-      expect(getByText('Projects')).toBeTruthy()
+      expect(getByText('Home')).toBeTruthy()
       expect(getByTitle('Project name').textContent).toBe('Lookbook')
       expect(getByTitle('Project name').className).toMatch(/whitespace-nowrap/)
       expect(queryByTitle('Switch scene')).toBeNull()

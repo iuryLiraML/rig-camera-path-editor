@@ -1,3 +1,4 @@
+import { CharacterPosePanel } from './CharacterPosePanel'
 import { useEffect, useRef, useState } from 'react'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
@@ -8,6 +9,7 @@ import { PROVIDERS } from '../lib/agent/providers'
 import { SkillsManager } from './SkillsManager'
 import { ImportIcon, ImageIcon } from './icons'
 import { TransformPopover, EnvironmentTransformPopover } from './TransformPopover'
+import { ObjectShapeSection } from './ObjectShapeSection'
 import { PathSections } from './RightPanel'
 import { CameraAdjustPanel } from './CameraAdjustPanel'
 import { directorDockSlot, GUTTER, useChromeLayout, useViewportInsets, useWindowSize } from './viewportInsets'
@@ -34,7 +36,13 @@ function DirectorInspector() {
     return <EnvironmentTransformPopover embedded />
   }
   if (objectId && object) {
-    return <TransformPopover objectId={objectId} embedded />
+    return (
+      <>
+        <div className="p-2"><CharacterPosePanel key={objectId} objectId={objectId} /></div>
+        <TransformPopover objectId={objectId} embedded />
+        <ObjectShapeSection objectId={objectId} />
+      </>
+    )
   }
   if (pathSelected) {
     return (

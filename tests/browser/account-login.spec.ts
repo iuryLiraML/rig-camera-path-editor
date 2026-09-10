@@ -11,7 +11,7 @@ test('the recovered session endpoint serves JSON through the dev adapter', async
 
 test('Account recognizes the site login without requiring a cloud token', async ({ page }) => {
   await page.route('**/api/auth/me', (route) => route.fulfill({ json: { email: 'browser-fixture@silverside.ai', loginConfigured: true } }))
-  await page.goto('/')
+  await page.goto('/#/build')
   await page.getByTitle('Account', { exact: true }).click()
   await expect(page.getByText('browser-fixture@silverside.ai', { exact: true })).toBeVisible()
   await expect(page.getByRole('menuitem', { name: 'Sign out', exact: true })).toBeVisible()
@@ -21,7 +21,7 @@ test('Account recognizes the site login without requiring a cloud token', async 
 test('sign-in navigation flushes an edited draft before leaving the editor', async ({ page }) => {
   await page.route('**/api/auth/me', (route) => route.fulfill({ json: { email: null, loginConfigured: true } }))
   await page.route('**/api/auth/login', (route) => route.fulfill({ contentType: 'text/html', body: '<p>OAuth navigation fixture</p>' }))
-  await page.goto('/')
+  await page.goto('/#/build')
   await page.getByTitle('Account', { exact: true }).click()
   await page.evaluate(async () => {
     const { useSceneStore } = await import('/src/state/useSceneStore.ts')

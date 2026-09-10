@@ -3,8 +3,8 @@ import { expect, test, type Page } from '@playwright/test'
 test.use({ viewport: { width: 1440, height: 900 } })
 
 async function open(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
   await page.evaluate(async () => {
     const { useEditorStore } = await import('/src/state/useEditorStore.ts')
     const e = useEditorStore.getState()

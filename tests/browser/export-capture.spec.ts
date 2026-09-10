@@ -4,8 +4,8 @@ for (const fallback of [false, true]) {
   test(`exports or reports unavailable encoding with ${fallback ? 'browser recording fallback' : 'native encoder'}`, async ({ page }, info) => {
     await page.setViewportSize({ width: 1024, height: 700 })
     if (fallback) await page.addInitScript(() => { Object.defineProperty(window, 'VideoEncoder', { value: undefined, configurable: true }) })
-    await page.goto('/')
-    await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+    await page.goto('/#/build')
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
     await page.evaluate(async () => {
       const { useRigStore } = await import('/src/state/useRigStore.ts')
       const { useEditorStore } = await import('/src/state/useEditorStore.ts')

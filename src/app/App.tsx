@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type DragEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent, type ReactNode } from 'react'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import { useRigStore } from '../state/useRigStore'
@@ -20,8 +20,13 @@ import { useChromeLayout } from '../ui/viewportInsets'
 import { SettingsDialog } from '../ui/SettingsDialog'
 import { SignOutDialog } from '../ui/SignOutDialog'
 import { ProjectsWorkspace } from '../ui/ProjectsWorkspace'
+import { HomeWorkspace } from '../ui/HomeWorkspace'
+import { LibraryWorkspace } from '../ui/LibraryWorkspace'
+import { PlanEditorWorkspace } from '../ui/PlanEditorWorkspace'
+import { WelcomeWorkspace } from '../ui/WelcomeWorkspace'
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { isTeamCloudApp } from '../lib/cloud/client'
+import { hasPublicEntered, subscribePublicEntered } from '../lib/publicEntered'
 import { reloadActiveProjectFromCloud } from '../lib/projects'
 import { syncProjectToCloud } from '../lib/cloud/sync'
 import { cancelRecording, isRecording } from '../lib/recorder'
@@ -51,6 +56,8 @@ import { RemeshJobOverlay } from '../ui/RemeshProgressBar'
 import { CameraBar } from '../ui/CameraBar'
 import { ShortcutsOverlay } from '../ui/ShortcutsOverlay'
 import { VisualizeBar } from '../ui/visualize/VisualizeBar'
+import { NewProjectDialog } from '../ui/NewProjectDialog'
+import { ProductionListDialog } from '../ui/ProductionListDialog'
 
 function useShortcuts() {
   useEffect(() => {
@@ -63,6 +70,11 @@ function useShortcuts() {
       if (editor.showShortcuts && e.key === 'Escape') {
         e.preventDefault()
         editor.setShowShortcuts(false)
+        return
+      }
+      if (editor.showProduction && e.key === 'Escape') {
+        e.preventDefault()
+        editor.setShowProduction(false)
         return
       }
       if (isTextEditing()) return
@@ -409,7 +421,13 @@ export function App() {
   const booted = useProjectStore((state) => state.booted)
   const appView = useEditorStore((state) => state.appView)
   const cloudStatus = useCloudAuthStore((state) => state.status)
-  const teamGate = isTeamCloudApp() && cloudStatus !== 'signed-in'
+  const publicEntered = useSyncExternalStore(subscribePublicEntered, hasPublicEntered, hasPublicEntered)
+  const teamApp = isTeamCloudApp()
+  const signedIn = cloudStatus === 'signed-in'
+  const workspace = resolveWorkspace(appView)
+  const showWelcome =
+    (teamApp && !signedIn) ||
+    (!teamApp && !signedIn && !publicEntered && workspace !== 'editor')
 
   if (!booted) {
     return (
@@ -423,18 +441,30 @@ export function App() {
   }
 
   // Settings lives at the root so "Open Settings" works from every view.
-  const workspace = teamGate ? 'projects' : resolveWorkspace(appView)
   let body: ReactNode
-  switch (workspace) {
-    case 'projects':
-      body = <ProjectsWorkspace />
-      break
-    case 'editor':
-      body = <EditorWorkspace />
-      break
-    default: {
-      const _never: never = workspace
-      body = _never
+  if (showWelcome) {
+    body = <WelcomeWorkspace />
+  } else {
+    switch (workspace) {
+      case 'home':
+        body = <HomeWorkspace />
+        break
+      case 'library':
+        body = <LibraryWorkspace />
+        break
+      case 'plan':
+        body = <PlanEditorWorkspace />
+        break
+      case 'projects':
+        body = <ProjectsWorkspace />
+        break
+      case 'editor':
+        body = <EditorWorkspace />
+        break
+      default: {
+        const _never: never = workspace
+        body = _never
+      }
     }
   }
 
@@ -442,6 +472,8 @@ export function App() {
     <>
       {body}
       <SettingsDialog />
+      <ProductionListDialog />
+      <NewProjectDialog />
       <SaveConflictDialog />
       <SignOutDialog />
     </>

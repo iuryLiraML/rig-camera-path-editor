@@ -1,14 +1,18 @@
 /** Shared IndexedDB access — one database, versioned stores. */
 
 const DB_NAME = 'rig-db'
-/** v5: asset clay thumbs. v4: folders store. v3 shipped without folders. */
-const DB_VERSION = 5
+/** v7: Library collections. v6: Account Library assets. v5: asset clay thumbs. v4: folders. */
+const DB_VERSION = 8
 
 export const STORES = {
   buffers: 'model-buffers',
   projects: 'projects',
   folders: 'folders',
   assetThumbs: 'asset-thumbs',
+  library: 'library-palcos',
+  collections: 'library-collections',
+  productionMedia: 'production-media',
+  productionJobs: 'production-jobs',
 } as const
 
 let dbPromise: Promise<IDBDatabase> | null = null
@@ -25,20 +29,37 @@ export function ensureStores(db: {
     db.createObjectStore(STORES.folders, { keyPath: 'id' })
   }
   if (!db.objectStoreNames.contains(STORES.assetThumbs)) db.createObjectStore(STORES.assetThumbs)
+  if (!db.objectStoreNames.contains(STORES.library)) {
+    db.createObjectStore(STORES.library, { keyPath: 'id' })
+  }
+  if (!db.objectStoreNames.contains(STORES.collections)) {
+    db.createObjectStore(STORES.collections, { keyPath: 'id' })
+  }
+  if (!db.objectStoreNames.contains(STORES.productionMedia)) db.createObjectStore(STORES.productionMedia)
+  if (!db.objectStoreNames.contains(STORES.productionJobs)) db.createObjectStore(STORES.productionJobs, { keyPath: 'id' })
 }
 
 function storesReady(db: { objectStoreNames: { contains: (name: string) => boolean } }) {
   return Object.values(STORES).every((store) => db.objectStoreNames.contains(store))
 }
 
-function openWithVersion(version: number, attempts = 0): Promise<IDBDatabase> {
+function openWithVersion(version: number | undefined, attempts = 0): Promise<IDBDatabase> {
   if (attempts > 8) {
     return Promise.reject(new Error('IndexedDB is missing required stores'))
   }
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, version)
+    const req = version === undefined ? indexedDB.open(DB_NAME) : indexedDB.open(DB_NAME, version)
     req.onupgradeneeded = () => ensureStores(req.result)
-    req.onerror = () => reject(req.error)
+    req.onerror = () => {
+      // Another clone on this origin may already have bumped the database past
+      // our schema version. Reopen at whatever version exists — the stores
+      // check below ratchets up only if something we need is actually missing.
+      if (req.error?.name === 'VersionError') {
+        openWithVersion(undefined, attempts + 1).then(resolve, reject)
+        return
+      }
+      reject(req.error)
+    }
     req.onsuccess = () => {
       const db = req.result
       db.onversionchange = () => db.close()
@@ -123,19 +144,31 @@ export async function idbDelete(store: string, key: string) {
   })
 }
 
-export async function idbClear(): Promise<void> {
+export async function idbClear(options?: { keepStores?: readonly string[] }): Promise<void> {
   const db = await openDB()
+  const keep = new Set(options?.keepStores ?? [])
   await Promise.all(
-    Object.values(STORES).map(
-      (store) =>
-        new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(store, 'readwrite')
-          tx.objectStore(store).clear()
-          tx.oncomplete = () => resolve()
-          tx.onerror = () => reject(tx.error)
-        }),
-    ),
+    Object.values(STORES)
+      .filter((store) => !keep.has(store))
+      .map(
+        (store) =>
+          new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(store, 'readwrite')
+            tx.objectStore(store).clear()
+            tx.oncomplete = () => resolve()
+            tx.onerror = () => reject(tx.error)
+          }),
+      ),
   )
+}
+
+/** Public sign-out: wipe projects, keep Account Library palcos and their splat bytes. */
+export async function idbClearPreservingLibrary(): Promise<void> {
+  const palcos = await idbGetAll<{ bufferKey: string }>(STORES.library)
+  const keepBuffers = new Set(palcos.map((item) => item.bufferKey).filter(Boolean))
+  await idbClear({ keepStores: [STORES.library, STORES.buffers] })
+  const keys = await idbKeys(STORES.buffers)
+  await Promise.all(keys.filter((key) => !keepBuffers.has(key)).map((key) => idbDelete(STORES.buffers, key)))
 }
 
 export async function idbKeys(store: string): Promise<string[]> {

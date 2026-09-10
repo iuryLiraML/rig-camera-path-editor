@@ -7,8 +7,8 @@ test('Add Object separates Figures and primitives and renders the bundled GLBs a
   const requests: string[] = []
   page.on('request', (request) => requests.push(request.url()))
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 45_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 45_000 })
   await page.evaluate(async () => {
     const { useEditorStore } = await import('/src/state/useEditorStore.ts')
     useEditorStore.getState().setWorkspaceMode('build')
@@ -35,8 +35,8 @@ test('Add Object separates Figures and primitives and renders the bundled GLBs a
 
 test('Shape preview updates after parameter edits and CSG stays cached across time', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 1000 })
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 45_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 45_000 })
   const id = await page.evaluate(async () => {
     const { useEditorStore } = await import('/src/state/useEditorStore.ts')
     const { useSceneStore } = await import('/src/state/useSceneStore.ts')
@@ -45,15 +45,16 @@ test('Shape preview updates after parameter edits and CSG stays cached across ti
     useSceneStore.getState().addPrimitive('box')
     return useSceneStore.getState().objects.at(-1)!.id
   })
-  await page.getByRole('button', { name: 'Shape', exact: true }).click()
-  const preview = page.locator('[data-solid-preview] img')
+  const shape = page.locator('[data-shape-section]')
+  const preview = shape.locator('[data-solid-preview] img')
+  await shape.locator('[data-solid-preview]').scrollIntoViewIfNeeded()
   await expect(preview).toBeVisible({ timeout: 30_000 })
   const before = await preview.getAttribute('src')
-  await page.getByRole('slider').first().press('ArrowRight')
+  await shape.getByRole('slider').first().press('ArrowRight')
   await expect(preview).not.toHaveAttribute('src', before!)
   const afterSlider = await preview.getAttribute('src')
-  const panelBounds = await page.locator('.panel').filter({ has: preview }).boundingBox()
-  expect(panelBounds!.y).toBeGreaterThanOrEqual(50)
+  const previewBounds = await page.locator('[data-solid-preview]').boundingBox()
+  expect(previewBounds!.x).toBeGreaterThan(1440 / 2)
   await page.evaluate(async (id) => {
     const { useSceneStore } = await import('/src/state/useSceneStore.ts')
     useSceneStore.getState().updatePrimitiveParams(id, { width: 3.7, height: 2, corner: 0 })

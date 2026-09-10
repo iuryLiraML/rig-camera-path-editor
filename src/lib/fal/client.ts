@@ -61,6 +61,20 @@ function liveClient() {
   return fal
 }
 
+/** Queue handles survive page reloads; callers persist the returned request id before polling. */
+export const falQueue = {
+  submit: async (modelId: string, input: Record<string, unknown>) => {
+    const response = await liveClient().queue.submit(modelId, { input })
+    return response.request_id
+  },
+  status: async (modelId: string, requestId: string, signal?: AbortSignal) =>
+    liveClient().queue.status(modelId, { requestId, abortSignal: signal }),
+  result: async (modelId: string, requestId: string, signal?: AbortSignal): Promise<unknown> =>
+    (await liveClient().queue.result(modelId, { requestId, abortSignal: signal })).data,
+  cancel: async (modelId: string, requestId: string) =>
+    liveClient().queue.cancel(modelId, { requestId }),
+}
+
 function throwIfAborted(signal?: AbortSignal) {
   if (!signal?.aborted) return
   throw new DOMException('The user aborted a request.', 'AbortError')

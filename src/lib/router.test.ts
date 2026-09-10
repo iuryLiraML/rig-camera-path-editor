@@ -6,6 +6,7 @@ const route = (over: Partial<Route> = {}): Route => ({
   projectId: null,
   sceneId: null,
   mode: 'build',
+  planId: null,
   ...over,
 })
 
@@ -20,6 +21,19 @@ describe('parseHash', () => {
 
   it('reads the projects list', () => {
     expect(parseHash('#/projects')).toEqual(route({ view: 'projects' }))
+  })
+
+  it('reads Home and Library workspaces', () => {
+    expect(parseHash('#/home')).toEqual(route({ view: 'home' }))
+    expect(parseHash('#/library')).toEqual(route({ view: 'library' }))
+  })
+
+  it('reads the floor-plan editor as a plan view carrying the plan id', () => {
+    expect(parseHash('#/library/plan/plan-abc')).toEqual(route({ view: 'plan', planId: 'plan-abc' }))
+  })
+
+  it('reads the bare library as the shelf, not the editor', () => {
+    expect(parseHash('#/library')).toEqual(route({ view: 'library', planId: null }))
   })
 
   it('reads a bare mode as the editor with no project open', () => {
@@ -65,12 +79,20 @@ describe('parseHash', () => {
 
 describe('formatRoute', () => {
   it('writes each shape', () => {
+    expect(formatRoute(route({ view: 'home' }))).toBe('#/home')
+    expect(formatRoute(route({ view: 'library' }))).toBe('#/library')
     expect(formatRoute(route({ view: 'projects' }))).toBe('#/projects')
     expect(formatRoute(route({ mode: 'compose' }))).toBe('#/compose')
     expect(formatRoute(route({ projectId: 'proj-a' }))).toBe('#/p/proj-a/build')
     expect(formatRoute(route({ projectId: 'proj-a', sceneId: 'scene-2', mode: 'visualize' }))).toBe(
       '#/p/proj-a/scene-2/visualize',
     )
+    expect(formatRoute(route({ view: 'plan', planId: 'plan-abc' }))).toBe('#/library/plan/plan-abc')
+  })
+
+  it('round-trips the plan route so a refresh reopens the same plan', () => {
+    const hash = '#/library/plan/plan-xyz'
+    expect(formatRoute(parseHash(hash)!)).toBe(hash)
   })
 
   it('escapes ids so a stray slash cannot invent a segment', () => {
@@ -80,6 +102,8 @@ describe('formatRoute', () => {
 
 describe('round trip', () => {
   const cases: Route[] = [
+    route({ view: 'home' }),
+    route({ view: 'library' }),
     route({ view: 'projects' }),
     route({ mode: 'compose' }),
     route({ mode: 'visualize' }),

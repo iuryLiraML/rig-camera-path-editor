@@ -136,6 +136,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
   const solidMode = useSolidSelectionStore((s) => s.mode)
   const objectContextActive = useEditorStore((s) => isObjectGizmoActive(s.selection, object.id))
   const selectedMember = useEditorStore((s) => s.selectionIds.includes(`obj:${object.id}`))
+  const showPoseHandles = useEditorStore((s) => s.showPoseHandles)
   const dummyBone = useEditorStore((s) => (s.selection === `obj:${object.id}` ? s.dummyBone : null))
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
   const tool = useEditorStore((s) => s.tool)
@@ -387,7 +388,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
           const member = `obj:${object.id}` as const
           const alreadySelected = editor.selectionIds.includes(member)
           const action = pointerPickMember(member, { additive: eventShiftHeld(e) })
-          if (object.rigKind === 'dummy' && alreadySelected && action === 'replace') {
+          if (showPoseHandles && object.rigKind === 'dummy' && alreadySelected && action === 'replace') {
             const limb = dummyBoneFromObject(e.object) ?? dummyBoneFromHit(object.root, e.point)
             if (limb) {
               editor.setDummyBone(limb)
@@ -430,7 +431,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
       {chrome.outline && showSceneObjects && !objectHidden && (
         <ObjectSelectionHalo target={groupRef} />
       )}
-      {objectContextActive &&
+      {objectContextActive && showPoseHandles &&
         object.rigKind === 'dummy' &&
         editing &&
         !tech &&
@@ -446,7 +447,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
           }}
         />
       )}
-      {objectContextActive &&
+      {objectContextActive && showPoseHandles &&
         tool === 'select' &&
         object.rigKind === 'dummy' &&
         dummyBone &&

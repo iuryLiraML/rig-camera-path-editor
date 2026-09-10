@@ -8,12 +8,12 @@ const FULL = { width: 1024, height: 700 }
 const COMPACT = { width: 768, height: 600 }
 
 async function openEditor(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
 }
 
 async function expectPersistentChrome(page: Page) {
-  await expect(page.getByTitle('Back to projects')).toBeVisible()
+  await expect(page.getByTitle('Back to Home')).toBeVisible()
   await expect(page.getByTitle('Account')).toBeVisible()
   await expect(page.getByText('Director', { exact: true })).toBeVisible()
   await expect(page.getByTitle('Place objects in the scene')).toBeVisible()

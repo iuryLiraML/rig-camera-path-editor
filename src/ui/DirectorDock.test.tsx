@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react'
 import { NO_SERVER_KEYS } from '../lib/agent/serverKeys'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
-import { makeObject, useSceneStore } from '../state/useSceneStore'
+import { makeObject, makePrimitive, useSceneStore } from '../state/useSceneStore'
 import { DirectorDock } from './DirectorDock'
 import { GUTTER, TOP_ROW_HEIGHT } from './viewportInsets'
 import * as THREE from 'three'
@@ -28,7 +28,9 @@ beforeEach(() => {
     showAddDrawer: false,
     composeDock: 'sequence',
     timelineHeight: 240,
+    selection: null,
   })
+  useSceneStore.setState({ objects: [] })
 })
 
 afterEach(() => {
@@ -145,5 +147,48 @@ describe('DirectorDock', () => {
     useEditorStore.setState({ selection: 'obj:car' })
     const { getByText } = render(<DirectorDock />)
     expect(getByText('Transform')).toBeTruthy()
+  })
+
+  it('shows Transform then Shape with clay color for a selected mesh', () => {
+    const object = makeObject('Car', new THREE.Group(), {
+      id: 'car',
+      shade: 0.5,
+      clayColor: '#2563eb',
+    })
+    useSceneStore.setState({ objects: [object] })
+    useEditorStore.setState({ selection: 'obj:car' })
+    const { getByText, getByLabelText, getByRole, queryByRole } = render(<DirectorDock />)
+    const transform = getByText('Transform')
+    const shape = getByText('Shape')
+    expect(transform.compareDocumentPosition(shape) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(queryByRole('button', { name: 'Body' })).toBeNull()
+    expect(queryByRole('button', { name: 'Extrude face' })).toBeNull()
+
+    const color = getByLabelText('Clay color') as HTMLInputElement
+    expect(color.type).toBe('color')
+    expect(color.value).toBe('#2563eb')
+    fireEvent.change(color, { target: { value: '#dc2626' } })
+    expect(useSceneStore.getState().objects[0]?.clayColor).toBe('#dc2626')
+    fireEvent.click(getByRole('button', { name: 'Reset gray' }))
+    expect(useSceneStore.getState().objects[0]?.clayColor).toBe('#bcbcbc')
+    expect(color.value).toBe('#bcbcbc')
+  })
+
+  it('shows Body, Face, and Edge for a selected primitive', () => {
+    const object = makePrimitive('box', { id: 'box' })
+    useSceneStore.setState({ objects: [object] })
+    useEditorStore.setState({ selection: 'obj:box' })
+    const { getByText, getByRole } = render(<DirectorDock />)
+    expect(getByText('Transform')).toBeTruthy()
+    expect(getByText('Shape')).toBeTruthy()
+    expect(getByRole('button', { name: 'Body' })).toBeTruthy()
+    expect(getByRole('button', { name: 'Face' })).toBeTruthy()
+    expect(getByRole('button', { name: 'Edge' })).toBeTruthy()
+  })
+
+  it('does not show Shape when the environment is selected', () => {
+    useEditorStore.setState({ selection: 'env' })
+    const { queryByText } = render(<DirectorDock />)
+    expect(queryByText('Shape')).toBeNull()
   })
 })

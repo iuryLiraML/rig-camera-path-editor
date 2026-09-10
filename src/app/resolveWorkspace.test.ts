@@ -10,7 +10,14 @@ describe('resolveWorkspace', () => {
     expect(resolveWorkspace('board')).toBe('editor')
   })
 
-  it('never returns anything but projects or editor', () => {
+  it('keeps Projects and the editor as their own workspaces', () => {
+    expect(resolveWorkspace('projects')).toBe('projects')
+    expect(resolveWorkspace('editor')).toBe('editor')
+  })
+
+  it('mounts Home and Library as their own workspaces', () => {
+    expect(resolveWorkspace('home')).toBe('home')
+    expect(resolveWorkspace('library')).toBe('library')
     expect(resolveWorkspace('projects')).toBe('projects')
   })
 })

@@ -69,8 +69,12 @@ function loadGoogleIdentity(): Promise<void> {
 
 export function GoogleSignInButton({
   onCredential,
+  text = 'signin_with',
+  fallbackLabel,
 }: {
   onCredential: (idToken: string) => void
+  text?: 'signin_with' | 'signup_with' | 'continue_with'
+  fallbackLabel?: string
 }) {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID?.trim()
   const hostRef = useRef<HTMLDivElement>(null)
@@ -96,7 +100,7 @@ export function GoogleSignInButton({
           type: 'standard',
           theme: 'filled_black',
           size: 'large',
-          text: 'signin_with',
+          text,
           shape: 'rectangular',
         })
       })
@@ -109,9 +113,20 @@ export function GoogleSignInButton({
     return () => {
       cancelled = true
     }
-  }, [clientId, onCredential])
+  }, [clientId, onCredential, text])
 
-  if (!clientId) return null
+  if (!clientId) {
+    if (!fallbackLabel) return null
+    return (
+      <button
+        type="button"
+        disabled
+        className="rounded-lg border border-line bg-panel-2 px-4 py-2 text-sm text-ink-dim"
+      >
+        {fallbackLabel}
+      </button>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-1">

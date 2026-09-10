@@ -36,8 +36,8 @@ async function coveredControls(page: Page) {
 }
 
 async function openCompose(page: Page) {
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
   await page.evaluate(async () => {
     const mod = await import('/src/state/useEditorStore.ts')
     mod.useEditorStore.getState().setWorkspaceMode('compose')

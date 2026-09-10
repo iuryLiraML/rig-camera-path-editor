@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createLegacyProjectWorkflow } from './projectWorkflow'
+import { createLegacyProjectWorkflow, createProjectWorkflow } from './projectWorkflow'
+import { approveProductionItems, reconcileProductionList } from './productionWorkflow'
 import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useProjectStore } from '../state/useProjectStore'
@@ -13,6 +14,7 @@ import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { LEGACY_META_KEY } from './sceneIO'
 
 const memory = new Map<string, { id: string; name: string; [key: string]: unknown }>()
+const memoryCollections = new Map<string, { id: string; name: string; [key: string]: unknown }>()
 
 vi.mock('./idb', () => ({
   idbUpdate: vi.fn(async (_store: string, id: string, update: (value: any) => any) => {
@@ -22,12 +24,14 @@ vi.mock('./idb', () => ({
     memory.set(id, next)
     return next
   }),
-  STORES: { buffers: 'model-buffers', projects: 'projects', folders: 'folders' },
+  STORES: { buffers: 'model-buffers', projects: 'projects', folders: 'folders', library: 'library-palcos', collections: 'library-collections' },
   idbPut: vi.fn(async (_store: string, value: { id: string; name: string }) => {
     memory.set(value.id, value)
   }),
   idbGet: vi.fn(async (_store: string, key: string) => memory.get(key)),
-  idbGetAll: vi.fn(async () => [...memory.values()]),
+  idbGetAll: vi.fn(async (store: string) =>
+    store === 'library-collections' ? [...memoryCollections.values()] : [...memory.values()],
+  ),
   idbKeys: vi.fn(async () => []),
   idbDelete: vi.fn(async (_store: string, key: string) => {
     memory.delete(key)
@@ -62,7 +66,8 @@ import {
   saveActiveProject,
   scheduleAutosave,
   switchScene,
-  goToProjectsHome,
+  goProjects,
+  goHome,
   beginSignOut,
   discardUnsyncedProject,
   backupUnsyncedProject,
@@ -227,6 +232,31 @@ describe('idbGetAll after save', () => {
     expect(all.some((record) => record.id === 'proj-round')).toBe(true)
     const stored = await idbGet<{ id: string; name: string }>(STORES.projects, 'proj-round')
     expect(stored?.name).toBe('Roundtrip')
+  })
+
+  it('reopens production approvals and Library links without creating a duplicate project', async () => {
+    const workflow = createProjectWorkflow('Production')
+    const proposed = reconcileProductionList(workflow.production, {
+      revisionId: 'script-v1',
+      scenes: [{ sourceKey: 'cafe', name: 'Cafe' }],
+      items: [{
+        sourceKey: 'ana', sourceFingerprint: 'ana-v1', name: 'Ana', kind: 'character',
+        provenance: 'explicit', quantity: 1, sceneSourceKeys: ['cafe'], prompt: 'Ana',
+      }],
+    }).list
+    workflow.production = approveProductionItems(proposed, [proposed.items[0].id], 'guidelines-v1')
+    workflow.production.items[0].fulfilledByAssetId = 'asset-ana'
+    workflow.production.items[0].fulfillmentMethod = 'existing'
+    useProjectStore.setState({ projectId: 'proj-production', name: 'Production', workflow })
+
+    await saveActiveProject()
+    useProjectStore.setState({ projectId: '', workflow: createLegacyProjectWorkflow('Untitled') })
+    await switchProject('proj-production')
+
+    expect(useProjectStore.getState().workflow.production.items[0]).toMatchObject({
+      sourceKey: 'ana', requirementStatus: 'approved', fulfilledByAssetId: 'asset-ana',
+    })
+    expect([...memory.keys()]).toEqual(['proj-production'])
   })
 })
 
@@ -471,7 +501,7 @@ describe('non-cloud boot', () => {
     expect(useProjectStore.getState().projectId).toBe('')
     expect(localStorage.getItem('rig-active-project')).toBeNull()
     expect(useProjectStore.getState().shots).toEqual([])
-    expect(useEditorStore.getState().appView).toBe('editor')
+    expect(useEditorStore.getState().appView).toBe('home')
     expect(usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors).toEqual([])
     expect(useRigStore.getState().t).toBe(0)
     expect(useRigStore.getState().playing).toBe(false)
@@ -480,14 +510,22 @@ describe('non-cloud boot', () => {
     expect(useCameraOptionsStore.getState().options[0].pristine).toBe(true)
   })
 
-  it('opens a blank unsaved editor on first run without creating a project', async () => {
+  it('lists Library collections on boot so the sidebar survives a reload', async () => {
+    memoryCollections.set('col-1', { id: 'col-1', name: 'Props', createdAt: 1, ownerId: 'local' })
+
     await bootProjects()
 
+    const { useLibraryStore } = await import('./library')
+    expect(useLibraryStore.getState().collections.map((collection) => collection.name)).toEqual(['Props'])
+  })
+
+  it('opens a blank Home session on first run without creating a project', async () => {
+    await bootProjects()
     expect(memory.size).toBe(0)
     expect(idbPut).not.toHaveBeenCalled()
     expect(useProjectStore.getState().projectId).toBe('')
     expect(useProjectStore.getState().projectList).toEqual([])
-    expect(useEditorStore.getState().appView).toBe('editor')
+    expect(useEditorStore.getState().appView).toBe('home')
     expect(usePathStore.getState().getPath(CAMERA_PATH_ID)?.anchors).toEqual([])
     expect(useSceneStore.getState().objects).toHaveLength(0)
 
@@ -519,11 +557,20 @@ describe('non-cloud boot', () => {
   })
 })
 
-describe('goToProjectsHome', () => {
+describe('goHome', () => {
+  it('opens Home after a successful save', async () => {
+    useProjectStore.setState({ projectId: 'proj-home', name: 'Home' })
+    useEditorStore.setState({ appView: 'editor' })
+    expect(await goHome()).toBe(true)
+    expect(useEditorStore.getState().appView).toBe('home')
+  })
+})
+
+describe('goProjects', () => {
   it('opens Projects after a successful save', async () => {
     useProjectStore.setState({ projectId: 'proj-home', name: 'Home' })
     useEditorStore.setState({ appView: 'editor' })
-    expect(await goToProjectsHome()).toBe(true)
+    expect(await goProjects()).toBe(true)
     expect(useEditorStore.getState().appView).toBe('projects')
   })
 
@@ -531,7 +578,7 @@ describe('goToProjectsHome', () => {
     useProjectStore.setState({ projectId: 'proj-home', name: 'Home' })
     useEditorStore.setState({ appView: 'editor' })
     vi.mocked(idbPut).mockRejectedValueOnce(new Error('quota'))
-    expect(await goToProjectsHome()).toBe(false)
+    expect(await goProjects()).toBe(false)
     expect(useEditorStore.getState().appView).toBe('editor')
     vi.mocked(idbPut).mockImplementation(async (_store, value) => {
       const record = value as { id: string; name: string }

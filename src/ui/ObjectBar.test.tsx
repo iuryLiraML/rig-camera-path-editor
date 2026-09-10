@@ -85,25 +85,12 @@ describe('ObjectBar asset display controls', () => {
     expect(queryByText('Transform')).toBeNull()
   })
 
-  it('exposes an accessible clay color input and Reset gray action in Shape', () => {
-    const object = makeObject('Car', meshRoot(), {
-      id: 'car',
-      shade: 0.5,
-      clayColor: '#2563eb',
-    })
+  it('does not expose a Shape button', () => {
+    const object = makeObject('Car', meshRoot(), { id: 'car', triangleCount: 12 })
     useSceneStore.setState({ objects: [object] })
-    useEditorStore.setState({ selection: 'obj:car', objectBarPanel: 'name' })
-
-    const { getByLabelText, getByRole } = render(<ObjectBar />)
-    const color = getByLabelText('Clay color') as HTMLInputElement
-    expect(color.type).toBe('color')
-    expect(color.value).toBe('#2563eb')
-
-    fireEvent.change(color, { target: { value: '#dc2626' } })
-    expect(useSceneStore.getState().objects[0]?.clayColor).toBe('#dc2626')
-
-    fireEvent.click(getByRole('button', { name: 'Reset gray' }))
-    expect(useSceneStore.getState().objects[0]?.clayColor).toBe('#bcbcbc')
-    expect(color.value).toBe('#bcbcbc')
+    useEditorStore.setState({ selection: 'obj:car' })
+    const { queryByTitle, queryByRole } = render(<ObjectBar />)
+    expect(queryByTitle('Shape')).toBeNull()
+    expect(queryByRole('button', { name: 'Shape' })).toBeNull()
   })
 })

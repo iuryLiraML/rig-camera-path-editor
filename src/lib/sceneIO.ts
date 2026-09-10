@@ -12,6 +12,7 @@ import {
   type Transform,
 } from '../state/useSceneStore'
 import type { PrimitiveSpec } from './primitiveGeometry'
+import type { StoredPlan } from './floorPlanModel'
 import { useRigStore } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore } from '../state/usePathStore'
 import { useEditorStore } from '../state/useEditorStore'
@@ -687,6 +688,8 @@ export interface ObjectMeta {
   bufferKey: string | null
   sourceFormat?: ModelSourceFormat
   primitive?: PrimitiveSpec
+  /** A floor plan's wall graph, copied at insert; the object rebuilds from it on load. */
+  plan?: StoredPlan
   transform: Transform
   keys: ModelKey[]
   playClips: boolean
@@ -714,6 +717,7 @@ export function toMeta(o: SceneObject): ObjectMeta {
     bufferKey: o.bufferKey,
     sourceFormat: o.sourceFormat,
     primitive: o.primitive,
+    plan: o.plan,
     transform: o.transform,
     keys: o.keys,
     playClips: o.playClips,
@@ -802,6 +806,10 @@ export async function loadSceneFromMetas(metas: ObjectMeta[], _seedIfEmpty = fal
       if (meta.primitive) {
         object = makePrimitive(meta.primitive.kind, { ...meta, params: meta.primitive.params })
         object.name = meta.name
+      } else if (meta.plan) {
+        // A floor plan rebuilds its geometry from its own copy of the wall graph.
+        const { makePlanObject } = await import('../state/useSceneStore')
+        object = makePlanObject(meta.name, meta.plan, { id: meta.id, transform: meta.transform, keys: meta.keys })
       } else if (meta.rigKind === 'dummy') {
         await ensureDummyTemplate(meta.figureSex ?? 'male')
         object = makeDummyObject({

@@ -21,7 +21,7 @@ export function OnboardingCard() {
     return (
       <Guide
         title="Add something to look at"
-        body="Pick a primitive from the tray, or import a .glb from the prompt bar or the Outliner. Then switch to Compose to draw the camera."
+        body="Add a primitive or import a .glb, then switch to Compose."
         actionLabel="Add an object"
         onAction={() => useSceneStore.getState().dismissOnboarding()}
         icon={<PlusIcon />}
@@ -33,7 +33,7 @@ export function OnboardingCard() {
     return (
       <Guide
         title="Describe the shot"
-        body="The Director builds the camera move from a prompt. Open the Director chat on the right, describe your shot, then send. Edit Shot takes you back to Compose."
+        body="Open Director, describe the shot, then send. Edit Shot returns to Compose."
         actionLabel="Open Settings"
         onAction={() => useEditorStore.getState().setShowSettings(true)}
       />
@@ -48,8 +48,8 @@ export function OnboardingCard() {
       title={onePoint ? 'Add one more point to play and export' : 'Frame a camera fly-through'}
       body={
         onePoint
-          ? 'Playback and export need two points on the path. Click the Pen tool and add the next point.'
-          : 'Draw a path with the Pen, pick a preset, or generate one in Visualize. Then press Add a Shot.'
+          ? 'Playback and export need two points. Click Pen and add the next one.'
+          : 'Draw a path with Pen, pick a preset, or generate one in Visualize. Then Add a Shot.'
       }
       actionLabel={onePoint ? 'Add the next point (P)' : 'Draw my own path (P)'}
       onAction={() => useEditorStore.getState().setTool('pen')}
@@ -76,8 +76,8 @@ function Guide({
   const band = chromeBand(insets, win.w)
   return (
     <div
-      className="panel absolute z-20 -translate-x-1/2 p-4"
-      style={{ bottom: insets.contentBottom, left: band.left + band.width / 2, width: Math.min(420, band.width) }}
+      className="panel absolute z-20 -translate-x-1/2 p-2.5"
+      style={{ bottom: insets.contentBottom, left: band.left + band.width / 2, width: Math.min(340, band.width) }}
     >
       <div className="flex items-start justify-between">
         <h2 className="text-sm font-semibold text-ink">{title}</h2>
@@ -89,11 +89,11 @@ function Guide({
           ×
         </button>
       </div>
-      <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">{body}</p>
+      <p className="mt-1.5 text-[12px] leading-snug text-ink-dim">{body}</p>
       <button
         type="button"
         onClick={onAction}
-        className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-panel-2 px-2 py-2 text-[12px] text-ink hover:bg-panel-3"
+        className="mt-2 inline-flex items-center gap-1.5 text-[12px] text-ink hover:text-accent"
       >
         {icon}
         {actionLabel}

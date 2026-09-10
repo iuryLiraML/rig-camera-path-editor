@@ -197,8 +197,8 @@ export function ProjectCard({
 
   return (
     <div
-      className={`group relative flex flex-col overflow-hidden rounded-xl border bg-panel text-left transition-colors ${
-        active ? 'border-accent/70' : 'border-line hover:border-ink-dim/50'
+      className={`group relative flex flex-col overflow-hidden rounded-xl border bg-panel text-left transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgb(0_0_0/0.25)] ${
+        active ? 'border-accent/70' : 'border-line hover:border-accent/40'
       }`}
     >
       <button
@@ -208,7 +208,7 @@ export function ProjectCard({
         title="Open this project in the editor"
         className="flex flex-col text-left disabled:cursor-wait disabled:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
       >
-        <div className="relative aspect-video w-full overflow-hidden bg-panel-2">
+        <div className="relative aspect-video min-h-[12rem] w-full overflow-hidden bg-panel-2">
           {thumbUrl ? (
             <img
               src={thumbUrl}
@@ -247,7 +247,7 @@ export function ProjectCard({
       >
         <DotsIcon size={14} />
       </button>
-      <div className="flex items-start justify-between gap-3 px-3.5 pb-3 pt-3">
+      <div className="flex items-start justify-between gap-3 px-4 pb-4 pt-4">
         <div className="min-w-0 flex-1">
           {renaming ? (
             <input
@@ -271,7 +271,7 @@ export function ProjectCard({
           ) : (
             <h3
               title="Project name"
-              className="truncate text-sm font-medium text-ink"
+              className="truncate text-base font-medium text-ink"
               onDoubleClick={(event) => {
                 event.preventDefault()
                 event.stopPropagation()

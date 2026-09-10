@@ -7,6 +7,7 @@ import {
 import type { FolderRecord } from '../lib/folders'
 import type { RigSnapshot } from './useRigStore'
 import type { ExportAspect, ExportRes } from './useEditorStore'
+import type { ProductionList } from '../lib/productionWorkflow'
 
 /**
  * What the Projects screen needs to draw a card. The list used to carry only
@@ -100,6 +101,7 @@ interface ProjectState {
   setProjectBusy: (projectBusy: boolean) => void
   setName: (name: string) => void
   setWorkflow: (workflow: ProjectWorkflow) => void
+  setProduction: (production: ProductionList) => void
   setGuidelines: (text: string) => void
   addPrompt: (prompt: SavedPrompt) => void
   removePrompt: (id: string) => void
@@ -183,6 +185,8 @@ export const useProjectStore = create<ProjectState>((set) => ({
           : project,
       ),
     })),
+  setProduction: (production) =>
+    set((state) => ({ workflow: { ...state.workflow, production } })),
   setGuidelines: (guidelines) => set({ guidelines }),
 
   addPrompt: (prompt) =>

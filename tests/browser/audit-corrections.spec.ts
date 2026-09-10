@@ -1,8 +1,8 @@
 import { expect, test, type Page } from '@playwright/test'
 
 async function open(page: Page, mode: 'build' | 'compose' | 'visualize') {
-  await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
   await page.getByRole('button', { name: mode[0].toUpperCase() + mode.slice(1), exact: true }).click()
   await page.waitForTimeout(300)
 }

@@ -37,18 +37,31 @@ test.describe('the app boots', () => {
   test('mounts React with no uncaught module error', async ({ page }) => {
     const errors = collectPageErrors(page)
 
-    await page.goto('/')
+    await page.goto('/#/build')
     await settleBoot(page, errors)
 
-    await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
+  })
+
+  test('Skip on Welcome opens Home tiles', async ({ page }) => {
+    const errors = collectPageErrors(page)
+    await page.goto('/')
+    await settleBoot(page, errors)
+    await page.getByRole('button', { name: 'Skip' }).click()
+    await expect(page.getByRole('heading', { name: 'Home', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^New project Start with AI/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /Import assets/ })).toBeVisible()
+    await expect(page.getByRole('navigation', { name: 'Workspaces' })).toBeVisible()
+    await expect(page.getByText('Generate 3D')).toHaveCount(0)
+    expect(errors).toEqual([])
   })
 
   test('arms a crosshair on the canvas when the Pen is picked', async ({ page }) => {
     const errors = collectPageErrors(page)
 
-    await page.goto('/')
+    await page.goto('/#/build')
     await settleBoot(page, errors)
-    await expect(page.getByTitle('Back to projects')).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
     await page.evaluate(async () => {
       const mod = await import('/src/state/useEditorStore.ts')
       mod.useEditorStore.getState().setWorkspaceMode('compose')
@@ -65,6 +78,40 @@ test.describe('the app boots', () => {
 
     // The only on-screen answer to "is the Pen armed?" before the first move.
     await expect.poll(canvasCursor).toBe('crosshair')
+    expect(errors).toEqual([])
+  })
+})
+
+const COMPACT = { width: 768, height: 600 }
+
+test.describe('Home at compact 768×600', () => {
+  test.use({ viewport: COMPACT })
+
+  test('Skip opens Home and the four tiles wrap', async ({ page }) => {
+    const errors = collectPageErrors(page)
+    await page.goto('/')
+    await settleBoot(page, errors)
+    await page.getByRole('button', { name: 'Skip' }).click()
+    await expect(page.getByRole('heading', { name: 'Home', exact: true })).toBeVisible()
+    const newProject = page.getByRole('button', { name: /^New project Start with AI/ })
+    const projects = page.getByRole('button', { name: /document list/ })
+    const top = await newProject.boundingBox()
+    const wrapped = await projects.boundingBox()
+    expect(top && wrapped).toBeTruthy()
+    expect(wrapped!.y).toBeGreaterThan(top!.y + 24)
+    expect(errors).toEqual([])
+  })
+
+  test('Back to Home chip returns to Home', async ({ page }) => {
+    const errors = collectPageErrors(page)
+    await page.goto('/')
+    await settleBoot(page, errors)
+    await page.getByRole('button', { name: 'Skip' }).click()
+    await expect(page.getByRole('heading', { name: 'Home', exact: true })).toBeVisible()
+    await page.goto('/#/build')
+    await expect(page.getByTitle('Back to Home')).toBeVisible({ timeout: 30_000 })
+    await page.getByTitle('Back to Home').click()
+    await expect(page.getByRole('heading', { name: 'Home', exact: true })).toBeVisible()
     expect(errors).toEqual([])
   })
 })

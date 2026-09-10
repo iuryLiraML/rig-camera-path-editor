@@ -35,7 +35,7 @@ export const isTechMode = (mode: ViewMode) => mode !== 'clay' && mode !== 'look'
  * button over a tool whose clicks the canvas drops.
  */
 const disarmStroke = (tool: Tool): Tool => (tool === 'pen' || tool === 'draw' ? 'select' : tool)
-export type AppView = 'projects' | 'editor' | 'board'
+export type AppView = 'home' | 'library' | 'projects' | 'editor' | 'board' | 'plan'
 export type PanelTab = 'design' | 'assistant'
 /** Job the editor chrome is serving. Same 3D scene; different overlays. */
 export type WorkspaceMode = 'build' | 'compose' | 'visualize'
@@ -74,6 +74,8 @@ interface EditorState {
   /** Ordered lasso members; session-only. `selection` remains the active member. */
   selectionIds: SelectionMemberId[]
   /** Dummy limb under FK pose (null = whole-object gizmo). */
+  showPoseHandles: boolean
+  setShowPoseHandles: (show: boolean) => void
   dummyBone: string | null
   gizmoMode: GizmoMode
   playMode: boolean
@@ -97,8 +99,10 @@ interface EditorState {
   exportRes: ExportRes
   /** manual output size, used when exportRes === 'custom' */
   customSize: [number, number]
-  /** editor canvas vs shots board (storyboard) */
+  /** editor canvas vs shots board (storyboard) vs the floor-plan editor */
   appView: AppView
+  /** The Library plan open in the floor-plan editor, when appView is 'plan'. */
+  planId: string | null
   /** global render mode of the viewport, PiP and exports */
   viewMode: ViewMode
   /** passes selected for video/frame export */
@@ -150,6 +154,8 @@ interface EditorState {
   keyableFocus: KeyableFocus | null
   /** settings dialog (API keys, model, guidelines) */
   showSettings: boolean
+  /** project-scoped production planning and approval dialog */
+  showProduction: boolean
   /** incremented to ask the editor camera to frame the model (F) */
   frameRequest: number
   /** incremented to aim the editor camera at the world origin (H) */
@@ -209,6 +215,7 @@ interface EditorState {
   setDepthFar: (far: number) => void
   setDepthRangeAuto: (on: boolean) => void
   setAppView: (view: AppView) => void
+  setPlanId: (id: string | null) => void
   setWorkspaceMode: (mode: WorkspaceMode) => void
   setComposeDock: (dock: ComposeDock) => void
   setShowOutliner: (on: boolean) => void
@@ -233,6 +240,7 @@ interface EditorState {
   setKeyableFocus: (focus: KeyableFocus | null) => void
   setPipRect: (rect: { right: number; bottom: number; fraction: number }) => void
   setShowSettings: (on: boolean) => void
+  setShowProduction: (on: boolean) => void
   requestFrame: () => void
   requestHome: () => void
   requestView: (view: QuickView) => void
@@ -260,6 +268,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   projection: 'perspective',
   selection: null,
   selectionIds: [],
+  showPoseHandles: false,
+  setShowPoseHandles: (showPoseHandles) => set({ showPoseHandles }),
   dummyBone: null,
   gizmoMode: 'translate',
   playMode: false,
@@ -272,6 +282,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   exportRes: 1080,
   customSize: [1920, 1080],
   appView: 'editor',
+  planId: null,
   workspaceMode: 'build',
   composeDock: 'sequence',
   showOutliner: false,
@@ -306,6 +317,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   panelTab: 'design',
   keyableFocus: null,
   showSettings: false,
+  showProduction: false,
   frameRequest: 0,
   homeRequest: 0,
   viewRequest: null,
@@ -461,8 +473,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       })
       return
     }
-    set({ appView })
+    // Leaving the floor-plan editor drops the open plan's identity.
+    if (appView !== 'plan') set({ appView, planId: null })
+    else set({ appView })
   },
+  setPlanId: (planId) => set({ planId }),
   setWorkspaceMode: (workspaceMode) =>
     set((s) => {
       resetOrbitLock()
@@ -552,6 +567,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setKeyableFocus: (keyableFocus) => set({ keyableFocus }),
   setPipRect: (pipRect) => set({ pipRect }),
   setShowSettings: (showSettings) => set({ showSettings }),
+  setShowProduction: (showProduction) => set({ showProduction }),
   requestFrame: () => set((s) => ({ frameRequest: s.frameRequest + 1 })),
   requestHome: () => set((s) => ({ homeRequest: s.homeRequest + 1 })),
   requestView: (view) => set((s) => ({ viewRequest: { view, n: (s.viewRequest?.n ?? 0) + 1 } })),

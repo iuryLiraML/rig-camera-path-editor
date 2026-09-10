@@ -1,8 +1,13 @@
 import { expect, test } from '@playwright/test'
 
-test('refresh restores the project, second scene and Compose mode', async ({ page }) => {
+test.beforeEach(async ({ page }) => {
   await page.goto('/')
-  await expect(page.getByTitle('Back to projects')).toBeVisible()
+  await page.getByRole('button', { name: 'Skip', exact: true }).click()
+})
+
+test('refresh restores the project, second scene and Compose mode', async ({ page }) => {
+  await page.goto('/#/build')
+  await expect(page.getByTitle('Back to Home')).toBeVisible()
   const ids = await page.evaluate(async () => {
     const { createProject, createScene } = await import('/src/lib/projects.ts')
     const project = await createProject('Pages fixture')
@@ -12,7 +17,7 @@ test('refresh restores the project, second scene and Compose mode', async ({ pag
   await page.getByTitle('Frame shots and edit the camera').click()
   await expect(page).toHaveURL(new RegExp(`#/p/${ids.project}/${ids.scene}/compose$`))
   await page.reload()
-  await expect(page.getByTitle('Back to projects')).toBeVisible()
+  await expect(page.getByTitle('Back to Home')).toBeVisible()
   await expect.poll(() => page.evaluate(async () => {
     const { useProjectStore } = await import('/src/state/useProjectStore.ts')
     const { useEditorStore } = await import('/src/state/useEditorStore.ts')
@@ -31,7 +36,7 @@ test('refresh restores the project, second scene and Compose mode', async ({ pag
 })
 
 test('Back to the blank launch preserves the saved draft and Forward restores it', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/#/build')
   await expect(page).toHaveURL(/#\/build$/)
   await page.getByRole('button', { name: 'Box', exact: true }).click()
   await expect(page.getByText('Saved', { exact: true })).toBeVisible()
@@ -54,8 +59,9 @@ test('Back to the blank launch preserves the saved draft and Forward restores it
 })
 
 test('Projects survives refresh without creating an empty project', async ({ page }) => {
-  await page.goto('/')
-  await page.getByTitle('Back to projects').click()
+  await page.goto('/#/build')
+  await page.getByTitle('Back to Home').click()
+  await page.getByRole('navigation', { name: 'Workspaces' }).getByRole('button', { name: 'Projects' }).click()
   await expect(page).toHaveURL(/#\/projects$/)
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Projects', exact: true })).toBeVisible()

@@ -1,4 +1,3 @@
-import { PrimitiveShapeControls } from './SolidControls'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { remeshSceneObject } from '../lib/meshJobs'
 import {
@@ -12,13 +11,11 @@ import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore, type ObjectBarPanel } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
 import {
-  CubeIcon,
   DotsIcon,
   ListIcon,
   MagnetIcon,
   MoveIcon,
 } from './icons'
-import { ClayColorControl } from './RightPanel'
 import { useViewportInsets } from './viewportInsets'
 
 export function ObjectBar() {
@@ -44,7 +41,6 @@ export function ObjectBar() {
       className="absolute z-30 flex -translate-x-1/2 flex-col items-center gap-2"
       style={{ left: insets.centre, bottom: insets.contentBottom }}
     >
-      {panel === 'name' && objectId && <NamePopover objectId={objectId} />}
       {panel === 'more' && objectId && <MoreMenu objectId={objectId} />}
       {object && isRemeshPlaceholder(object.root) && (
         <div className="panel flex items-center gap-2 px-2.5 py-1.5 text-[10px] text-ink-dim">
@@ -79,11 +75,6 @@ export function ObjectBar() {
             )}
             <span className="mx-1 h-4 w-px bg-line" />
           </>
-        )}
-        {!envSelected && (
-          <IconBtn title="Shape" active={panel === 'name'} onClick={() => setPanel('name')}>
-            <CubeIcon size={14} />
-          </IconBtn>
         )}
         <IconBtn
           title="Outliner"
@@ -168,47 +159,6 @@ function IconBtn({
     >
       {children}
     </button>
-  )
-}
-
-function NamePopover({ objectId }: { objectId: string }) {
-  const object = useSceneStore((s) => s.objects.find((o) => o.id === objectId))
-  const shade = object?.shade ?? 0.7
-  const insets = useViewportInsets()
-  if (!object) return null
-  return (
-    <div className="panel w-80 overflow-y-auto p-3" style={{ maxHeight: `calc(100dvh - ${insets.contentBottom + insets.top + 52}px)` }}>
-      <div className="flex items-center justify-between">
-        <span className="text-[12px] font-semibold text-ink">{object.primitive ? 'Shape' : 'Object'}</span>
-        <button
-          type="button"
-          onClick={() => useEditorStore.getState().setObjectBarPanel('none')}
-          className="text-ink-dim hover:text-ink"
-        >
-          ×
-        </button>
-      </div>
-      <input
-        value={object.name}
-        onChange={(e) => useSceneStore.getState().renameObject(objectId, e.target.value)}
-        className="mt-2 w-full rounded-md bg-panel-2 px-2 py-1.5 text-[12px] text-ink outline-none"
-      />
-      {object.primitive && <div className="mt-3"><PrimitiveShapeControls object={object} /></div>}
-      <label className="mt-3 block text-[10px] uppercase tracking-wide text-ink-dim">Shade</label>
-      <input
-        type="range"
-        min={0.15}
-        max={0.95}
-        step={0.01}
-        value={shade}
-        onChange={(e) => useSceneStore.getState().setObjectShade(objectId, Number(e.target.value))}
-        className="mt-1 w-full"
-      />
-      <label className="mt-3 block text-[10px] uppercase tracking-wide text-ink-dim">Clay color</label>
-      <div className="mt-1">
-        <ClayColorControl objectId={objectId} />
-      </div>
-    </div>
   )
 }
 
