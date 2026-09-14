@@ -40,7 +40,7 @@ import {
   TrashIcon,
 } from './icons'
 import { SceneSwitcher } from './SceneSwitcher'
-import { GUTTER, LEFT_PANEL_MAX, useViewportInsets } from './viewportInsets'
+import { GUTTER, LEFT_PANEL_MAX, useViewportInsets, type PanelVariant } from './viewportInsets'
 
 function VisibilityToggle({
   hideId,
@@ -676,7 +676,7 @@ export function ProjectMenu() {
   )
 }
 
-export function LeftPanel() {
+export function LeftPanel({ variant = 'rail' }: { variant?: PanelVariant } = {}) {
   const objects = useSceneStore((s) => s.objects)
   const pendingLifts = useSceneStore((s) => s.pendingLifts)
   const environmentId = useEnvironmentStore((s) => s.environmentId)
@@ -685,7 +685,9 @@ export function LeftPanel() {
   const lookAtMode = useRigStore((s) => s.lookAtMode)
   const cameraOptions = useCameraOptionsStore((s) => s.options)
   const scenes = useProjectStore((s) => s.scenes)
-  const [query, setQuery] = useState('')
+  // Filter lives in the store so it survives swapping the rail for the phone sheet.
+  const query = useEditorStore((s) => s.outlinerQuery)
+  const setQuery = useEditorStore((s) => s.setOutlinerQuery)
   const insets = useViewportInsets()
 
   const items: { id: SelectableId; icon: React.ReactNode; name: string }[] = [
@@ -702,19 +704,8 @@ export function LeftPanel() {
     .map((p) => ({ id: p.id, name: p.name }))
     .filter((p) => p.name.toLowerCase().includes(q))
 
-  return (
-    <div
-      className="panel absolute z-20 flex flex-col overflow-visible"
-      style={{
-        left: GUTTER,
-        // Below the global top row, so the chip and the modes stay put instead
-        // of this column taking over their band when the outliner opens.
-        top: insets.top,
-        bottom: GUTTER,
-        width: insets.leftWidth || LEFT_PANEL_MAX,
-      }}
-    >
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+  const body = (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="px-2 pt-2">
         <div className="flex items-center gap-2">
           <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md bg-panel-2 px-2 py-1.5">
@@ -847,7 +838,28 @@ export function LeftPanel() {
       <div className="border-t border-line/60 p-2">
         <FooterItem icon={<ImportIcon />} label="Import" onClick={openImportDialog} />
       </div>
-      </div>
+    </div>
+  )
+
+  // Phone shell: the outliner fills the Task sheet, no absolute positioning.
+  if (variant === 'sheet') {
+    return <div className="flex h-full min-h-0 flex-col overflow-hidden">{body}</div>
+  }
+
+  return (
+    <div
+      className="panel absolute z-20 flex flex-col overflow-visible"
+      style={{
+        // Clear the device safe area (a landscape notch / home indicator).
+        left: GUTTER + insets.safeArea.left,
+        // Below the global top row, so the chip and the modes stay put instead
+        // of this column taking over their band when the outliner opens.
+        top: insets.top,
+        bottom: insets.dockBottom,
+        width: insets.leftWidth || LEFT_PANEL_MAX,
+      }}
+    >
+      {body}
     </div>
   )
 }

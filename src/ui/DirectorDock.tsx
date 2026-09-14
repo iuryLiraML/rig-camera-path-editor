@@ -12,7 +12,7 @@ import { TransformPopover, EnvironmentTransformPopover } from './TransformPopove
 import { ObjectShapeSection } from './ObjectShapeSection'
 import { PathSections } from './RightPanel'
 import { CameraAdjustPanel } from './CameraAdjustPanel'
-import { directorDockSlot, GUTTER, useChromeLayout, useViewportInsets, useWindowSize } from './viewportInsets'
+import { directorDockSlot, GUTTER, useChromeLayout, useViewportInsets, useWindowSize, type PanelVariant } from './viewportInsets'
 
 function ToolChip({ name }: { name: string }) {
   return (
@@ -64,7 +64,8 @@ const PLACEHOLDER: Record<'build' | 'compose' | 'visualize', string> = {
 }
 
 /** Director chat — full-height right rail in every workspace. */
-export function DirectorDock() {
+export function DirectorDock({ variant = 'rail' }: { variant?: PanelVariant } = {}) {
+  const sheet = variant === 'sheet'
   const chat = useAgentStore((s) => s.chat)
   const status = useAgentStore((s) => s.status)
   const taskProgress = useAgentStore((s) => s.taskProgress)
@@ -84,9 +85,13 @@ export function DirectorDock() {
   const { directorCompact, tier } = useChromeLayout()
   const win = useWindowSize()
   const [chatOpen, setChatOpen] = useState(false)
-  const overlayOpen = chatOpen && directorCompact && tier !== 'full'
-  const compact = directorCompact && !overlayOpen
-  const [input, setInput] = useState('')
+  // In the phone Task sheet the Director always renders full (chat + composer);
+  // the rail's compact / overlay states do not apply.
+  const overlayOpen = !sheet && chatOpen && directorCompact && tier !== 'full'
+  const compact = !sheet && directorCompact && !overlayOpen
+  // Draft lives in the store so it survives swapping the rail for the phone sheet.
+  const input = useEditorStore((s) => s.directorDraft)
+  const setInput = useEditorStore((s) => s.setDirectorDraft)
   const [showSkills, setShowSkills] = useState(false)
   const [pendingImage, setPendingImage] = useState<File | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -118,44 +123,56 @@ export function DirectorDock() {
 
   return (
     <div
-      className={`panel absolute ${overlayOpen ? 'z-40' : 'z-30'} flex min-h-0 flex-col overflow-hidden`}
+      className={
+        sheet
+          ? 'flex h-full min-h-0 flex-col overflow-hidden'
+          : `panel absolute ${overlayOpen ? 'z-40' : 'z-30'} flex min-h-0 flex-col overflow-hidden`
+      }
       onKeyDown={(e) => {
         if (e.key === 'Escape' && chatOpen) {
           e.stopPropagation()
           setChatOpen(false)
         }
       }}
-      style={{
-        right: dock.right,
-        width: overlayOpen ? Math.min(360, win.w - GUTTER * 2) : dock.width,
-        // Below the global top row: at the top gutter the rail covered the
-        // toolbar's own band and ate the pills painted over it.
-        top: insets.top,
-        bottom: GUTTER,
-      }}
+      style={
+        sheet
+          ? undefined
+          : {
+              right: dock.right,
+              width: overlayOpen ? Math.min(360, win.w - GUTTER * 2) : dock.width,
+              // Below the global top row: at the top gutter the rail covered the
+              // toolbar's own band and ate the pills painted over it.
+              top: insets.top,
+              // dockBottom clears the device safe area (home indicator), not just the gutter.
+              bottom: insets.dockBottom,
+            }
+      }
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           <div className="flex shrink-0 items-center gap-1 border-b border-line/60 px-3 py-2">
             <span className="text-[11px] font-medium text-ink">
               {generate ? 'Visualize' : 'Director'}
             </span>
-            <button
-              type="button"
-              title={compact ? 'Expand Director' : 'Collapse Director'}
-              aria-expanded={!compact}
-              onClick={() => {
-                if (tier === 'full') {
-                  // Desktop expansion must update the space reserved by every dock.
-                  setChatOpen(false)
-                  useEditorStore.getState().setDirectorPreference(compact ? 'expanded' : 'compact')
-                } else {
-                  setChatOpen(!chatOpen)
-                }
-              }}
-              className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
-            >
-              {compact ? 'Expand' : 'Collapse'}
-            </button>
+            {!sheet && (
+              <button
+                type="button"
+                title={compact ? 'Expand Director' : 'Collapse Director'}
+                aria-expanded={!compact}
+                onClick={() => {
+                  if (tier === 'full') {
+                    // Desktop expansion must update the space reserved by every dock.
+                    setChatOpen(false)
+                    useEditorStore.getState().setDirectorPreference(compact ? 'expanded' : 'compact')
+                  } else {
+                    setChatOpen(!chatOpen)
+                  }
+                }}
+                className="ml-auto rounded-md px-1.5 py-0.5 text-[10px] text-ink-dim hover:bg-panel-2 hover:text-ink"
+              >
+                {compact ? 'Expand' : 'Collapse'}
+              </button>
+            )}
+            {sheet && <span className="ml-auto" />}
             {generate && (
               <button
                 type="button"

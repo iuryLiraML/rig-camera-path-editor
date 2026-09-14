@@ -1,3 +1,4 @@
+import { isPhoneTier, type LayoutTier } from './chromeLayout'
 import type { ComposeDock, Tool, WorkspaceMode } from '../state/useEditorStore'
 
 export interface EditorChromeFlags {
@@ -20,6 +21,31 @@ export interface EditorChromeFlags {
   pip: boolean
   cameraHud: boolean
   onboarding: boolean
+  /** Phone shell: top app bar + bottom task bar + single Task sheet (#66). */
+  phoneShell: boolean
+}
+
+const NO_CHROME: EditorChromeFlags = {
+  toolbar: false,
+  modeSwitcher: false,
+  projectChip: false,
+  outliner: false,
+  addDrawer: false,
+  objectBar: false,
+  timeline: false,
+  sequence: false,
+  composeTabs: false,
+  shotFrame: false,
+  cameraBar: false,
+  addShot: false,
+  visualizeRail: false,
+  directorDock: false,
+  footer: false,
+  navLegend: false,
+  pip: false,
+  cameraHud: false,
+  onboarding: false,
+  phoneShell: false,
 }
 
 export function editorChrome(input: {
@@ -28,29 +54,17 @@ export function editorChrome(input: {
   composeDock: ComposeDock
   showOutliner: boolean
   showAddDrawer: boolean
+  /** Defaults to a docked desktop tier when omitted, preserving old callers. */
+  tier?: LayoutTier
 }): EditorChromeFlags {
   if (input.playMode) {
-    return {
-      toolbar: false,
-      modeSwitcher: false,
-      projectChip: false,
-      outliner: false,
-      addDrawer: false,
-      objectBar: false,
-      timeline: false,
-      sequence: false,
-      composeTabs: false,
-      shotFrame: false,
-      cameraBar: false,
-      addShot: false,
-      visualizeRail: false,
-      directorDock: false,
-      footer: false,
-      navLegend: false,
-      pip: false,
-      cameraHud: false,
-      onboarding: false,
-    }
+    return { ...NO_CHROME }
+  }
+
+  // Phone shell replaces every persistent docked rail with a single Task sheet,
+  // launched from the bottom task bar, over a full-bleed canvas.
+  if (input.tier && isPhoneTier(input.tier)) {
+    return { ...NO_CHROME, phoneShell: true }
   }
 
   const mode = input.workspaceMode
@@ -77,6 +91,7 @@ export function editorChrome(input: {
         pip: false,
         cameraHud: false,
         onboarding: true,
+        phoneShell: false,
       }
     case 'compose':
       return {
@@ -101,6 +116,7 @@ export function editorChrome(input: {
         pip: true,
         cameraHud: true,
         onboarding: true,
+        phoneShell: false,
       }
     case 'visualize':
       return {
@@ -123,6 +139,7 @@ export function editorChrome(input: {
         pip: false,
         cameraHud: false,
         onboarding: false,
+        phoneShell: false,
       }
     default: {
       const _never: never = mode

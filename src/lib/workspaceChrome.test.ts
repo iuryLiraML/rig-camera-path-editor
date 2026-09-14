@@ -93,3 +93,45 @@ describe('editorChrome', () => {
     expect(pathGuidesVisible(false, 'visualize', 'path')).toBe(false)
   })
 })
+
+describe('editorChrome phone shell', () => {
+  const base = {
+    playMode: false,
+    composeDock: 'timeline' as const,
+    showOutliner: false,
+    showAddDrawer: false,
+  }
+
+  it('replaces every docked rail with the phone shell on phone', () => {
+    const chrome = editorChrome({ ...base, workspaceMode: 'build', tier: 'phone' })
+    expect(chrome.phoneShell).toBe(true)
+    // None of the persistent desktop chrome renders on phone.
+    expect(chrome.directorDock).toBe(false)
+    expect(chrome.outliner).toBe(false)
+    expect(chrome.addDrawer).toBe(false)
+    expect(chrome.toolbar).toBe(false)
+    expect(chrome.footer).toBe(false)
+    expect(chrome.timeline).toBe(false)
+    expect(chrome.visualizeRail).toBe(false)
+  })
+
+  it('keeps the phone shell out of every docked tier', () => {
+    for (const tier of ['tablet', 'compact', 'full'] as const) {
+      const chrome = editorChrome({ ...base, workspaceMode: 'build', tier })
+      expect(chrome.phoneShell).toBe(false)
+      expect(chrome.directorDock).toBe(true)
+    }
+  })
+
+  it('omits the phone shell when the tier is unspecified (desktop callers)', () => {
+    const chrome = editorChrome({ ...base, workspaceMode: 'compose' })
+    expect(chrome.phoneShell).toBe(false)
+    expect(chrome.directorDock).toBe(true)
+  })
+
+  it('shows nothing at all in play mode, phone included', () => {
+    const chrome = editorChrome({ ...base, workspaceMode: 'build', tier: 'phone', playMode: true })
+    expect(chrome.phoneShell).toBe(false)
+    expect(chrome.toolbar).toBe(false)
+  })
+})

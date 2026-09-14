@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { directorIsCompact } from '../lib/chromeLayout'
+import { directorIsCompact, layoutTier } from '../lib/chromeLayout'
 import {
   chromeBand,
   chromeSizes,
@@ -11,6 +11,10 @@ import {
   freeAreaRect,
   GUTTER,
   LEFT_PANEL_MAX,
+  MIN_FREE_HEIGHT,
+  MIN_FREE_WIDTH,
+  PHONE_TASK_BAR_HEIGHT,
+  PHONE_TOP_BAR_HEIGHT,
   toolbarSlot,
   viewportInsets,
   VISUALIZE_DOCK_HEIGHT,
@@ -21,6 +25,20 @@ import {
 import { TIMELINE_HEIGHT } from './Timeline'
 
 const WINDOW = 1202
+
+/** The named viewport matrix from specs/005-responsive-touch/spec.md. */
+const NAMED_MATRIX = [
+  [360, 800],
+  [390, 844],
+  [844, 390],
+  [768, 1024],
+  [1024, 768],
+  [1024, 600],
+  [1366, 768],
+  [1440, 900],
+  [1920, 1080],
+  [2560, 1440],
+] as const
 
 describe('viewportInsets', () => {
   it('Build reserves the Director rail when the outliner is closed', () => {
@@ -232,5 +250,93 @@ describe('viewportInsets', () => {
     const compact = directorIsCompact(1024, 700, 'expanded')
     const insets = viewportInsets('build', 1024, false, 700, 240, { directorCompact: compact })
     expect(insets.rightWidth).toBe(DIRECTOR_DOCK_WIDTH)
+  })
+})
+
+describe('phone shell budget', () => {
+  it('reserves no docked rails or dock on phone', () => {
+    const sizes = chromeSizes(390, 844, {
+      mode: 'compose',
+      composeDock: 'timeline',
+      showOutliner: true,
+      timelineVisible: true,
+      directorCompact: true,
+      tier: 'phone',
+    })
+    expect(sizes).toEqual({ leftWidth: 0, rightWidth: 0, timelineHeight: 0 })
+  })
+
+  it('spans the free area between the top app bar and the bottom task bar', () => {
+    const insets = viewportInsets('build', 390, false, 844, 240, { tier: 'phone' })
+    expect(insets.leftWidth).toBe(0)
+    expect(insets.rightWidth).toBe(0)
+    expect(insets.left).toBe(GUTTER)
+    expect(insets.right).toBe(390 - GUTTER)
+    expect(insets.top).toBe(PHONE_TOP_BAR_HEIGHT + GUTTER)
+    expect(insets.bottom).toBe(PHONE_TASK_BAR_HEIGHT + GUTTER)
+    const free = freeAreaRect(insets, 844)
+    expect(free.w).toBeGreaterThanOrEqual(MIN_FREE_WIDTH)
+    expect(free.h).toBeGreaterThanOrEqual(MIN_FREE_HEIGHT)
+  })
+
+  it('insets the phone bars past the device safe area', () => {
+    const safeArea = { top: 47, right: 0, bottom: 34, left: 0 }
+    const insets = viewportInsets('build', 390, false, 844, 240, { tier: 'phone', safeArea })
+    expect(insets.top).toBe(47 + PHONE_TOP_BAR_HEIGHT + GUTTER)
+    expect(insets.bottom).toBe(34 + PHONE_TASK_BAR_HEIGHT + GUTTER)
+    expect(insets.safeArea).toEqual(safeArea)
+  })
+})
+
+describe('named viewport matrix', () => {
+  it('classifies every named window as a supported tier', () => {
+    for (const [w, h] of NAMED_MATRIX) {
+      expect(['phone', 'tablet', 'compact', 'full']).toContain(layoutTier(w, h))
+    }
+  })
+
+  it.each(NAMED_MATRIX)('gives %ix%i a usable, non-overlapping free area', (w, h) => {
+    const tier = layoutTier(w, h)
+    // Default editor chrome: the outliner is an opt-in overlay, closed at rest.
+    const insets = viewportInsets('build', w, false, h, 240, {
+      directorCompact: directorIsCompact(w, h, 'auto'),
+      tier,
+    })
+    expect(insets.left).toBeGreaterThanOrEqual(0)
+    expect(insets.right).toBeLessThanOrEqual(w)
+    expect(insets.right).toBeGreaterThan(insets.left)
+    const free = freeAreaRect(insets, h)
+    expect(free.w).toBeGreaterThanOrEqual(MIN_FREE_WIDTH)
+    expect(free.h).toBeGreaterThanOrEqual(MIN_FREE_HEIGHT)
+    if (tier !== 'phone') {
+      // On a docked tier the free area never runs under the Director column.
+      const dock = directorDockSlot(insets)
+      const dockLeft = w - dock.right - dock.width
+      expect(insets.right).toBeLessThanOrEqual(dockLeft + 1)
+    }
+  })
+
+  it.each(NAMED_MATRIX)('gives %ix%i a usable free area in every workspace', (w, h) => {
+    const tier = layoutTier(w, h)
+    for (const mode of ['build', 'compose', 'visualize'] as const) {
+      const timelineVisible = mode === 'compose'
+      const insets = viewportInsets(mode, w, timelineVisible, h, 240, {
+        directorCompact: directorIsCompact(w, h, 'auto'),
+        tier,
+      })
+      const free = freeAreaRect(insets, h)
+      expect(free.w, `${mode} ${w}x${h} width`).toBeGreaterThanOrEqual(MIN_FREE_WIDTH)
+      expect(free.h, `${mode} ${w}x${h} height`).toBeGreaterThanOrEqual(MIN_FREE_HEIGHT)
+    }
+  })
+
+  it('keeps a usable canvas at the narrowest tablet with the default chrome', () => {
+    const insets = viewportInsets('build', 600, false, 900, 240, {
+      directorCompact: true,
+      tier: 'tablet',
+    })
+    const free = freeAreaRect(insets, 900)
+    expect(free.w).toBeGreaterThanOrEqual(MIN_FREE_WIDTH)
+    expect(free.h).toBeGreaterThanOrEqual(MIN_FREE_HEIGHT)
   })
 })

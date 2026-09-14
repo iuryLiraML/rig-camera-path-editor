@@ -4,11 +4,20 @@ import {
   type ComposeDock,
   type WorkspaceMode,
 } from '../state/useEditorStore'
-import { directorIsCompact, layoutTier, type LayoutTier } from '../lib/chromeLayout'
+import {
+  directorIsCompact,
+  isPhoneTier,
+  layoutTier,
+  type LayoutTier,
+} from '../lib/chromeLayout'
+import { useSafeAreaInsets, ZERO_SAFE_AREA, type SafeAreaInsets } from './safeAreaInsets'
 
 /**
  * Single source of truth for the free area of the viewport — the region not
- * covered by the floating chrome for the current workspace job.
+ * covered by the floating chrome for the current workspace job. Every tier
+ * (phone / tablet / compact / full) resolves through here, and safe-area insets
+ * plus the phone shell bars are folded into the same rect so floating chrome
+ * never lands under a notch, a home indicator, or one of the phone bars.
  */
 
 /** gutter used between every docked panel and the window edges */
@@ -29,6 +38,14 @@ export const DIRECTOR_DOCK_WIDTH = 360
 export const COMPACT_DIRECTOR_DOCK_WIDTH = 240
 /** height of the top row (Toolbar / ModeSwitcher / ProjectChip), both at top-3 */
 export const TOP_ROW_HEIGHT = 38
+
+/** A docked panel (`LeftPanel`, `DirectorDock`) rendered as a rail or a phone sheet. */
+export type PanelVariant = 'rail' | 'sheet'
+
+/** phone shell — slim top app bar (project menu + workspace switcher) */
+export const PHONE_TOP_BAR_HEIGHT = 44
+/** phone shell — bottom task bar that launches the single active Task panel */
+export const PHONE_TASK_BAR_HEIGHT = 56
 
 export const LEFT_PANEL_MAX = 280
 export const LEFT_PANEL_MIN = 196
@@ -82,7 +99,7 @@ export function directorDockSlot(insets: ViewportInsets): { right: number; width
     insets.rightWidth > 0
       ? insets.rightWidth
       : Math.min(DIRECTOR_DOCK_WIDTH, Math.max(0, insets.right - insets.left))
-  return { right: GUTTER, width }
+  return { right: GUTTER + insets.safeArea.right, width }
 }
 
 /**
@@ -132,6 +149,8 @@ export interface ChromeSizeInput {
   timelineVisible: boolean
   requestedHeight?: number
   directorCompact?: boolean
+  /** Layout tier; the phone shell docks nothing and reserves no rail width. */
+  tier?: LayoutTier
 }
 
 export function chromeSizes(
@@ -139,6 +158,13 @@ export function chromeSizes(
   windowHeight: number,
   input: ChromeSizeInput,
 ): { leftWidth: number; rightWidth: number; timelineHeight: number } {
+  // Phone reserves no persistent rails or dock: panels open one at a time in a
+  // bottom sheet, so the free area is the whole safe viewport.
+  const tier = input.tier ?? layoutTier(windowWidth, windowHeight)
+  if (isPhoneTier(tier)) {
+    return { leftWidth: 0, rightWidth: 0, timelineHeight: 0 }
+  }
+
   const requestedHeight = input.requestedHeight ?? TIMELINE_HEIGHT_DEFAULT
   const directorWidth = input.directorCompact ? COMPACT_DIRECTOR_DOCK_WIDTH : DIRECTOR_DOCK_WIDTH
   let leftWidth = 0
@@ -227,6 +253,10 @@ export interface ViewportInsets {
   leftWidth: number
   rightWidth: number
   timelineHeight: number
+  /** Resolved layout tier for the given window size. */
+  tier: LayoutTier
+  /** Device safe-area insets folded into the rect above. */
+  safeArea: SafeAreaInsets
 }
 
 export function viewportInsets(
@@ -235,8 +265,40 @@ export function viewportInsets(
   timelineVisible: boolean,
   windowHeight = 900,
   requestedHeight = TIMELINE_HEIGHT_DEFAULT,
-  extras: { composeDock?: ComposeDock; showOutliner?: boolean; directorCompact?: boolean } = {},
+  extras: {
+    composeDock?: ComposeDock
+    showOutliner?: boolean
+    directorCompact?: boolean
+    tier?: LayoutTier
+    safeArea?: SafeAreaInsets
+  } = {},
 ): ViewportInsets {
+  const tier = extras.tier ?? layoutTier(windowWidth, windowHeight)
+  const safe = extras.safeArea ?? ZERO_SAFE_AREA
+
+  // Phone shell: full-bleed canvas between the top app bar and the bottom task
+  // bar; no side rails, no persistent dock.
+  if (isPhoneTier(tier)) {
+    const left = GUTTER + safe.left
+    const right = windowWidth - GUTTER - safe.right
+    const top = safe.top + PHONE_TOP_BAR_HEIGHT + GUTTER
+    const bottom = safe.bottom + PHONE_TASK_BAR_HEIGHT + GUTTER
+    return {
+      left,
+      top,
+      right,
+      bottom,
+      centre: left + (right - left) / 2,
+      contentBottom: bottom,
+      dockBottom: bottom,
+      leftWidth: 0,
+      rightWidth: 0,
+      timelineHeight: 0,
+      tier,
+      safeArea: safe,
+    }
+  }
+
   const { leftWidth, rightWidth, timelineHeight } = chromeSizes(windowWidth, windowHeight, {
     mode,
     composeDock: extras.composeDock ?? 'timeline',
@@ -244,26 +306,27 @@ export function viewportInsets(
     timelineVisible,
     requestedHeight,
     directorCompact: extras.directorCompact ?? false,
+    tier,
   })
-  const left = leftWidth > 0 ? GUTTER + leftWidth + GUTTER : GUTTER
-  const right = windowWidth - (rightWidth > 0 ? GUTTER + rightWidth + GUTTER : GUTTER)
+  const left = (leftWidth > 0 ? GUTTER + leftWidth + GUTTER : GUTTER) + safe.left
+  const right = windowWidth - (rightWidth > 0 ? GUTTER + rightWidth + GUTTER : GUTTER) - safe.right
   const visualizeDock = mode === 'visualize' ? VISUALIZE_DOCK_HEIGHT : 0
   const bottom =
-    timelineVisible && timelineHeight > 0
+    (timelineVisible && timelineHeight > 0
       ? GUTTER + timelineHeight + GUTTER
       : visualizeDock > 0
         ? GUTTER + visualizeDock + GUTTER
-        : GUTTER
+        : GUTTER) + safe.bottom
   const footerBand = mode === 'compose' && timelineVisible ? FOOTER_ROW_HEIGHT + GUTTER : 0
   const addDrawerBand = mode === 'build' ? ADD_DRAWER_HEIGHT + GUTTER : 0
   const composeDocked = mode === 'compose' && timelineVisible
-  const dockBottom = GUTTER
+  const dockBottom = GUTTER + safe.bottom
   const contentBottom = composeDocked
     ? bottom + footerBand + GUTTER
     : bottom + addDrawerBand + GUTTER
   return {
     left,
-    top: GUTTER + TOP_ROW_HEIGHT + GUTTER,
+    top: GUTTER + TOP_ROW_HEIGHT + GUTTER + safe.top,
     right,
     bottom,
     centre: left + (right - left) / 2,
@@ -272,6 +335,8 @@ export function viewportInsets(
     leftWidth,
     rightWidth,
     timelineHeight,
+    tier,
+    safeArea: safe,
   }
 }
 
@@ -312,15 +377,33 @@ export function intersectRect(a: XYWH, b: XYWH): XYWH {
   }
 }
 
-/** Window size, tracked so overlays re-place themselves on resize. */
-export function useWindowSize() {
-  const [size, setSize] = useState(() => ({ w: window.innerWidth, h: window.innerHeight }))
+function readWindowSize(): { w: number; h: number } {
+  const vv = typeof window !== 'undefined' ? window.visualViewport : undefined
+  return {
+    w: Math.round(vv?.width ?? window.innerWidth),
+    h: Math.round(vv?.height ?? window.innerHeight),
+  }
+}
+
+/**
+ * Window size, tracked so overlays re-place themselves on resize. Reads the
+ * visual viewport when present so the mobile virtual keyboard (which shrinks the
+ * visual viewport without a window resize) re-budgets the layout.
+ */
+export function useWindowSize(): { w: number; h: number } {
+  const [size, setSize] = useState(() => readWindowSize())
   useEffect(() => {
-    const onResize = () => setSize({ w: window.innerWidth, h: window.innerHeight })
+    const onResize = () =>
+      setSize((prev) => {
+        const next = readWindowSize()
+        return prev.w === next.w && prev.h === next.h ? prev : next
+      })
     window.addEventListener('resize', onResize)
+    window.addEventListener('orientationchange', onResize)
     window.visualViewport?.addEventListener('resize', onResize)
     return () => {
       window.removeEventListener('resize', onResize)
+      window.removeEventListener('orientationchange', onResize)
       window.visualViewport?.removeEventListener('resize', onResize)
     }
   }, [])
@@ -352,6 +435,7 @@ export function useViewportInsets(windowWidth?: number, windowHeight?: number): 
   const timelineHeight = useEditorStore((s) => s.timelineHeight)
   const directorPreference = useEditorStore((s) => s.directorPreference)
   const win = useWindowSize()
+  const safeArea = useSafeAreaInsets()
   const w = windowWidth ?? win.w
   const h = windowHeight ?? win.h
   const timelineVisible = !playMode && workspaceMode === 'compose'
@@ -359,5 +443,7 @@ export function useViewportInsets(windowWidth?: number, windowHeight?: number): 
     composeDock,
     showOutliner,
     directorCompact: directorIsCompact(w, h, directorPreference),
+    tier: layoutTier(w, h),
+    safeArea,
   })
 }

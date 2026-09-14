@@ -46,6 +46,12 @@ export type ObjectBarPanel = 'none' | 'transform' | 'name' | 'properties' | 'mor
 export type CameraPanel = 'closed' | 'adjust' | 'fx'
 export type VisualizeMedia = 'still' | 'motion'
 export type RecordingKind = 'video' | 'still'
+/**
+ * Phone shell: the single Task panel open in the bottom sheet at a time
+ * (issue #66). `none` leaves the full-bleed canvas clear. Later tickets add
+ * per-workspace surfaces (timeline, camera, review).
+ */
+export type TaskPanel = 'none' | 'scene' | 'tools' | 'director'
 
 export type SelectableId =
   | 'light'
@@ -122,6 +128,16 @@ interface EditorState {
   composeDock: ComposeDock
   /** Outliner overlay (Build/Compose). Not a permanent column. */
   showOutliner: boolean
+  /** Phone shell: the single Task panel open in the bottom sheet (one at a time). */
+  activeTaskPanel: TaskPanel
+  /**
+   * Unsaved Director / Visualize composer text. Lifted out of the component so
+   * it survives a tier change that swaps the docked rail for the phone Task
+   * sheet — two separate instances would otherwise drop the draft (#66).
+   */
+  directorDraft: string
+  /** Outliner search filter, lifted for the same cross-tier reason. */
+  outlinerQuery: string
   /** Add-an-object drawer (Build). */
   showAddDrawer: boolean
   /** Active chip in the Add drawer so a CTA can open Environment. */
@@ -217,6 +233,9 @@ interface EditorState {
   setAppView: (view: AppView) => void
   setPlanId: (id: string | null) => void
   setWorkspaceMode: (mode: WorkspaceMode) => void
+  setActiveTaskPanel: (panel: TaskPanel) => void
+  setDirectorDraft: (draft: string) => void
+  setOutlinerQuery: (query: string) => void
   setComposeDock: (dock: ComposeDock) => void
   setShowOutliner: (on: boolean) => void
   toggleOutliner: () => void
@@ -286,6 +305,9 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   workspaceMode: 'build',
   composeDock: 'sequence',
   showOutliner: false,
+  activeTaskPanel: 'none',
+  directorDraft: '',
+  outlinerQuery: '',
   showAddDrawer: false,
   addDrawerChip: 'primitives',
   objectBarPanel: 'none',
@@ -438,7 +460,11 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({
       gizmoMode,
     }),
-  setPlayMode: (playMode) => set({ playMode }),
+  setPlayMode: (playMode) =>
+    set((s) => ({ playMode, activeTaskPanel: playMode ? 'none' : s.activeTaskPanel })),
+  setActiveTaskPanel: (activeTaskPanel) => set({ activeTaskPanel }),
+  setDirectorDraft: (directorDraft) => set({ directorDraft }),
+  setOutlinerQuery: (outlinerQuery) => set({ outlinerQuery }),
   setCameraView: (cameraView) =>
     set((s) =>
       cameraView
@@ -496,6 +522,8 @@ export const useEditorStore = create<EditorState>((set, get) => ({
         objectBarPanel: workspaceMode === 'visualize' ? 'none' : s.objectBarPanel,
         showOutliner: workspaceMode === 'build' ? s.showOutliner : false,
         cameraPanel: workspaceMode === 'compose' ? s.cameraPanel : 'closed',
+        // Switching jobs closes the phone Task sheet; the new job's bar reopens it.
+        activeTaskPanel: 'none',
       }
     }),
   setComposeDock: (composeDock) => set({ composeDock }),

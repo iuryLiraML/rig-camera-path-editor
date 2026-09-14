@@ -5,7 +5,6 @@ import { useRigStore } from '../state/useRigStore'
 import { usePathStore } from '../state/usePathStore'
 import { cameraReady } from '../state/cameraPathLink'
 import { editorChrome } from '../lib/workspaceChrome'
-import { COMPACT_LAYOUT_MIN } from '../lib/chromeLayout'
 import { Viewport } from '../viewport/Viewport'
 import { TopChrome } from '../ui/TopChrome'
 import { LeftPanel } from '../ui/LeftPanel'
@@ -56,6 +55,7 @@ import { RemeshJobOverlay } from '../ui/RemeshProgressBar'
 import { CameraBar } from '../ui/CameraBar'
 import { ShortcutsOverlay } from '../ui/ShortcutsOverlay'
 import { VisualizeBar } from '../ui/visualize/VisualizeBar'
+import { PhoneShell } from '../ui/phone/PhoneShell'
 import { NewProjectDialog } from '../ui/NewProjectDialog'
 import { ProductionListDialog } from '../ui/ProductionListDialog'
 
@@ -254,14 +254,15 @@ function EditorWorkspace() {
   const composeDock = useEditorStore((s) => s.composeDock)
   const showOutliner = useEditorStore((s) => s.showOutliner)
   const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
+  const { tier } = useChromeLayout()
   const chrome = editorChrome({
     playMode,
     workspaceMode,
     composeDock,
     showOutliner,
     showAddDrawer,
+    tier,
   })
-  const { tier } = useChromeLayout()
   const [dragging, setDragging] = useState(false)
 
   useShortcuts()
@@ -315,6 +316,7 @@ function EditorWorkspace() {
       </KeepMounted>
       {chrome.objectBar && <ObjectBar />}
       {chrome.addDrawer && <AddObjectDrawer />}
+      {chrome.phoneShell && <PhoneShell />}
       <ImportAssetsModal />
       <RemeshJobOverlay />
       <ShortcutsOverlay />
@@ -348,15 +350,6 @@ function EditorWorkspace() {
       {notice && (
         <div className="panel absolute left-1/2 top-16 z-30 -translate-x-1/2 px-4 py-2 text-xs text-ink">
           {notice}
-        </div>
-      )}
-
-      {tier === 'unsupported' && (
-        <div className="pointer-events-none absolute inset-x-0 bottom-3 z-40 flex justify-center">
-          <div className="panel px-4 py-2 text-xs text-ink">
-            This window is below the supported size ({COMPACT_LAYOUT_MIN.w}×{COMPACT_LAYOUT_MIN.h}).
-            Enlarge it to keep editing.
-          </div>
         </div>
       )}
 
