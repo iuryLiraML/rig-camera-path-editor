@@ -6,6 +6,7 @@ export type FalSubscribeOpts = {
   /** When true, Fal includes runner logs on queue updates (needed to parse real %). */
   logs?: boolean
   onQueueUpdate?: (status: unknown) => void
+  onRequestId?: (requestId: string) => void
 }
 
 export type FalSubscribe = (
@@ -132,6 +133,7 @@ export async function subscribe<T>(
       logs: opts?.logs,
       onQueueUpdate: opts?.onQueueUpdate,
     })
+    if (typeof result?.requestId === 'string') opts?.onRequestId?.(result.requestId)
     const data = result && typeof result === 'object' && 'data' in result ? result.data : result
     if (data == null) throw new Error(`${modelId} returned an empty payload.`)
     return data as T

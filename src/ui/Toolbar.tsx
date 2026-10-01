@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useCameraReady } from '../state/cameraPathLink'
-import { useEditorStore } from '../state/useEditorStore'
+import { useEditorStore, type QuickView } from '../state/useEditorStore'
 import { applyBeginPlayback } from '../lib/playback'
 import { openComposeTimeline } from '../lib/editorShortcuts'
 import { AddObjectMenu } from './AddObjectMenu'
@@ -15,19 +15,25 @@ function ToolButton({
   disabled = false,
   title,
   onClick,
+  dataTour,
+  wide = false,
 }: {
   children: ReactNode
   active?: boolean
   disabled?: boolean
   title: string
   onClick?: () => void
+  /** Stable hook for the guided tutorial's spotlight (issue #78). */
+  dataTour?: string
+  wide?: boolean
 }) {
   return (
     <button
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`flex h-7 w-7 items-center justify-center rounded-md transition-colors ${
+      data-tour={dataTour}
+      className={`flex shrink-0 items-center justify-center rounded-md transition-colors ${wide ? 'h-11 w-auto min-w-11 gap-1 px-2' : 'h-7 w-7'} ${
         active
           ? 'bg-accent text-white'
           : disabled
@@ -41,6 +47,33 @@ function ToolButton({
 }
 
 const Divider = () => <div className="mx-1 h-4 w-px bg-line" />
+
+const PHONE_VIEWS: { value: QuickView; label: string }[] = [
+  { value: 'front', label: 'Front' },
+  { value: 'top', label: 'Top' },
+  { value: 'right', label: 'Right' },
+]
+
+function PhoneQuickViews() {
+  const requestView = useEditorStore((s) => s.requestView)
+  return (
+    <div className="flex shrink-0 items-center gap-2 rounded-lg bg-panel-2 px-2 py-1.5" aria-label="Editor views">
+      <span className="text-[10px] text-ink-dim">View</span>
+      <div className="flex rounded-full bg-panel p-0.5">
+        {PHONE_VIEWS.map((view) => (
+          <button
+            key={view.value}
+            type="button"
+            onClick={() => requestView(view.value)}
+            className="min-h-8 rounded-full px-2.5 text-[11px] text-ink-dim hover:bg-panel-3 hover:text-ink"
+          >
+            {view.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
 
 function MagnetIcon() {
   return (
@@ -83,7 +116,10 @@ function SnapControls() {
 }
 
 function ExportMenu({ disabled }: { disabled: boolean }) {
-  const [open, setOpen] = useState(false)
+  // Open-state lives in the store so the guided tutorial can open it and detect
+  // that the export step was reached (issue #78).
+  const open = useEditorStore((s) => s.exportMenuOpen)
+  const setOpen = useEditorStore((s) => s.setExportMenuOpen)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -93,14 +129,15 @@ function ExportMenu({ disabled }: { disabled: boolean }) {
     }
     window.addEventListener('pointerdown', close)
     return () => window.removeEventListener('pointerdown', close)
-  }, [open])
+  }, [open, setOpen])
 
   return (
     <div ref={ref} className="relative">
       <button
+        data-tour="export"
         title={disabled ? 'Create a path first' : 'Export video or camera rig'}
         disabled={disabled}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => setOpen(!open)}
         className={`rounded-md px-3 py-1 text-[11px] ${
           disabled
             ? 'cursor-not-allowed bg-panel-3 text-ink-dim/60'
@@ -122,7 +159,7 @@ function ExportMenu({ disabled }: { disabled: boolean }) {
   )
 }
 
-export function Toolbar() {
+export function Toolbar({ phoneSheet = false }: { phoneSheet?: boolean } = {}) {
   const tool = useEditorStore((s) => s.tool)
   const setTool = useEditorStore((s) => s.setTool)
   const gizmoMode = useEditorStore((s) => s.gizmoMode)
@@ -148,7 +185,7 @@ export function Toolbar() {
   }
 
   const gizmoRow = (
-    <div className="flex items-center gap-px px-0.5">
+    <div data-tour="object-transform" className="flex items-center gap-px px-0.5">
       <ToolButton
         title="Move (W)"
         active={tool === 'select' && gizmoMode === 'translate'}
@@ -180,20 +217,25 @@ export function Toolbar() {
         <ToolButton
           title="Center the view on the world origin (H)"
           onClick={() => useEditorStore.getState().requestHome()}
+          wide={phoneSheet}
         >
           <TargetIcon />
+          {phoneSheet && <span className="text-[10px]">Home</span>}
         </ToolButton>
         <button
-          title="Click to frame the scene (F)"
+          aria-label="Frame selected objects"
+          title={`Frame selected objects (F) · Zoom ${zoomPct}%`}
           onClick={() => useEditorStore.getState().requestFrame()}
-          className="w-11 px-1 text-center text-[11px] tabular-nums text-ink-dim hover:text-ink"
+          className={`${phoneSheet ? 'h-11 min-w-16 rounded-md bg-panel-2 px-2' : 'w-11'} text-center text-[11px] tabular-nums text-ink-dim hover:text-ink`}
         >
-          {zoomPct}%
+          {phoneSheet ? 'Frame' : `${zoomPct}%`}
         </button>
         <ToolButton
           title="Timeline (T)"
           active={workspaceMode === 'compose'}
-          onClick={() => openComposeTimeline()}
+          onClick={() => phoneSheet
+            ? useEditorStore.getState().setActiveTaskPanel('timeline')
+            : openComposeTimeline()}
         >
           <ClockIcon />
         </ToolButton>
@@ -201,7 +243,8 @@ export function Toolbar() {
     ) : null
 
   return (
-    <div className="panel relative z-20 flex w-max shrink-0 items-center justify-center gap-0.5 px-1.5 py-1">
+    <div className={`panel relative z-20 flex w-max shrink-0 items-center justify-center gap-0.5 px-1.5 py-1 ${phoneSheet ? 'flex-wrap' : ''}`}>
+      {phoneSheet && composeTools && <PhoneQuickViews />}
       {sceneTools && (
         <>
           {composeTools && !compact && (
@@ -213,11 +256,12 @@ export function Toolbar() {
           </ToolButton>
           {composeTools && (
             <>
-              {(tool === 'pen' || !compact) && (
+              {(tool === 'pen' || !compact || phoneSheet) && (
                 <ToolButton
                   title="Pen — click to place path points (P)"
                   active={tool === 'pen'}
                   onClick={() => setTool('pen')}
+                  dataTour="pen-tool"
                 >
                   <PenIcon />
                 </ToolButton>
@@ -233,7 +277,7 @@ export function Toolbar() {
               )}
             </>
           )}
-          {!compact && (
+          {(!compact || phoneSheet) && (
             <>
               <Divider />
               {gizmoRow}
@@ -248,7 +292,7 @@ export function Toolbar() {
           )}
         </>
       )}
-      {!compact && framingRow}
+      {(!compact || phoneSheet) && framingRow}
       <ToolButton title="Undo (Ctrl+Z)" onClick={() => undo()}>
         <span className="text-[11px]">↶</span>
       </ToolButton>
@@ -276,9 +320,9 @@ export function Toolbar() {
               <DrawPathIcon />
             </ToolButton>
           )}
-          {gizmoRow}
+          {!phoneSheet && gizmoRow}
           {tool === 'pen' && composeTools && <SnapControls />}
-          {framingRow}
+          {!phoneSheet && framingRow}
         </ToolbarMore>
       )}
       <ExportMenu disabled={!hasPath} />

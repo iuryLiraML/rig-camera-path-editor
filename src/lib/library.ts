@@ -1,3 +1,5 @@
+import { sha256Hex } from './cloud/client'
+import { reconstructionBufferKeys, type BodyReconstruction } from './bodyReconstruction'
 import { create } from 'zustand'
 import { idbDelete, idbGet, idbGetAll, idbPut, STORES } from './idb'
 import { persistModelBuffer } from './readModelFile'
@@ -11,6 +13,7 @@ import { makeEnvironmentId, useEnvironmentStore } from '../state/useEnvironmentS
 import { useCloudAuthStore } from '../state/useCloudAuthStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
+import { isTutorialProgressV2 } from './tutorial/tutorialProgress'
 import { createProject } from './projects'
 import { useSceneStore } from '../state/useSceneStore'
 
@@ -34,6 +37,8 @@ export type LibraryAsset = {
   tags: string[]
   /** A Plan's wall graph. Absent on Location and Model, which hold bytes instead. */
   plan?: StoredPlan
+  reconstruction?: BodyReconstruction
+  sourceRevisionKey?: string
 }
 
 export type LibraryCollection = {
@@ -84,6 +89,7 @@ export function libraryBufferKeys(): Set<string> {
   for (const asset of useLibraryStore.getState().assets) {
     // A Plan owns no buffer; a null key must not leak into the orphan sweep's keep-set.
     if (asset.bufferKey) keys.add(asset.bufferKey)
+    for (const key of reconstructionBufferKeys(asset.reconstruction)) keys.add(key)
   }
   return keys
 }
@@ -279,6 +285,29 @@ export async function createPlanAsset(collectionId: string | null = null): Promi
   return id
 }
 
+/** Publish a Scene Plan as a new reusable Library Plan. The scene instance and
+ * its original Library asset remain untouched. */
+export async function createPlanAssetFromScenePlan(plan: StoredPlan, name: string): Promise<string> {
+  const id = makeSceneId('plan')
+  const asset: LibraryAsset = {
+    id,
+    name: name.trim() || 'Untitled plan',
+    kind: 'plan',
+    bufferKey: null,
+    source: 'import',
+    format: 'plan',
+    createdAt: Date.now(),
+    ownerId: libraryOwnerId(),
+    collectionId: null,
+    tags: [],
+    plan: structuredClone(plan),
+  }
+  await idbPut(STORES.library, asset)
+  await listLibraryAssets()
+  useLibraryStore.getState().setSelectedId(id)
+  return id
+}
+
 // Thumbnail rendering is asynchronous; serialize writes so Save cannot restore an older title.
 const planWrites = new Map<string, Promise<void>>()
 function writePlan(assetId: string, write: () => Promise<void>): Promise<void> {
@@ -344,6 +373,14 @@ async function insertPlanIntoScene(asset: LibraryAsset): Promise<string | null> 
     await createProject(asset.name)
   }
   useSceneStore.getState().addObject(object)
+  const tutorial = useProjectStore.getState().workflow.tutorial
+  if (isTutorialProgressV2(tutorial) && tutorial.artifacts.planAssetId === asset.id) {
+    const { bindTutorialArtifact, recordObservedTutorialAction } = await import('./tutorial/tutorialActions')
+    bindTutorialArtifact('planObjectId', object.id)
+    recordObservedTutorialAction('room.insert', {
+      kind: 'inserted-bound-plan', sceneId: useProjectStore.getState().activeSceneId, subjectId: object.id,
+    })
+  }
   const editor = useEditorStore.getState()
   editor.setAppView('editor')
   editor.setWorkspaceMode('build')
@@ -371,7 +408,7 @@ async function makeModelThumbnail(bufferKey: string, name: string): Promise<Blob
   return makeLibraryStill(name)
 }
 
-export async function importLibraryAsset(file: File, collectionId: string | null = null, options: { navigate?: boolean } = {}): Promise<string | null> {
+export async function importLibraryAsset(file: File, collectionId: string | null = null, options: { navigate?: boolean; reconstruction?: BodyReconstruction; sourceRevisionKey?: string } = {}): Promise<string | null> {
   const kind = libraryAssetFileKind(file.name)
   if (!kind) {
     useSceneStore.getState().showNotice('Import accepts .ply, .splat, .glb, .gltf or .obj')
@@ -412,6 +449,8 @@ export async function importLibraryAsset(file: File, collectionId: string | null
         thumbnail: kind === 'model' ? await makeModelThumbnail(id, name) : await makeLibraryStill(name),
         collectionId,
         tags: [],
+        reconstruction: options.reconstruction ? structuredClone(options.reconstruction) : undefined,
+        sourceRevisionKey: options.sourceRevisionKey,
       }
       await idbPut(STORES.library, asset)
     } catch (error) {
@@ -513,10 +552,31 @@ export async function insertLibraryAssetIntoScene(assetId: string): Promise<stri
     await createProject(asset.name)
   }
   const { importModelFile } = await import('./sceneIO')
-  const imported = await importModelFile(new File([buffer], `${asset.name}.${asset.format}`), { announce: true })
+  const imported = await importModelFile(new File([buffer], `${asset.name}.${asset.format}`), { announce: true, ...(asset.reconstruction ? { autoRemesh: false } : {}) })
   if (!imported) return null
+  if (asset.reconstruction) useSceneStore.setState((state) => ({ objects: state.objects.map((object) => object.id === imported.objectId ? { ...object, rigKind: 'sam-person', reconstruction: structuredClone(asset.reconstruction), keepDenseMesh: true } : object) }))
   const editor = useEditorStore.getState()
   editor.setAppView('editor')
   editor.setWorkspaceMode('build')
   return imported.objectId
+}
+
+/** Save a source revision; the instance's current pose remains scene-owned. */
+export async function saveSceneModelToLibrary(objectId: string): Promise<string | null> {
+  const object = useSceneStore.getState().objects.find((item) => item.id === objectId)
+  if (!object?.bufferKey) return null
+  const reconstruction = object.reconstruction ? structuredClone(object.reconstruction) : undefined
+  const buffer = await idbGet<ArrayBuffer>(STORES.buffers, object.bufferKey)
+  if (!buffer) {
+    useSceneStore.getState().showNotice('The source model is missing from this browser')
+    return null
+  }
+  const sourceRevisionKey = `${await sha256Hex(buffer)}:${await sha256Hex(new TextEncoder().encode(JSON.stringify(reconstruction ?? null)).buffer)}`
+  const existing = (await listLibraryAssets()).find((asset) => asset.kind === 'model' && asset.sourceRevisionKey === sourceRevisionKey)
+  if (existing) return existing.id
+  return importLibraryAsset(new File([buffer], `${object.name}.${object.sourceFormat ?? 'glb'}`), null, {
+    navigate: false,
+    reconstruction,
+    sourceRevisionKey,
+  })
 }

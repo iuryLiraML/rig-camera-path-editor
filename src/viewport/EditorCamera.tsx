@@ -33,6 +33,7 @@ const VIEW_DIRS = {
 
 /** Live handle to the editor viewport camera, so "pose from view" can read it. */
 export const editorCameraRef: { current: THREE.Camera | null } = { current: null }
+if (import.meta.env.DEV && typeof window !== 'undefined') Object.assign(window, { __editorCameraRef: editorCameraRef })
 
 export function EditorCamera() {
   const projection = useEditorStore((s) => s.projection)

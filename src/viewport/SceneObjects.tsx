@@ -40,6 +40,7 @@ import { capturePointer, releasePointer } from './path/PenTool'
 import { applyAssetDisplay } from '../lib/assetDisplay'
 import { PATH_SELECTED_HALO } from '../lib/pathVisual'
 import { objectSelectionChrome } from '../lib/selectionChrome'
+import type { ScenePlanTarget } from '../lib/scenePlan'
 
 const DEG = Math.PI / 180
 const RAD = 180 / Math.PI
@@ -49,6 +50,7 @@ const MESH_DRAG_PX = 3
 
 /** live wrapper groups per object id, for framing (F) and preset bounding boxes */
 export const objectGroups = new Map<string, THREE.Group>()
+if (import.meta.env.DEV && typeof window !== 'undefined') Object.assign(window, { __objectGroups: objectGroups })
 
 /** union bounding box of every object in the scene (world space) */
 export function sceneBounds(): THREE.Box3 | null {
@@ -118,6 +120,45 @@ function ObjectGizmo({
 
 function ignoreRaycast() {}
 
+function scenePlanTargetOf(object: THREE.Object3D): ScenePlanTarget | null {
+  const target = object.userData.scenePlanTarget as Partial<ScenePlanTarget> | undefined
+  if (!target || typeof target.kind !== 'string') return null
+  if (target.kind === 'room' && typeof target.roomKey === 'string') return { kind: 'room', roomKey: target.roomKey }
+  if (target.kind === 'wall' && typeof target.wallId === 'string') return { kind: 'wall', wallId: target.wallId }
+  if (target.kind === 'opening' && typeof target.openingId === 'string') return { kind: 'opening', openingId: target.openingId }
+  return null
+}
+
+function sameScenePlanTarget(a: ScenePlanTarget, b: ScenePlanTarget): boolean {
+  return a.kind === b.kind
+    && (a.kind !== 'room' || (b.kind === 'room' && a.roomKey === b.roomKey))
+    && (a.kind !== 'wall' || (b.kind === 'wall' && a.wallId === b.wallId))
+    && (a.kind !== 'opening' || (b.kind === 'opening' && a.openingId === b.openingId))
+}
+
+/** The selected semantic Plan part needs a visible cue, separate from object selection. */
+function ScenePlanTargetHalo({ root, target }: { root: React.RefObject<THREE.Group | null>; target: ScenePlanTarget }) {
+  const helper = useMemo(() => new THREE.Box3Helper(new THREE.Box3(), PATH_SELECTED_HALO), [])
+  useFrame(() => {
+    const group = root.current
+    if (!group) {
+      helper.visible = false
+      return
+    }
+    group.updateWorldMatrix(true, true)
+    helper.box.makeEmpty()
+    let found = false
+    group.traverse((child) => {
+      const candidate = scenePlanTargetOf(child)
+      if (!candidate || !sameScenePlanTarget(candidate, target)) return
+      helper.box.expandByObject(child)
+      found = true
+    })
+    helper.visible = found
+  })
+  return <primitive object={helper} raycast={ignoreRaycast} />
+}
+
 function ObjectSelectionHalo({ target }: { target: React.RefObject<THREE.Group | null> }) {
   const helper = useMemo(() => new THREE.BoxHelper(new THREE.Object3D(), PATH_SELECTED_HALO), [])
   useFrame(() => {
@@ -135,6 +176,8 @@ function ObjectSelectionHalo({ target }: { target: React.RefObject<THREE.Group |
 function ObjectNode({ object }: { object: SceneObject }) {
   const solidMode = useSolidSelectionStore((s) => s.mode)
   const objectContextActive = useEditorStore((s) => isObjectGizmoActive(s.selection, object.id))
+  const scenePlanEditing = useEditorStore((s) => s.scenePlanEdit?.objectId === object.id)
+  const scenePlanTarget = useEditorStore((s) => s.scenePlanEdit?.objectId === object.id ? s.scenePlanEdit.target : null)
   const selectedMember = useEditorStore((s) => s.selectionIds.includes(`obj:${object.id}`))
   const showPoseHandles = useEditorStore((s) => s.showPoseHandles)
   const dummyBone = useEditorStore((s) => (s.selection === `obj:${object.id}` ? s.dummyBone : null))
@@ -374,6 +417,12 @@ function ObjectNode({ object }: { object: SceneObject }) {
           ) {
             return
           }
+          if (editor.scenePlanEdit?.objectId === object.id && object.plan && editor.workspaceMode === 'build') {
+            e.stopPropagation()
+            pointerPickMember(`obj:${object.id}`, { additive: false })
+            editor.setScenePlanTarget(scenePlanTargetOf(e.object))
+            return
+          }
           if (useEditorStore.getState().lockedIds.includes(object.id)) {
             e.stopPropagation()
             pointerPickMember(`obj:${object.id}`, { additive: eventShiftHeld(e) })
@@ -431,6 +480,9 @@ function ObjectNode({ object }: { object: SceneObject }) {
       {chrome.outline && showSceneObjects && !objectHidden && (
         <ObjectSelectionHalo target={groupRef} />
       )}
+      {scenePlanEditing && scenePlanTarget && showSceneObjects && !objectHidden && (
+        <ScenePlanTargetHalo root={groupRef} target={scenePlanTarget} />
+      )}
       {objectContextActive && showPoseHandles &&
         object.rigKind === 'dummy' &&
         editing &&
@@ -470,7 +522,7 @@ function ObjectNode({ object }: { object: SceneObject }) {
             }}
           />
         )}
-      {objectContextActive && (!object.primitive || solidMode === 'body') && tool === 'select' && editing && !tech && !follow && !locked && !dummyBone && (
+      {objectContextActive && !scenePlanEditing && (!object.primitive || solidMode === 'body') && tool === 'select' && editing && !tech && !follow && !locked && !dummyBone && (
         <ObjectGizmo
           targetRef={groupRef}
           mode={gizmoMode}

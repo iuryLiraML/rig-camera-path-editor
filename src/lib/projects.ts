@@ -1,5 +1,6 @@
+import { reconstructionBufferKeys } from './bodyReconstruction'
 import { useProjectStore, type CustomSkill, type DirectorChatEntry, type SavedPrompt, type Shot, type ProjectSummary } from '../state/useProjectStore'
-import { useSceneStore, makeSceneId } from '../state/useSceneStore'
+import { useSceneStore, makeSceneId, makePrimitive } from '../state/useSceneStore'
 import { applyRigSnapshot, getRigSnapshot, useRigStore, type RigSnapshot } from '../state/useRigStore'
 import { CAMERA_PATH_ID, usePathStore, type MotionPath } from '../state/usePathStore'
 import { cameraAnchorCount } from '../state/cameraPathLink'
@@ -15,7 +16,8 @@ import {
 import { idbGet, idbGetAll, idbPut, idbUpdate, STORES } from './idb'
 import { CloudConflictError, isTeamCloudApp, listCloudProjects } from './cloud/client'
 import { deleteSyncedProject, hydrateCloudProject, syncActiveProjectToCloud, syncProjectToCloud } from './cloud/sync'
-import { liveSceneMetas, loadSceneFromMetas, readLegacyMetas, sweepOrphanBuffers, type ObjectMeta } from './sceneIO'
+import { liveSceneMetas, loadSceneFromMetas, readLegacyMetas, sweepOrphanBuffers, toMeta, type ObjectMeta } from './sceneIO'
+import { newTutorialProgressV2 } from './tutorial/tutorialProgress'
 import { hydrateEnvironmentFromRecord, loadLiveEnvironmentBuffer } from './environmentJobs'
 import type { ProjectEnvironment, ProjectMeshAsset } from './environment'
 import { cloneEnvTransform } from './environment'
@@ -772,20 +774,24 @@ export async function bootProjects() {
 /** Every buffer key referenced by any scene in any project, plus whatever the live stage holds right now. */
 export function liveBufferKeys(records: ProjectRecord[], liveMetas: ObjectMeta[]): Set<string> {
   const keys = new Set<string>()
+  const keep = (asset: { bufferKey: string | null; reconstruction?: import('./bodyReconstruction').BodyReconstruction }) => {
+    if (asset.bufferKey) keys.add(asset.bufferKey)
+    for (const key of reconstructionBufferKeys(asset.reconstruction)) keys.add(key)
+  }
   for (const record of records) {
-    record.scenes.forEach((scene) => scene.sceneMeta.forEach((m) => m.bufferKey && keys.add(m.bufferKey)))
+    record.scenes.forEach((scene) => scene.sceneMeta.forEach(keep))
     for (const environment of record.environments ?? []) {
       keys.add(environment.bufferKey)
       if (environment.sourceImageKey) keys.add(environment.sourceImageKey)
     }
-    for (const asset of record.unplacedAssets ?? []) keys.add(asset.bufferKey)
+    for (const asset of record.unplacedAssets ?? []) keep(asset)
   }
-  liveMetas.forEach((m) => m.bufferKey && keys.add(m.bufferKey))
+  liveMetas.forEach(keep)
   for (const environment of useEnvironmentStore.getState().environments) {
     keys.add(environment.bufferKey)
     if (environment.sourceImageKey) keys.add(environment.sourceImageKey)
   }
-  for (const asset of useEnvironmentStore.getState().unplacedAssets) keys.add(asset.bufferKey)
+  for (const asset of useEnvironmentStore.getState().unplacedAssets) keep(asset)
   for (const key of libraryBufferKeys()) keys.add(key)
   return keys
 }
@@ -1053,6 +1059,72 @@ export function createGuidedProject(draft: ProductionBreakdown, source: string, 
   })
 }
 
+/**
+ * Seed and open a dedicated guided-Tutorial project (issue #78). Mirrors
+ * `createGuidedProject`: one full record built in memory and written once, so no
+ * blank-session/autosave path can create a duplicate. The scene starts with a
+ * clay box + plane (no knot); progress lives in `workflow.tutorial`.
+ */
+export function startTutorial() {
+  return serializeProjectTransition(async () => {
+    await saveActiveProject({ createIfMissing: useSaveStatusStore.getState().status === 'dirty' })
+    const id = makeSceneId('proj')
+    const sceneId = makeSceneId('scene')
+    const now = Date.now()
+    const workflow = createLegacyProjectWorkflow('Tutorial')
+    const tutorial = newTutorialProgressV2(sceneId)
+    const tutorialRig = { ...makeEmptyRigSnapshot(), duration: 5, drawPlaneY: 0.1, pathId: CAMERA_PATH_ID }
+    const tutorialCamera = { id: 'tutorial-camera', name: 'Camera 1', rig: tutorialRig, pristine: true }
+    const floor = toMeta(makePrimitive('plane'))
+    const practiceCubeObject = makePrimitive('box')
+    practiceCubeObject.name = 'Practice Cube'
+    const practiceCube = toMeta(practiceCubeObject)
+    workflow.tutorial = {
+      ...tutorial,
+      currentActionId: 'intro.start',
+      artifacts: { practiceCubeId: practiceCube.id, cameraOptionId: tutorialCamera.id },
+      actions: {
+        'intro.result': {
+          status: 'confirmed',
+          evidence: { kind: 'preview-seen', sceneId, at: now },
+        },
+        'intro.start': {
+          status: 'practiced',
+          evidence: { kind: 'started-project', sceneId, subjectId: id, at: now },
+        },
+      },
+    }
+    const scene: SceneRecord = {
+      id: sceneId, name: 'Scene 1', order: 0, createdAt: now,
+      sceneMeta: [floor, practiceCube], rig: tutorialRig,
+      cameraOptions: [tutorialCamera], activeCameraOptionId: tutorialCamera.id,
+      paths: [{ id: CAMERA_PATH_ID, name: 'Camera Path', anchors: [], closed: false, rounding: 0.8 }],
+      shots: [], directorChat: [], directorLessons: [],
+    }
+    const record: ProjectRecord = {
+      id, name: 'Tutorial', createdAt: now, updatedAt: now,
+      contentRevision: crypto.randomUUID(), folderId: null, workflow,
+      guidelines: '', savedPrompts: [], skills: [],
+      activeSceneId: sceneId, scenes: [scene],
+    }
+    await enqueueProjectWrite(id, () => idbPut(STORES.projects, record))
+    createdAtById.set(id, now)
+    upsertProjectSummary(record)
+    resetEditorChrome()
+    const tutorialEditor = useEditorStore.getState()
+    tutorialEditor.setShowAddDrawer(false)
+    tutorialEditor.setShowOutliner(false)
+    tutorialEditor.setCameraPanel('closed')
+    await openHydratedRecord(record)
+    localStorage.setItem(ACTIVE_KEY, id)
+    resetHistory()
+    useSaveStatusStore.getState().setStatus('saved')
+    requestProjectSync(id)
+    useEditorStore.getState().setAppView('editor')
+    return id
+  })
+}
+
 export async function renameProject(projectId: string, name: string) {
   const next = name.trim() || 'Untitled'
   const store = useProjectStore.getState()
@@ -1230,7 +1302,17 @@ export async function goLibrary(signal?: AbortSignal) {
 }
 
 export async function goProjects(signal?: AbortSignal) {
-  return leaveEditorTo('projects', signal)
+  const saved = await leaveEditorTo('projects', signal)
+  if (saved) {
+    const { recordObservedTutorialAction } = await import('./tutorial/tutorialActions')
+    const project = useProjectStore.getState()
+    recordObservedTutorialAction('finish.return', {
+      kind: 'project-saved-and-returned',
+      sceneId: project.activeSceneId,
+      subjectId: project.projectId,
+    })
+  }
+  return saved
 }
 
 export async function listUnsyncedProjects(): Promise<{ id: string; name: string }[]> {

@@ -184,7 +184,13 @@ export async function approveFindRows(rows: FindRow[], image: Blob | null) {
         const url = lifted.glbUrls[i] ?? lifted.glbUrls[0]
         if (!url) continue
         const buffer = await downloadGlb(url, signal)
-        await parkUnplacedAsset({ buffer, name: people[i].name, rigKind: 'sam-person' })
+        await parkUnplacedAsset({
+          buffer,
+          name: people[i].name,
+          rigKind: 'sam-person',
+          reconstruction: lifted.reconstructions?.[i],
+          signal,
+        })
       }
     }
     for (const row of objects) {

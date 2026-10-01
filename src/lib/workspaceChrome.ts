@@ -54,6 +54,10 @@ export function editorChrome(input: {
   composeDock: ComposeDock
   showOutliner: boolean
   showAddDrawer: boolean
+  /** Keep the lesson canvas focused; its actions reveal tools when needed. */
+  tutorialActive?: boolean
+  /** Show the task-specific inspector during hands-on lessons, without Director chat. */
+  tutorialInspectorVisible?: boolean
   /** Defaults to a docked desktop tier when omitted, preserving old callers. */
   tier?: LayoutTier
 }): EditorChromeFlags {
@@ -75,8 +79,8 @@ export function editorChrome(input: {
         modeSwitcher: true,
         projectChip: true,
         outliner: input.showOutliner,
-        // Build's object tray stays open — Compose / Visualize are Director chat.
-        addDrawer: true,
+        // During a guided lesson, reveal the object tray only when an action opens it.
+        addDrawer: input.tutorialActive ? input.showAddDrawer : true,
         objectBar: true,
         timeline: false,
         sequence: false,
@@ -85,7 +89,7 @@ export function editorChrome(input: {
         cameraBar: false,
         addShot: false,
         visualizeRail: false,
-        directorDock: true,
+        directorDock: !input.tutorialActive || Boolean(input.tutorialInspectorVisible),
         footer: false,
         navLegend: true,
         pip: false,
@@ -110,7 +114,7 @@ export function editorChrome(input: {
         cameraBar: true,
         addShot: false,
         visualizeRail: false,
-        directorDock: true,
+        directorDock: !input.tutorialActive || Boolean(input.tutorialInspectorVisible),
         footer: true,
         navLegend: false,
         pip: true,
@@ -133,7 +137,7 @@ export function editorChrome(input: {
         cameraBar: false,
         addShot: false,
         visualizeRail: true,
-        directorDock: true,
+        directorDock: !input.tutorialActive || Boolean(input.tutorialInspectorVisible),
         footer: false,
         navLegend: false,
         pip: false,

@@ -1,4 +1,5 @@
 import { createProductionList, migrateProductionList, type ProductionList } from './productionWorkflow'
+import { migrateTutorialProgress, type TutorialProgress } from './tutorial/tutorialProgress'
 
 export const PROJECT_WORKFLOW_VERSION = 2 as const
 
@@ -149,6 +150,8 @@ export interface ProjectWorkflow {
   prd: PrdArtifact
   shotList: ShotListArtifact
   production: ProductionList
+  /** Guided Tutorial progress (issue #78). Present only on Tutorial projects. */
+  tutorial?: TutorialProgress
 }
 
 export type RequiredProjectAction =
@@ -551,6 +554,8 @@ export function migrateProjectWorkflow(value: unknown, projectName: string): Pro
     prd: prdArtifact(candidate.prd),
     shotList: shotListArtifact(candidate.shotList),
     production: migrateProductionList(candidate.production),
+    // Optional; undefined for every non-tutorial project (stays normal).
+    tutorial: migrateTutorialProgress(candidate.tutorial),
   }
 }
 

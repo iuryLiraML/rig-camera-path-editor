@@ -52,3 +52,42 @@ it('keeps numeric caret edits in one transaction and steps by one degree', () =>
   undo()
   expect(useSceneStore.getState().objects[0].bonePose).toBeUndefined()
 })
+
+it('explains that a SAM static mesh is not a poseable rig', async () => {
+  const THREE = await import('three')
+  const { makeObject } = await import('../state/useSceneStore')
+  const root = new THREE.Group()
+  root.add(new THREE.Mesh(new THREE.BoxGeometry()))
+  const object = makeObject('SAM person', root, { rigKind: 'sam-person' })
+  useSceneStore.setState({ objects: [object] })
+  const screen = render(<CharacterPosePanel objectId={object.id} />)
+  expect(screen.getByText('Static mesh')).toBeTruthy()
+  expect(screen.getByText(/Reconstruction data is unavailable/)).toBeTruthy()
+  expect(screen.queryByRole('slider')).toBeNull()
+  expect(screen.queryByRole('button', { name: 'Create editable rig' })).toBeNull()
+})
+
+it('distinguishes an imported skin from a supported humanoid without guessing a profile', () => {
+  const figure = useSceneStore.getState().objects[0]
+  delete figure.root.userData.dummyGltf
+  useSceneStore.setState({ objects: [{ ...figure, rigKind: 'sam-person' }] })
+  const screen = render(<CharacterPosePanel objectId={figure.id} />)
+  expect(screen.getByText('Skinned rig')).toBeTruthy()
+  expect(screen.queryByRole('slider')).toBeNull()
+})
+
+
+it('does not label malformed skin weights as an editable rig', async () => {
+  const THREE = await import('three')
+  const figure = useSceneStore.getState().objects[0]
+  figure.root.traverse((node) => {
+    if (node instanceof THREE.SkinnedMesh) node.geometry = node.geometry.clone()
+    if (node instanceof THREE.SkinnedMesh) node.geometry.getAttribute('skinWeight').setX(0, NaN)
+  })
+  delete figure.root.userData.dummyGltf
+  useSceneStore.setState({ objects: [{ ...figure, rigKind: 'sam-person' }] })
+  const screen = render(<CharacterPosePanel objectId={figure.id} />)
+  expect(screen.getByText('Static mesh')).toBeTruthy()
+  expect(screen.getByText(/invalid joint weights/)).toBeTruthy()
+  expect(screen.queryByRole('slider')).toBeNull()
+})

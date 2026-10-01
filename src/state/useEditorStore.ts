@@ -14,6 +14,7 @@ import { usePathStore, type AnchorRef } from './usePathStore'
 // action — never while this module is still evaluating.
 import { useSceneStore } from './useSceneStore'
 import type { RigChannel } from './useRigStore'
+import type { ScenePlanTarget } from '../lib/scenePlan'
 
 export type SelectedTimelineKey =
   | { kind: 'rig'; channel: RigChannel; id: string }
@@ -48,10 +49,11 @@ export type VisualizeMedia = 'still' | 'motion'
 export type RecordingKind = 'video' | 'still'
 /**
  * Phone shell: the single Task panel open in the bottom sheet at a time
- * (issue #66). `none` leaves the full-bleed canvas clear. Later tickets add
- * per-workspace surfaces (timeline, camera, review).
+ * (issue #66). `none` leaves the full-bleed canvas clear.
  */
-export type TaskPanel = 'none' | 'scene' | 'tools' | 'director'
+export type TaskPanel = 'none' | 'scene' | 'tools' | 'timeline' | 'director'
+/** Explicit structural-edit context for one scene-local Plan. */
+export type ScenePlanEdit = { objectId: string; target: ScenePlanTarget | null }
 
 export type SelectableId =
   | 'light'
@@ -79,6 +81,8 @@ interface EditorState {
   selection: SelectableId | null
   /** Ordered lasso members; session-only. `selection` remains the active member. */
   selectionIds: SelectionMemberId[]
+  /** A Scene Plan is structurally editable only after the user chooses Edit Plan. */
+  scenePlanEdit: ScenePlanEdit | null
   /** Dummy limb under FK pose (null = whole-object gizmo). */
   showPoseHandles: boolean
   setShowPoseHandles: (show: boolean) => void
@@ -148,6 +152,9 @@ interface EditorState {
   cameraPanel: CameraPanel
   /** Import Assets modal. */
   showImportModal: boolean
+  /** Export menu/flow is open. Lifted from the Toolbar so the Tutorial can open
+   *  it and detect that the export step was reached (issue #78). */
+  exportMenuOpen: boolean
   /** Object ids that refuse transform (Lock on the object bar). */
   lockedIds: string[]
   /** Outliner hide — scene objects, lights, targets, cameras and paths. */
@@ -211,6 +218,9 @@ interface EditorState {
   setTool: (tool: Tool) => void
   setProjection: (projection: Projection) => void
   select: (id: SelectableId | null) => void
+  startScenePlanEdit: (objectId: string) => void
+  setScenePlanTarget: (target: ScenePlanTarget | null) => void
+  stopScenePlanEdit: () => void
   selectMany: (ids: SelectionMemberId[], anchorRefs?: readonly AnchorRef[]) => void
   setDummyBone: (name: string | null) => void
   selectKeyframe: (key: SelectedTimelineKey | null) => void
@@ -246,6 +256,7 @@ interface EditorState {
   setObjectBarPanel: (panel: ObjectBarPanel) => void
   setCameraPanel: (panel: CameraPanel) => void
   setShowImportModal: (on: boolean) => void
+  setExportMenuOpen: (open: boolean) => void
   toggleLock: (id: string) => void
   toggleHidden: (id: string) => void
   setVisualizeMedia: (media: VisualizeMedia) => void
@@ -287,6 +298,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   projection: 'perspective',
   selection: null,
   selectionIds: [],
+  scenePlanEdit: null,
   showPoseHandles: false,
   setShowPoseHandles: (showPoseHandles) => set({ showPoseHandles }),
   dummyBone: null,
@@ -313,6 +325,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   objectBarPanel: 'none',
   cameraPanel: 'closed',
   showImportModal: false,
+  exportMenuOpen: false,
   lockedIds: [],
   hiddenIds: [],
   visualizeMedia: 'still',
@@ -411,6 +424,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set((s) => ({
       selection,
       selectionIds,
+      scenePlanEdit: selection === `obj:${s.scenePlanEdit?.objectId}` ? s.scenePlanEdit : null,
       dummyBone: selection && s.selection === selection ? s.dummyBone : null,
       selectedKeyframe: null,
       cameraPanel:
@@ -422,6 +436,18 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     // spline-point set, otherwise W/E/R stays glued to the last anchors.
     if (selection !== 'camera-path') usePathStore.getState().selectAnchor(null)
   },
+  startScenePlanEdit: (objectId) =>
+    set({
+      workspaceMode: 'build',
+      tool: 'select',
+      selection: `obj:${objectId}`,
+      selectionIds: [`obj:${objectId}`],
+      scenePlanEdit: { objectId, target: null },
+      showAddDrawer: false,
+      activeTaskPanel: 'director',
+    }),
+  setScenePlanTarget: (target) => set((s) => s.scenePlanEdit ? { scenePlanEdit: { ...s.scenePlanEdit, target } } : {}),
+  stopScenePlanEdit: () => set({ scenePlanEdit: null }),
   selectMany: (ids, anchorRefs = []) => {
     const selectionIds = [...new Set(ids)]
     const active = selectionIds.at(-1) ?? null
@@ -500,7 +526,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       return
     }
     // Leaving the floor-plan editor drops the open plan's identity.
-    if (appView !== 'plan') set({ appView, planId: null })
+    if (appView !== 'plan') set({ appView, planId: null, scenePlanEdit: appView === 'editor' ? get().scenePlanEdit : null })
     else set({ appView })
   },
   setPlanId: (planId) => set({ planId }),
@@ -509,6 +535,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
       resetOrbitLock()
       return {
         workspaceMode,
+        scenePlanEdit: workspaceMode === 'build' ? s.scenePlanEdit : null,
         ...(workspaceMode !== 'compose' && s.cameraView
           ? { cameraView: false, flyRecording: false, lookThroughLivePose: false }
           : {}),
@@ -544,6 +571,7 @@ export const useEditorStore = create<EditorState>((set, get) => ({
     set({ cameraPanel })
   },
   setShowImportModal: (showImportModal) => set({ showImportModal }),
+  setExportMenuOpen: (exportMenuOpen) => set({ exportMenuOpen }),
   toggleLock: (id) =>
     set((s) => ({
       lockedIds: s.lockedIds.includes(id)

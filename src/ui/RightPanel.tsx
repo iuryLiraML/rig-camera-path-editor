@@ -38,7 +38,6 @@ import {
 import { easeGroups, easeDef, type EaseKind } from '../lib/easing'
 import { exportDimensions } from '../lib/recorder'
 import { applyCameraPreset, PRESETS } from '../lib/presets'
-import { animateSelectedPerson } from '../lib/animatePerson'
 import {
   applyDummyBonePose,
 } from '../lib/dummyCharacter'
@@ -462,16 +461,9 @@ function ObjectSections({ objectId }: { objectId: string }) {
               />
             </Row>
           )}
-          {object.rigKind === 'sam-person' && (
-            <PanelButton
-              label="Animate"
-              title="Rig this person with Meshy Idle / Walk / Run"
-              onClick={() => void animateSelectedPerson(object.id)}
-            />
-          )}
         </Section>
       )}
-      {object.rigKind === 'dummy' && <CharacterPosePanel key={object.id} objectId={object.id} />}
+      <CharacterPosePanel key={object.id} objectId={object.id} />
       <FollowSection objectId={object.id} />
       {object.primitive && (
         <Section title="Shape">
@@ -722,7 +714,9 @@ export function PathSections() {
           <Slider value={rounding} onChange={path.setRounding} format={pct} />
         </Row>
         <Row label="Height">
-          <Slider value={pathHeight} onChange={path.setPathHeight} min={-10} max={10} step={0.1} format={meters} />
+          <div data-tour="path-height">
+            <Slider value={pathHeight} onChange={path.setPathHeight} min={-10} max={10} step={0.1} format={meters} />
+          </div>
         </Row>
         <Row label="Closed">
           <Segmented
@@ -967,6 +961,7 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
           )}
         </Section>
       )}
+      <div data-tour="camera-target">
       <Section title="Look">
         <Row label="Mode">
           <Segmented
@@ -1031,30 +1026,33 @@ export function CinemaCameraSections({ pane = 'all' }: { pane?: 'all' | 'adjust'
           <Vec3GroupFields group="target" values={targetNow} />
         )}
       </Section>
+      </div>
       <Section title="Lens">
-        <Row label="FOV">
-          <div className="flex items-center gap-2">
-            <Slider
-              value={fovNow}
-              keyed={hasKeyAtTime(fovKeys, t)}
-              onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'fov' : null)}
-              onChange={(v) => writeFov(v)}
-              min={15}
-              max={120}
-              step={1}
-              format={deg}
-            />
-            <KeyButton
-              active={fovKeys.length > 0}
-              onKey={hasKeyAtTime(fovKeys, t)}
-              onClick={() => {
-                const state = useRigStore.getState()
-                state.setPlaying(false)
-                state.upsertChannelKey('fov', state.t, fovNow)
-              }}
-            />
-          </div>
-        </Row>
+        <div data-tour="camera-fov">
+          <Row label="FOV">
+            <div className="flex items-center gap-2">
+              <Slider
+                value={fovNow}
+                keyed={hasKeyAtTime(fovKeys, t)}
+                onFocusChange={(on) => useEditorStore.getState().setKeyableFocus(on ? 'fov' : null)}
+                onChange={(v) => writeFov(v)}
+                min={15}
+                max={120}
+                step={1}
+                format={deg}
+              />
+              <KeyButton
+                active={fovKeys.length > 0}
+                onKey={hasKeyAtTime(fovKeys, t)}
+                onClick={() => {
+                  const state = useRigStore.getState()
+                  state.setPlaying(false)
+                  state.upsertChannelKey('fov', state.t, fovNow)
+                }}
+              />
+            </div>
+          </Row>
+        </div>
         <ChannelKeys
           channel="fov"
           keys={fovKeys}
@@ -1428,7 +1426,7 @@ function TargetSections() {
   )
   const targetNow = evalSeparatedVec3(t, targetXKeys, targetYKeys, targetZKeys, target, ease)
   return (
-    <Section title="Look-At Target">
+    <div data-tour="camera-target"><Section title="Look-At Target">
       <TrackObjectRow />
       {tracking ? (
         <>
@@ -1440,7 +1438,7 @@ function TargetSections() {
       ) : (
         <Vec3GroupFields group="target" values={targetNow} />
       )}
-    </Section>
+    </Section></div>
   )
 }
 

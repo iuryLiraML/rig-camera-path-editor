@@ -50,6 +50,23 @@ describe('viewportInsets', () => {
     expect(insets.bottom).toBe(GUTTER)
   })
 
+  it('budgets the lesson card against only the panels currently shown', () => {
+    const focused = viewportInsets('build', WINDOW, false, 900, 240, {
+      directorVisible: false,
+      addDrawerVisible: false,
+    })
+    expect(focused.rightWidth).toBe(0)
+    expect(focused.right).toBe(WINDOW - GUTTER)
+    expect(focused.contentBottom).toBe(GUTTER * 2)
+
+    const figureStep = viewportInsets('build', WINDOW, false, 900, 240, {
+      directorVisible: false,
+      addDrawerVisible: true,
+    })
+    expect(figureStep.rightWidth).toBe(0)
+    expect(figureStep.contentBottom).toBe(GUTTER * 2 + ADD_DRAWER_HEIGHT + GUTTER)
+  })
+
   it('Build reserves the outliner when it is open', () => {
     const insets = viewportInsets('build', WINDOW, false, 900, 240, { showOutliner: true })
     expect(insets.leftWidth).toBe(LEFT_PANEL_MAX)

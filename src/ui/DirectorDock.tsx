@@ -10,9 +10,11 @@ import { SkillsManager } from './SkillsManager'
 import { ImportIcon, ImageIcon } from './icons'
 import { TransformPopover, EnvironmentTransformPopover } from './TransformPopover'
 import { ObjectShapeSection } from './ObjectShapeSection'
+import { ScenePlanInspector } from './ScenePlanInspector'
 import { PathSections } from './RightPanel'
 import { CameraAdjustPanel } from './CameraAdjustPanel'
 import { directorDockSlot, GUTTER, useChromeLayout, useViewportInsets, useWindowSize, type PanelVariant } from './viewportInsets'
+import { isTutorialProgressV2 } from '../lib/tutorial/tutorialProgress'
 
 function ToolChip({ name }: { name: string }) {
   return (
@@ -40,6 +42,7 @@ function DirectorInspector() {
       <>
         <div className="p-2"><CharacterPosePanel key={objectId} objectId={objectId} /></div>
         <TransformPopover objectId={objectId} embedded />
+        <ScenePlanInspector objectId={objectId} />
         <ObjectShapeSection objectId={objectId} />
       </>
     )
@@ -77,7 +80,15 @@ export function DirectorDock({ variant = 'rail' }: { variant?: PanelVariant } = 
   const liftPhotoName = useAgentStore((s) => s.liftPhotoName)
   const visualizeMedia = useEditorStore((s) => s.visualizeMedia)
   const workspaceMode = useEditorStore((s) => s.workspaceMode)
+  const selection = useEditorStore((s) => s.selection)
   const cameraPanel = useEditorStore(s => s.cameraPanel)
+  const tutorialInspectorAction = useProjectStore((s) => {
+    const t = s.workflow.tutorial
+    return isTutorialProgressV2(t) && t.active && !t.done
+      && ['room.scene-edit', 'figure.pose', 'camera.height', 'camera.frame', 'timing.lens'].includes(t.currentActionId)
+      ? t.currentActionId
+      : null
+  })
   const editingCamera = workspaceMode === 'compose' && cameraPanel !== 'closed'
   const editingPoint = usePathStore(s => s.selectedAnchorId !== null) && workspaceMode === 'compose'
   const insets = useViewportInsets()
@@ -119,6 +130,47 @@ export function DirectorDock({ variant = 'rail' }: { variant?: PanelVariant } = 
         ? `${text}\n\nDeliver a camera move I can export as MP4.`
         : text
     void useAgentStore.getState().sendMessage(body, image ?? undefined)
+  }
+
+  if (tutorialInspectorAction) {
+    const objectId = selection?.startsWith('obj:') ? selection.slice(4) : null
+    const title = tutorialInspectorAction === 'room.scene-edit'
+      ? 'Scene Plan'
+      : tutorialInspectorAction === 'figure.pose'
+      ? 'Figure pose'
+      : tutorialInspectorAction === 'camera.height'
+        ? 'Path height'
+        : tutorialInspectorAction === 'camera.frame'
+          ? 'Camera framing'
+          : 'Camera lens'
+    const inspector = tutorialInspectorAction === 'room.scene-edit'
+      ? objectId
+        ? <ScenePlanInspector key={objectId} objectId={objectId} />
+        : <p className="text-[11px] text-ink-dim">Select the lesson Scene Plan to edit its walls, room, doors, or windows.</p>
+      : tutorialInspectorAction === 'figure.pose'
+      ? objectId
+        ? <CharacterPosePanel key={objectId} objectId={objectId} />
+        : <p className="text-[11px] text-ink-dim">Select the lesson Figure to edit its pose.</p>
+      : tutorialInspectorAction === 'camera.height'
+        ? <DirectorInspector />
+        : <CameraAdjustPanel />
+    return (
+      <section
+        aria-label={`${title} inspector`}
+        className={sheet ? 'flex h-full min-h-0 flex-col overflow-hidden' : 'panel absolute z-30 flex min-h-0 flex-col overflow-hidden'}
+        style={sheet ? undefined : {
+          right: dock.right,
+          width: dock.width,
+          top: insets.top,
+          bottom: insets.dockBottom,
+        }}
+      >
+        {!sheet && <div className="flex shrink-0 items-center border-b border-line/60 px-3 py-2 text-[11px] font-medium text-ink">{title}</div>}
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {inspector}
+        </div>
+      </section>
+    )
   }
 
   return (

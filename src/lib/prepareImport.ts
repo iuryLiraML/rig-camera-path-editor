@@ -89,10 +89,9 @@ export function repairImportedShading(root: THREE.Object3D) {
     child.geometry.computeBoundingSphere()
     child.castShadow = true
     child.receiveShadow = true
-    child.raycast = THREE.Mesh.prototype.raycast
+    child.raycast = child instanceof THREE.SkinnedMesh ? THREE.SkinnedMesh.prototype.raycast : THREE.Mesh.prototype.raycast
     if (child instanceof THREE.SkinnedMesh) {
       child.frustumCulled = false
-      child.skeleton?.pose()
       child.updateMatrixWorld(true)
       child.computeBoundingBox()
     }

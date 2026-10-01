@@ -63,7 +63,10 @@ export function TransformPopover({ objectId, embedded = false }: { objectId: str
           </button>
         )}
       </div>
-      <Row label="Position" keyframe={<PoseKeyButton objectId={objectId} channel="position" />}>
+      <Row
+        label="Position"
+        keyframe={<PoseKeyButton objectId={objectId} channel="position" touchTarget={embedded} />}
+      >
         <XYZInput
           value={live.position}
           keyed={hasObjectChannelKeyAtTime(object.keys, 'position', t)}
@@ -71,7 +74,10 @@ export function TransformPopover({ objectId, embedded = false }: { objectId: str
           onChange={(axis, value) => setAxis('position', axis, value)}
         />
       </Row>
-      <Row label="Rotation" keyframe={<PoseKeyButton objectId={objectId} channel="rotation" />}>
+      <Row
+        label="Rotation"
+        keyframe={<PoseKeyButton objectId={objectId} channel="rotation" touchTarget={embedded} />}
+      >
         <XYZInput
           value={live.rotation}
           step={1}
@@ -92,7 +98,7 @@ export function TransformPopover({ objectId, embedded = false }: { objectId: str
             <LinkIcon size={12} />
           </button>
         }
-        keyframe={<PoseKeyButton objectId={objectId} channel="scale" />}
+        keyframe={<PoseKeyButton objectId={objectId} channel="scale" touchTarget={embedded} />}
       >
         <XYZInput
           value={live.scale}

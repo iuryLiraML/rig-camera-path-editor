@@ -58,6 +58,7 @@ import {
   AUTOSAVE_MS,
   bootProjects,
   createProject,
+  startTutorial,
   switchProject,
   flushActiveProject,
   installPersistFlush,
@@ -77,6 +78,7 @@ import {
 import { idbGet, idbGetAll, idbPut, STORES } from './idb'
 import { syncProjectToCloud } from './cloud/sync'
 import { makeEmptyRigSnapshot } from '../state/useCameraOptionsStore'
+import { isTutorialProgressV2 } from './tutorial/tutorialProgress'
 
 beforeEach(() => {
   memory.clear()
@@ -167,6 +169,31 @@ describe('saveActiveProject', () => {
     expect(useProjectStore.getState().projectId).toBe('proj-keep')
     expect(memory.get('proj-keep')?.name).toBe('Keep')
     expect([...memory.keys()]).toEqual(['proj-keep'])
+  })
+})
+
+describe('startTutorial', () => {
+  it('creates one isolated v2 lesson with a bound practice cube and no authored answer', async () => {
+    const id = await startTutorial()
+    const record = await idbGet<ProjectRecord>(STORES.projects, id)
+    const tutorial = record?.workflow?.tutorial
+
+    expect(memory.size).toBe(1)
+    expect(record?.scenes).toHaveLength(1)
+    expect(record?.activeSceneId).toBe(tutorial?.version === 2 ? tutorial.sceneId : '')
+    expect(tutorial).toMatchObject({ version: 2, currentActionId: 'intro.start' })
+    expect(isTutorialProgressV2(tutorial) && tutorial.actions['intro.result']?.status).toBe('confirmed')
+    expect(isTutorialProgressV2(tutorial) && tutorial.artifacts.practiceCubeId).toBeTruthy()
+    expect(isTutorialProgressV2(tutorial) && tutorial.actions['intro.start']?.status).toBe('practiced')
+    expect(isTutorialProgressV2(tutorial) && tutorial.artifacts.cameraOptionId).toBe('tutorial-camera')
+    expect(record?.scenes[0].sceneMeta.map((object) => object.name)).toContain('Practice Cube')
+    expect(record?.scenes[0].sceneMeta.some((object) => object.plan || object.rigKind === 'dummy')).toBe(false)
+    expect(record?.scenes[0].paths?.[0].anchors).toEqual([])
+    expect(record?.scenes[0].cameraOptions?.[0]?.name).toBe('Camera 1')
+    expect(record?.scenes[0].rig.duration).toBe(5)
+    expect(record?.scenes[0].rig.drawPlaneY).toBe(0.1)
+    expect(useProjectStore.getState().projectId).toBe(id)
+    expect(useEditorStore.getState().appView).toBe('editor')
   })
 })
 

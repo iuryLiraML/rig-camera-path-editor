@@ -19,6 +19,9 @@ import {
 import { CAMERA_PATH_ID, makeAnchor, usePathStore } from '../state/usePathStore'
 import { useRigStore } from '../state/useRigStore'
 import { writeStaticPose } from './autoKey'
+import { planActions, planFromJSON, planToJSON } from './floorPlanModel'
+import { updateScenePlanWall } from './scenePlan'
+import { makePlanObject } from '../state/useSceneStore'
 
 describe('camera pose history', () => {
   it('undoes and redoes a Free camera gesture without animation keys', () => {
@@ -141,6 +144,29 @@ describe('history suspend', () => {
     expect(useSceneStore.getState().bgColor).toBe('#222222')
     expect(undo()).toBe(true)
     expect(useSceneStore.getState().bgColor).toBe(before)
+  })
+})
+
+describe('history vs Scene Plans', () => {
+  it('undoes a whole live slider gesture as one local Plan change', () => {
+    const plan = planFromJSON({ walls: [], openings: [] })
+    planActions.stampRectangle(plan, { x: 0, y: 0 }, { x: 4, y: 4 })
+    const object = makePlanObject('Room', planToJSON(plan), { id: 'scene-plan' })
+    useSceneStore.setState({ objects: [object] })
+    resetHistory()
+    const wallId = plan.walls[0]!.id
+
+    const finish = beginHistoryTransaction()
+    useSceneStore.getState().setScenePlan(object.id, updateScenePlanWall(object.plan!, wallId, { height: 2.8 }).plan)
+    const live = useSceneStore.getState().objects[0]!
+    useSceneStore.getState().setScenePlan(live.id, updateScenePlanWall(live.plan!, wallId, { height: 3.2 }).plan)
+    finish()
+
+    expect(planFromJSON(useSceneStore.getState().objects[0]!.plan!).walls[0]!.height).toBe(3.2)
+    expect(undo()).toBe(true)
+    expect(planFromJSON(useSceneStore.getState().objects[0]!.plan!).walls[0]!.height).toBe(2.4)
+    expect(redo()).toBe(true)
+    expect(planFromJSON(useSceneStore.getState().objects[0]!.plan!).walls[0]!.height).toBe(3.2)
   })
 })
 

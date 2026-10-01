@@ -6,6 +6,7 @@ import {
   planRooms,
   planExtrude,
   planArea,
+  hitTest,
   wallLength,
   type PlanState,
 } from './floorPlanModel'
@@ -53,6 +54,18 @@ describe('floorPlanModel: corner dragging and the trapezoid (SC-002, SC-003)', (
     expect(planArea(s.walls)).toBeCloseTo(24, 3)
     planActions.undo(s)
     expect(planArea(s.walls)).toBeCloseTo(20, 3)
+  })
+})
+
+describe('floorPlanModel: configurable touch hit areas', () => {
+  it('keeps precise desktop hits while allowing a wider touch target at phone scale', () => {
+    const s = createPlan()
+    shell(s, 4, 4)
+    const point = { x: 4.4, y: 4 }
+    expect(hitTest(s, point)).toMatchObject({ kind: 'wall' })
+    expect(hitTest(s, point, { vertex: 1.6, wall: 1.6 })).toMatchObject({
+      kind: 'vertex', vertex: { x: 4, y: 4 },
+    })
   })
 })
 

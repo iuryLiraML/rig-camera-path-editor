@@ -176,6 +176,7 @@ export interface SceneObject {
   /** True after a remesh GLB replaced the dense source — never restore as a cube. */
   remeshed?: boolean
   rigKind?: import('../lib/environment').RigKind
+  reconstruction?: import('../lib/bodyReconstruction').BodyReconstruction
   /** Scene-block clay: load the GLB, never the remesh cube. */
   keepDenseMesh?: boolean
   /** SAM 3.0 textured GLB — Clay mode can still gray it. */
@@ -243,7 +244,7 @@ export function makeObject(
   options: Partial<
     Pick<
       SceneObject,
-      'id' | 'shade' | 'clayColor' | 'bufferKey' | 'sourceFormat' | 'modelFormat' | 'primitive' | 'plan' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'remeshed' | 'rigKind' | 'keepDenseMesh' | 'keepTexture' | 'keepPoints' | 'bonePose' | 'boneTranslate' | 'figureSex' | 'displayMode'
+      'id' | 'shade' | 'clayColor' | 'bufferKey' | 'sourceFormat' | 'modelFormat' | 'primitive' | 'plan' | 'transform' | 'keys' | 'clips' | 'playClips' | 'activeClip' | 'follow' | 'triangleCount' | 'remeshed' | 'rigKind' | 'reconstruction' | 'keepDenseMesh' | 'keepTexture' | 'keepPoints' | 'bonePose' | 'boneTranslate' | 'figureSex' | 'displayMode'
     >
   > = {},
 ): SceneObject {
@@ -272,6 +273,7 @@ export function makeObject(
     follow: options.follow,
     triangleCount: options.triangleCount ?? countRenderedTriangles(root),
     remeshed: options.remeshed,
+    reconstruction: options.reconstruction,
     rigKind: options.rigKind ?? 'none',
     keepDenseMesh: options.keepDenseMesh,
     keepTexture: options.keepTexture,
@@ -376,6 +378,8 @@ interface SceneState {
   ) => void
   addPrimitive: (kind: PrimitiveKind) => void
   updatePrimitiveParams: (id: string, params: Record<string, number>) => void
+  /** Rebuild a Scene Plan from its local wall graph without touching Library. */
+  setScenePlan: (id: string, plan: StoredPlan) => void
   appendPrimitiveOp: (id: string, op: CadOp) => void
   removeLastPrimitiveOp: (id: string) => void
   removeObject: (id: string) => void
@@ -440,6 +444,7 @@ interface SceneState {
       figureSex?: 'female' | 'male'
       activeClip?: string
       displayMode?: AssetDisplayMode
+      plan?: StoredPlan
     }[],
   ) => void
   setBgColor: (hex: string) => void
@@ -515,6 +520,17 @@ export const useSceneStore = create<SceneState>()(
         updatePrimitiveParams: (id, params) =>
           updateObject(id, (o) => o.primitive ? rebuildPrimitive(o, { ...o.primitive, params: { ...o.primitive.params, ...params } }) : {}),
 
+        setScenePlan: (id, plan) =>
+          updateObject(id, (object) => {
+            if (!object.plan) return {}
+            const stored = structuredClone(plan)
+            const root = buildPlanGroup(stored, { wall: object.material, floor: object.material })
+            const sourceMaterials = captureSourceMaterials(root)
+            const next = { ...object, root, plan: stored, sourceMaterials }
+            applyAssetDisplay(next, useEditorStore.getState().viewMode)
+            return { root, plan: stored, sourceMaterials, triangleCount: countRenderedTriangles(root) }
+          }),
+
         appendPrimitiveOp: (id, op) =>
           updateObject(id, (o) => {
             if (!o.primitive || o.rigKind === 'dummy') throw new Error('Select an existing primitive solid.')
@@ -558,6 +574,7 @@ export const useSceneStore = create<SceneState>()(
               sourceFormat: src.sourceFormat,
               follow: src.follow ? { ...src.follow } : undefined,
               rigKind: src.rigKind,
+              reconstruction: src.reconstruction ? structuredClone(src.reconstruction) : undefined,
               remeshed: src.remeshed,
               keepDenseMesh: src.keepDenseMesh,
               keepTexture: src.keepTexture,
@@ -570,7 +587,9 @@ export const useSceneStore = create<SceneState>()(
             }
             // rebuild primitives from their spec; clone meshes for GLBs
             let copy: SceneObject
-            if (src.primitive) {
+            if (src.plan) {
+              copy = makePlanObject(`${src.name} copy`, src.plan, common)
+            } else if (src.primitive) {
               copy = makePrimitive(src.primitive.kind, { ...common, primitive: src.primitive })
             } else {
               const clonedRoot = SkeletonUtils.clone(src.root)
@@ -796,6 +815,12 @@ export const useSceneStore = create<SceneState>()(
                 figureSex: snap.figureSex ?? base.figureSex,
                 activeClip: 'activeClip' in snap ? snap.activeClip : base.activeClip,
                 displayMode: snap.displayMode ?? 'solid',
+                plan: snap.plan ? structuredClone(snap.plan) : base.plan,
+              }
+              if (restored.plan && JSON.stringify(restored.plan) !== JSON.stringify(base.plan)) {
+                restored.root = buildPlanGroup(restored.plan, { wall: base.material, floor: base.material })
+                restored.sourceMaterials = captureSourceMaterials(restored.root)
+                restored.triangleCount = countRenderedTriangles(restored.root)
               }
               applyAssetDisplay(restored, useEditorStore.getState().viewMode)
               next.push(restored)

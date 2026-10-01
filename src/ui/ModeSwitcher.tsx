@@ -12,12 +12,13 @@ export function ModeSwitcher() {
   const setMode = useEditorStore((s) => s.setWorkspaceMode)
 
   return (
-    <div className="panel flex shrink-0 items-center gap-0.5 px-1 py-1">
+    <div data-tour="mode-switcher" className="panel flex shrink-0 items-center gap-0.5 px-1 py-1">
       {MODES.map((option) => {
         const active = mode === option.value
         return (
           <button
             key={option.value}
+            data-tour={`mode-${option.value}`}
             type="button"
             title={option.title}
             onClick={() => startTransition(() => setMode(option.value))}

@@ -1,4 +1,6 @@
 import * as THREE from 'three'
+import { readFileSync } from 'node:fs'
+import { parseGlbBuffer } from './sceneIO'
 import { describe, expect, it } from 'vitest'
 import { boundsAreUsable, meshWorldBounds, prepareImportedRoot, repairImportedShading } from './prepareImport'
 import { normalizeModel } from '../state/useSceneStore'
@@ -104,4 +106,22 @@ describe('normalizeModel', () => {
     const maxDim = Math.max(size.x, size.y, size.z)
     expect(maxDim).toBeCloseTo(2, 1)
   })
+})
+
+
+it('preserves authored skeletal pose and skinning when repairing an imported GLB', async () => {
+  const bytes = new Uint8Array(readFileSync('public/dummy/Male.glb')).buffer
+  const { scene } = await parseGlbBuffer(bytes)
+  let mesh: THREE.SkinnedMesh | undefined
+  scene.traverse((node) => { if (node instanceof THREE.SkinnedMesh) mesh = node })
+  expect(mesh).toBeDefined()
+  const bone = mesh!.skeleton.bones.find((joint) => joint.children.some((child) => child instanceof THREE.Bone))!
+  bone.rotateZ(0.5)
+  scene.updateMatrixWorld(true)
+  const authored = bone.quaternion.clone()
+  const before = mesh!.getVertexPosition(0, new THREE.Vector3())
+  prepareImportedRoot(scene)
+  expect(bone.quaternion.toArray()).toEqual(authored.toArray())
+  expect(mesh!.getVertexPosition(0, new THREE.Vector3()).distanceTo(before)).toBeLessThan(1e-7)
+  expect(mesh!.raycast).toBe(THREE.SkinnedMesh.prototype.raycast)
 })

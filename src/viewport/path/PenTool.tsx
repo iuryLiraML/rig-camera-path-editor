@@ -24,6 +24,7 @@ import { pickBezier, viewDragPlane, type BezierHit } from '../../lib/bezierPicki
 import { moveBezierSegment, type HandleSide } from '../../lib/bezierEditing'
 import { computeAutoHandles } from '../../lib/curve'
 import { beginHistoryTransaction } from '../../lib/history'
+import { finishPen } from '../../lib/finishPen'
 import { lockOrbit, unlockOrbit } from '../../lib/orbitLock'
 import { followActivePathIfFree } from '../../state/cameraPathLink'
 import { objectGroups } from '../SceneObjects'
@@ -486,11 +487,4 @@ function PenGhost({ preview }: { preview: Preview }) {
   )
 }
 
-/** Finish drawing: close the loop if asked, then go back to select. */
-export function finishPen(close = false) {
-  const path = usePathStore.getState()
-  const active = path.getPath(path.activePathId)
-  if (close && (active?.anchors.length ?? 0) > 2) path.setClosed(true)
-  useEditorStore.getState().setTool('select')
-  useEditorStore.getState().select('camera-path')
-}
+export { finishPen }

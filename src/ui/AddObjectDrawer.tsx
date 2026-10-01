@@ -25,7 +25,7 @@ import { assetThumbKind, clayThumbForBuffer, type AssetThumbKind } from '../lib/
 import type { ProjectMeshAsset } from '../lib/environment'
 import { ClapperIcon, CubeIcon, FrameIcon, GlobeIcon, ImportIcon, PersonIcon, SearchIcon, WandIcon } from './icons'
 import { FigurePreview, PrimitivePreview } from './PrimitivePreview'
-import { ADD_DRAWER_HEIGHT, GUTTER, directorDockSlot, useViewportInsets } from './viewportInsets'
+import { ADD_DRAWER_HEIGHT, GUTTER, directorDockSlot, useViewportInsets, type PanelVariant } from './viewportInsets'
 import {
   approveFindRows,
   detectObjectRows,
@@ -44,7 +44,7 @@ function isStillImage(file: File) {
   return /\.(jpe?g|png|webp)$/i.test(file.name)
 }
 
-export function AddObjectDrawer() {
+export function AddObjectDrawer({ variant = 'rail' }: { variant?: PanelVariant } = {}) {
   const objects = useSceneStore((s) => s.objects)
   const unplaced = useEnvironmentStore((s) => s.unplacedAssets)
   const environments = useEnvironmentStore((s) => s.environments)
@@ -74,8 +74,8 @@ export function AddObjectDrawer() {
   return (
     <>
     <div
-      className="panel absolute z-30 flex flex-col overflow-hidden"
-      style={{
+      className={variant === 'sheet' ? 'flex h-full min-h-0 w-full flex-col overflow-hidden' : 'panel absolute z-30 flex flex-col overflow-hidden'}
+      style={variant === 'sheet' ? undefined : {
         left: insets.left,
         right: dock.right + dock.width + GUTTER,
         bottom: insets.bottom + GUTTER,
@@ -103,7 +103,7 @@ export function AddObjectDrawer() {
           />
         </div>
       </div>
-      <div className="flex gap-1 px-3 pt-2">
+      <div className={`flex gap-1 px-3 pt-2 ${variant === 'sheet' ? 'shrink-0 overflow-x-auto' : ''}`}>
         {(
           [
             { id: 'figures', label: 'Figures' },
@@ -116,6 +116,7 @@ export function AddObjectDrawer() {
           <button
             key={item.id}
             type="button"
+            data-tour={item.id === 'figures' ? 'figures-drawer' : undefined}
             onClick={() => {
               if (item.id !== chip) setGenerateMode('pick')
               useEditorStore.getState().setAddDrawerChip(item.id)

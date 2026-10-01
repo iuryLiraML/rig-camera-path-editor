@@ -1,3 +1,5 @@
+import { instantiateUnplaced } from './environmentJobs'
+import { liveBufferKeys } from './projects'
 import * as THREE from 'three'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { setServerKeysForTests } from './agent/serverKeys'
@@ -26,6 +28,7 @@ import {
   isRemeshPlaceholder,
   makeRemeshPlaceholderRoot,
   objectFromStoredBuffer,
+  toMeta,
   undoLastMeshRevision,
 } from './sceneIO'
 import { makeObject, objectGraveyard, useSceneStore } from '../state/useSceneStore'
@@ -786,7 +789,7 @@ describe('generateSamBody', () => {
     setFalTransportForTests({
       subscribe: async (modelId, input) => {
         calls.push({ modelId, input })
-        return { model_glb: { url: 'https://body.glb' } }
+        return { model_glb: { url: 'https://body.glb' }, visualization: { url: 'https://diagnostic.png' }, metadata: { num_people: 1, people: [{ person_id: 0, body_pose_params: [[0, 0, 0]], future_field: 'retain' }] } }
       },
       upload: async () => 'https://photo.jpg',
     })
@@ -795,6 +798,8 @@ describe('generateSamBody', () => {
       if (String(input) === 'https://body.glb') {
         return new Response(new Uint8Array(encodeTriangleGlb(1)), { status: 200 })
       }
+      if (String(input) === 'https://photo.jpg') return new Response(new Uint8Array([1]))
+      if (String(input) === 'https://diagnostic.png') return new Response(new Uint8Array([9, 8, 7]))
       throw new Error(`unexpected fetch ${String(input)}`)
     }) as typeof fetch
     try {
@@ -802,10 +807,28 @@ describe('generateSamBody', () => {
       expect(calls).toHaveLength(1)
       expect(calls[0]?.modelId).toBe(SAM_3D_BODY)
       expect(calls[0]?.input).not.toHaveProperty('mask_url')
+      expect(calls[0]?.input.include_mhr_params).toBe(true)
       const shelf = useEnvironmentStore.getState().unplacedAssets
       expect(shelf).toHaveLength(1)
       expect(shelf[0]?.rigKind).toBe('sam-person')
       expect(shelf[0]?.keepTexture).toBe(true)
+      const asset = shelf[0]!
+      expect(asset.reconstruction?.metadata).toEqual({ num_people: 1, people: [{ person_id: 0, body_pose_params: [[0, 0, 0]], future_field: 'retain' }] })
+      const diagnostic = asset.reconstruction?.artifacts.find((item) => item.role === 'visualization')
+      expect(diagnostic?.bufferKey).toBeTruthy()
+      expect(new Uint8Array(idbMemory.get(diagnostic!.bufferKey!)!)).toEqual(new Uint8Array([9, 8, 7]))
+      expect(asset.reconstruction?.artifacts.find((item) => item.role === 'source-body')?.bufferKey).toBe(asset.bufferKey)
+      const placedId = await instantiateUnplaced(asset.id)
+      const placed = useSceneStore.getState().objects.find((object) => object.id === placedId)!
+      expect(placed.reconstruction).toEqual(asset.reconstruction)
+      useSceneStore.getState().duplicateObject(placed.id)
+      const duplicate = useSceneStore.getState().objects.at(-1)!
+      expect(duplicate.reconstruction).toEqual(asset.reconstruction)
+      expect(duplicate.reconstruction).not.toBe(placed.reconstruction)
+      expect(liveBufferKeys([], [toMeta(placed)]).has(diagnostic!.bufferKey!)).toBe(true)
+      const saved = JSON.parse(JSON.stringify(asset))
+      const root = await objectFromStoredBuffer({ ...toMeta(boxObject('restored', 'Person')), ...saved }, idbMemory.get(asset.bufferKey)!)
+      expect(toMeta(root).reconstruction).toEqual(asset.reconstruction)
       expect(useEditorStore.getState().viewMode).toBe('look')
       expect(useEditorStore.getState().addDrawerChip).toBe('assets')
     } finally {

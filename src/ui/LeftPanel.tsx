@@ -9,6 +9,7 @@ import { RemeshProgressBar } from './RemeshProgressBar'
 import { createProject, deleteProject, switchProject } from '../lib/projects'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useProjectStore } from '../state/useProjectStore'
+import { isTutorialProgressV2 } from '../lib/tutorial/tutorialProgress'
 import { useRigStore } from '../state/useRigStore'
 import { usePathStore } from '../state/usePathStore'
 import { useCameraOptionsStore } from '../state/useCameraOptionsStore'
@@ -32,6 +33,7 @@ import {
   GlobeIcon,
   ImportIcon,
   DotsIcon,
+  EditIcon,
   PenIcon,
   PlusIcon,
   SearchIcon,
@@ -112,10 +114,12 @@ function ObjectTreeItem({
   id,
   icon,
   name,
+  tutorialTarget = false,
 }: {
   id: string
   icon: React.ReactNode
   name: string
+  tutorialTarget?: boolean
 }) {
   const selection = useEditorStore((s) => s.selection)
   const selectionIds = useEditorStore((s) => s.selectionIds)
@@ -140,6 +144,7 @@ function ObjectTreeItem({
   return (
     <div className="flex flex-col gap-0.5">
     <div
+      data-tour={tutorialTarget ? 'practice-cube-row' : undefined}
       className={`group flex w-full items-center gap-1 rounded-md pr-1 transition-colors ${
         selected ? 'bg-accent text-white' : 'text-ink hover:bg-panel-2'
       }`}
@@ -385,13 +390,15 @@ function PathTreeItem({ id, name }: { id: string; name: string }) {
   )
 }
 
-function CameraOptionItem({ id, name }: { id: string; name: string }) {
+function CameraOptionItem({ id, name, touchTarget = false }: { id: string; name: string; touchTarget?: boolean }) {
   const activeOptionId = useCameraOptionsStore((s) => s.activeOptionId)
   const canRemove = useCameraOptionsStore((s) => s.options.length > 1)
   const selection = useEditorStore((s) => s.selection)
   const active = id === activeOptionId
   const selected = active && selection === 'cinema-camera'
   const hidden = useEditorStore((s) => s.hiddenIds.includes(`cam:${id}`))
+  const tutorial = useProjectStore((s) => s.workflow.tutorial)
+  const tutorialTarget = isTutorialProgressV2(tutorial) && tutorial.artifacts.cameraOptionId === id
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(name)
   const [confirming, setConfirming] = useState(false)
@@ -414,6 +421,7 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
 
   return (
     <div
+      data-tour={tutorialTarget ? 'tutorial-camera-option' : undefined}
       className={`group flex w-full items-center gap-1 rounded-md px-1 py-0.5 ${
         selected ? 'bg-accent text-white' : active ? 'bg-panel-2 text-ink' : 'text-ink hover:bg-panel-2'
       }`}
@@ -424,7 +432,7 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
           useEditorStore.getState().select('cinema-camera')
         }}
         onDoubleClick={() => setEditing(true)}
-        className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left text-xs"
+        className={`flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left text-xs ${touchTarget ? 'min-h-11' : ''}`}
         title={name}
       >
         <span className={selected ? 'text-white' : 'text-ink-dim'}>
@@ -455,6 +463,23 @@ function CameraOptionItem({ id, name }: { id: string; name: string }) {
         )}
       </button>
       <VisibilityToggle hideId={`cam:${id}`} name={name} selected={selected} />
+      {!editing && (
+        <button
+          type="button"
+          aria-label="Rename camera"
+          title="Rename camera"
+          onClick={(event) => {
+            event.stopPropagation()
+            setDraft(name)
+            setEditing(true)
+          }}
+          className={`flex shrink-0 items-center justify-center rounded ${
+            touchTarget ? 'h-11 w-11' : 'h-7 w-7'
+          } ${selected ? 'text-white/70 hover:bg-white/15 hover:text-white' : 'text-ink-dim hover:bg-panel hover:text-ink'}`}
+        >
+          <EditIcon size={13} />
+        </button>
+      )}
 {/* This was a 10px "x" at opacity-0 until you hovered the exact row, which
           read as "cameras cannot be deleted". Always visible, real icon, and it
           asks once before throwing away a camera move. */}
@@ -685,6 +710,8 @@ export function LeftPanel({ variant = 'rail' }: { variant?: PanelVariant } = {})
   const lookAtMode = useRigStore((s) => s.lookAtMode)
   const cameraOptions = useCameraOptionsStore((s) => s.options)
   const scenes = useProjectStore((s) => s.scenes)
+  const tutorial = useProjectStore((s) => s.workflow.tutorial)
+  const practiceCubeId = isTutorialProgressV2(tutorial) ? tutorial.artifacts.practiceCubeId : undefined
   // Filter lives in the store so it survives swapping the rail for the phone sheet.
   const query = useEditorStore((s) => s.outlinerQuery)
   const setQuery = useEditorStore((s) => s.setOutlinerQuery)
@@ -772,6 +799,7 @@ export function LeftPanel({ variant = 'rail' }: { variant?: PanelVariant } = {})
               id={object.id}
               icon={<CubeIcon />}
               name={object.name}
+              tutorialTarget={object.id === practiceCubeId}
             />
           ))}
           {visible.map((item) => (
@@ -795,6 +823,7 @@ export function LeftPanel({ variant = 'rail' }: { variant?: PanelVariant } = {})
                   </button>
                 )}
                 <button
+                  data-tour="camera-add"
                   onClick={() => {
                     useCameraOptionsStore.getState().createOption()
                     useEditorStore.getState().select('cinema-camera')
@@ -808,7 +837,7 @@ export function LeftPanel({ variant = 'rail' }: { variant?: PanelVariant } = {})
             </div>
             <div className="flex flex-col gap-0.5">
               {visibleCameras.map((camera) => (
-                <CameraOptionItem key={camera.id} id={camera.id} name={camera.name} />
+                <CameraOptionItem key={camera.id} id={camera.id} name={camera.name} touchTarget={variant === 'sheet'} />
               ))}
             </div>
           </div>

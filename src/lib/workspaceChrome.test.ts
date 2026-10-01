@@ -35,6 +35,43 @@ describe('editorChrome', () => {
     expect(flags.footer).toBe(false)
   })
 
+  it('keeps the active lesson focused and reveals the object tray on demand', () => {
+    const flags = editorChrome({
+      playMode: false,
+      workspaceMode: 'build',
+      composeDock: 'timeline',
+      showOutliner: false,
+      showAddDrawer: false,
+      tutorialActive: true,
+    })
+    expect(flags.addDrawer).toBe(false)
+    expect(flags.directorDock).toBe(false)
+    expect(flags.objectBar).toBe(true)
+
+    const figureStep = editorChrome({
+      playMode: false,
+      workspaceMode: 'build',
+      composeDock: 'timeline',
+      showOutliner: false,
+      showAddDrawer: true,
+      tutorialActive: true,
+    })
+    expect(figureStep.addDrawer).toBe(true)
+    expect(figureStep.directorDock).toBe(false)
+
+    const poseStep = editorChrome({
+      playMode: false,
+      workspaceMode: 'build',
+      composeDock: 'timeline',
+      showOutliner: false,
+      showAddDrawer: false,
+      tutorialActive: true,
+      tutorialInspectorVisible: true,
+    })
+    expect(poseStep.addDrawer).toBe(false)
+    expect(poseStep.directorDock).toBe(true)
+  })
+
   it('Compose shows the shot strip and the active-shot timeline together', () => {
     const flags = editorChrome({
       playMode: false,

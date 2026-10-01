@@ -197,6 +197,7 @@ export function ProjectCard({
 
   return (
     <div
+      data-project-id={project.id}
       className={`group relative flex flex-col overflow-hidden rounded-xl border bg-panel text-left transition-all hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgb(0_0_0/0.25)] ${
         active ? 'border-accent/70' : 'border-line hover:border-accent/40'
       }`}

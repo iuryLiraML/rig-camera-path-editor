@@ -13,9 +13,11 @@ import { KeyButton } from './primitives'
 export function PoseKeyButton({
   objectId,
   channel,
+  touchTarget = false,
 }: {
   objectId: string
   channel: ObjectChannel
+  touchTarget?: boolean
 }) {
   const t = useRigStore((s) => s.t)
   const object = useSceneStore((s) => s.objects.find((item) => item.id === objectId))
@@ -31,6 +33,7 @@ export function PoseKeyButton({
       active={active}
       onKey={keyed}
       title={title}
+      touchTarget={touchTarget}
       onClick={() => {
         const editor = useEditorStore.getState()
         if (editor.selection !== `obj:${objectId}`) editor.select(`obj:${objectId}`)

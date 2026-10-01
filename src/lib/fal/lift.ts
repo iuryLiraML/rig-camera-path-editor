@@ -1,3 +1,4 @@
+import type { BodyReconstruction } from '../bodyReconstruction'
 import { assertGlbMesh } from '../assetSniff'
 import { subscribe, type FalSubscribeOpts } from './client'
 import { falFileUrl, falLooksLikeGlb } from './files'
@@ -11,9 +12,12 @@ type LiftResult = {
   gaussian_splat?: FalFile
   individual_glbs?: FalFile[]
   metadata?: unknown
+  visualization?: FalFile
+  meshes?: FalFile[]
 }
 
 export type PersonLift = {
+  reconstruction?: BodyReconstruction
   glbUrl: string
   metadata?: unknown
 }
@@ -46,18 +50,36 @@ export async function liftPersonDetailed(opts: {
   signal?: AbortSignal
   onQueueUpdate?: FalSubscribeOpts['onQueueUpdate']
 }): Promise<PersonLift> {
+  let requestId: string | undefined
   const data = await subscribe<LiftResult>(
     SAM_3D_BODY,
     {
       image_url: opts.imageUrl,
       ...(opts.maskUrl ? { mask_url: opts.maskUrl } : {}),
-      export_meshes: false,
+      export_meshes: true,
       include_3d_keypoints: false,
-      include_mhr_params: opts.includeMhrParams ?? false,
+      include_mhr_params: opts.includeMhrParams ?? true,
     },
-    { signal: opts.signal, onQueueUpdate: opts.onQueueUpdate },
+    { signal: opts.signal, onQueueUpdate: opts.onQueueUpdate, onRequestId: (id) => { requestId = id } },
   )
-  return { glbUrl: requireGlb(data, SAM_3D_BODY), metadata: data.metadata }
+  return {
+    glbUrl: requireGlb(data, SAM_3D_BODY), metadata: data.metadata,
+    reconstruction: {
+      version: 1, provider: 'fal', model: SAM_3D_BODY, requestId,
+      metadata: data.metadata ?? null,
+      source: { imageUrl: opts.imageUrl, ...(opts.maskUrl ? { maskUrl: opts.maskUrl } : {}) },
+      artifacts: [
+        { role: 'source-body', url: requireGlb(data, SAM_3D_BODY) },
+        { role: 'source-image', url: opts.imageUrl },
+        ...(opts.maskUrl ? [{ role: 'source-mask', url: opts.maskUrl }] : []),
+        ...(falFileUrl(data.visualization) ? [{ role: 'visualization', url: falFileUrl(data.visualization)! }] : []),
+        ...(data.meshes ?? []).flatMap((file, index) => {
+          const url = falFileUrl(file)
+          return url ? [{ role: `person-mesh-${index}`, url }] : []
+        }),
+      ],
+    },
+  }
 }
 
 export async function liftPerson(opts: {

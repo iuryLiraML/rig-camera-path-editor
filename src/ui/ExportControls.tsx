@@ -5,6 +5,9 @@ import { useCameraReady } from '../state/cameraPathLink'
 import { downloadRigJSON } from '../state/useRigStore'
 import { useEditorStore, type ViewMode } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { useProjectStore } from '../state/useProjectStore'
+import { recordObservedTutorialAction, recordTutorialExport } from '../lib/tutorial/tutorialActions'
+import { tutorialShotSignature } from '../lib/tutorial/tutorialObservation'
 import { Segmented } from './primitives'
 import { CameraIcon, ExportIcon } from './icons'
 
@@ -199,6 +202,7 @@ export function ExportActions({
   const exportPasses = useEditorStore((s) => s.exportPasses)
   const ready = useCameraReady()
   const recording = useEditorStore((s) => s.recording)
+  const activeSceneId = useProjectStore((s) => s.activeSceneId)
   const reason = !ready ? 'Add two path points or choose a Free camera in Compose' : exportPasses.length === 0 ? 'Select at least one export pass' : recording ? 'An export is already in progress' : undefined
   const disabled = Boolean(reason)
 
@@ -206,9 +210,27 @@ export function ExportActions({
     <div className={compact ? 'flex shrink-0 items-center gap-1.5' : undefined}>
       <button
         type="button"
+        data-tour={compact ? 'visualize-export' : undefined}
         onClick={() => {
           onDone?.()
-          void exportVideo()
+          recordTutorialExport('setup-ready')
+          void exportVideo().then((result) => {
+            if (result.status === 'file-offered') {
+              const signature = tutorialShotSignature()
+              recordTutorialExport('file-offered', { fileName: result.fileName, byteSize: result.byteSize, signature })
+              recordObservedTutorialAction('finish.export', {
+                kind: 'browser-offered-video-file',
+                sceneId: activeSceneId,
+                subjectId: result.fileName,
+                signature,
+              })
+            } else if (result.status === 'cancelled' || result.status === 'unsupported' || result.status === 'failed') {
+              recordTutorialExport(result.status)
+            }
+          }).catch((error) => {
+            console.error('Video export action failed', error)
+            recordTutorialExport('failed')
+          })
         }}
         disabled={disabled}
         title={reason}

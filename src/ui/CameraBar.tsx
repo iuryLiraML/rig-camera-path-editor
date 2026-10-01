@@ -80,7 +80,7 @@ export function CameraBar({ embedded = false }: { embedded?: boolean }) {
         >
           {activeMm}mm
         </button>
-        <ChannelKeyButton channel="fov" />
+        <span data-tour="camera-fov"><ChannelKeyButton channel="fov" /></span>
         <button
           type="button"
           title="Select the camera path"

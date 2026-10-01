@@ -118,3 +118,15 @@ describe('editor snapshot serde', () => {
     expect('bufferAssetId' in restored.scenes[0].sceneMeta[0]).toBe(false)
   })
 })
+
+it('preserves reconstruction data and durable artifact references through cloud serialization', () => {
+  const reconstruction = { version: 1, provider: 'fal' as const, model: 'fal-ai/sam-3/3d-body', source: { imageUrl: 'https://expired.example/photo' }, metadata: { future: [1, 2] }, artifacts: [{ role: 'visualization', url: 'https://expired.example/result', bufferKey: 'diagnostic' }] }
+  const record = { id: 'p', name: 'P', createdAt: 1, activeSceneId: scene.id, guidelines: '', skills: [], savedPrompts: [], scenes: [{ ...scene, sceneMeta: [{ ...scene.sceneMeta[0], reconstruction }] }] }
+  const cloud = toCloudEditorState(record, { bufferAssets: { diagnostic: { assetId: 'remote-diagnostic', sha256: 'sha' } }, stillAssets: {} })
+  expect(cloud.scenes[0].sceneMeta[0].reconstruction?.artifacts[0]).toMatchObject({ bufferKey: 'diagnostic', cloudAssetId: 'remote-diagnostic' })
+  expect(cloud.scenes[0].sceneMeta[0].reconstruction?.source.imageUrl).toBe('')
+  expect(cloud.scenes[0].sceneMeta[0].reconstruction?.artifacts[0]?.url).toBe('')
+  const restored = fromCloudEditorState(JSON.parse(JSON.stringify(cloud)), { id: 'p', name: 'P', createdAt: 1, shots: [], workflow: undefined, cloudUpdatedAt: '2026-09-10' })
+  expect(restored.scenes[0].sceneMeta[0].reconstruction?.metadata).toEqual({ future: [1, 2] })
+  expect(restored.bufferAssets?.diagnostic.assetId).toBe('remote-diagnostic')
+})

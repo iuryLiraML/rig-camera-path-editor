@@ -63,11 +63,13 @@ export function KeyButton({
   onKey,
   onClick,
   title = 'Add a keyframe for this property at the playhead (I)',
+  touchTarget = false,
 }: {
   active: boolean
   onKey?: boolean
   onClick: () => void
   title?: string
+  touchTarget?: boolean
 }) {
   return (
     <button
@@ -76,7 +78,7 @@ export function KeyButton({
       title={title}
       aria-label={title}
       aria-pressed={!!onKey}
-      className={`shrink-0 text-[11px] leading-none transition-colors ${
+      className={`${touchTarget ? 'flex min-h-11 min-w-11 items-center justify-center rounded-md' : 'shrink-0'} text-[11px] leading-none transition-colors ${
         onKey ? 'text-[#3dd68c]' : active ? 'text-accent' : 'text-ink-dim hover:text-ink'
       }`}
     >
@@ -248,6 +250,10 @@ export function Slider({
   format,
   keyed = false,
   onFocusChange,
+  onGestureStart,
+  onGestureEnd,
+  onGestureCancel,
+  ariaLabel,
 }: {
   value: number
   onChange: (value: number) => void
@@ -257,7 +263,16 @@ export function Slider({
   format?: (value: number) => string
   keyed?: boolean
   onFocusChange?: (on: boolean) => void
+  /** Optional gesture lifecycle for one history transaction across live slider updates. */
+  onGestureStart?: () => void
+  onGestureEnd?: () => void
+  onGestureCancel?: () => void
+  ariaLabel?: string
 }) {
+  const keyboardGesture = useRef(false)
+  const isAdjustmentKey = (key: string) =>
+    key === 'ArrowLeft' || key === 'ArrowRight' || key === 'ArrowUp' || key === 'ArrowDown'
+      || key === 'Home' || key === 'End' || key === 'PageUp' || key === 'PageDown'
   return (
     <div className={`flex min-w-0 flex-1 items-center gap-2 ${keyed ? 'rounded-md ring-1 ring-[#3dd68c] px-1' : ''}`}>
       <input
@@ -266,10 +281,41 @@ export function Slider({
         max={max}
         step={step}
         value={value}
+        aria-label={ariaLabel}
         onChange={(e) => onChange(parseFloat(e.target.value))}
+        onPointerDown={onGestureStart}
+        onPointerUp={onGestureEnd}
+        onPointerCancel={onGestureCancel}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            if (keyboardGesture.current) {
+              keyboardGesture.current = false
+              onGestureCancel?.()
+            } else {
+              onGestureCancel?.()
+            }
+            return
+          }
+          if (isAdjustmentKey(e.key) && !keyboardGesture.current) {
+            keyboardGesture.current = true
+            onGestureStart?.()
+          }
+        }}
+        onKeyUp={(e) => {
+          if (keyboardGesture.current && isAdjustmentKey(e.key)) {
+            keyboardGesture.current = false
+            onGestureEnd?.()
+          }
+        }}
         onFocus={() => onFocusChange?.(true)}
-        onBlur={() => onFocusChange?.(false)}
-        className="w-full min-w-0 flex-1 accent-accent"
+        onBlur={() => {
+          if (keyboardGesture.current) {
+            keyboardGesture.current = false
+            onGestureEnd?.()
+          }
+          onFocusChange?.(false)
+        }}
+        className="touch-range w-full min-w-0 flex-1 accent-accent"
       />
       <span
         className={`w-9 shrink-0 text-right text-[11px] tabular-nums ${

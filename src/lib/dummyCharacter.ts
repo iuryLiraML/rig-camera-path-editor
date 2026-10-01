@@ -693,6 +693,7 @@ export function addDummyToScene(sex: FigureSex = 'male') {
   const object = makeDummyObject({ figureSex: sex })
   useSceneStore.getState().addObject(object)
   useEditorStore.getState().select(`obj:${object.id}`)
+  void import('./tutorial/tutorialObservation').then(({ registerTutorialFigure }) => registerTutorialFigure(object.id))
   if (!object.root.userData.dummyGltf) void upgradeDummyIfNeeded(object.id, sex)
   return object.id
 }

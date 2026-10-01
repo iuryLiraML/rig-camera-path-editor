@@ -1,3 +1,4 @@
+import { persistReconstructionArtifacts } from './bodyReconstruction'
 import { idbGet, STORES } from './idb'
 import { persistModelBuffer } from './readModelFile'
 import {
@@ -224,22 +225,28 @@ export async function parkUnplacedAsset(opts: {
   buffer: ArrayBuffer
   name: string
   rigKind: RigKind
+  reconstruction?: import('./bodyReconstruction').BodyReconstruction
+  signal?: AbortSignal
   keepTexture?: boolean
   keepPoints?: boolean
 }): Promise<{ assetId: string; objectName: string }> {
   const id = makeUnplacedId()
   await persistModelBuffer(id, opts.buffer)
+  const reconstruction = await persistReconstructionArtifacts(opts.reconstruction, opts.signal, opts.buffer, id)
   const asset: ProjectMeshAsset = {
     id,
     name: opts.name,
     bufferKey: id,
     rigKind: opts.rigKind,
+    reconstruction,
     keepTexture: opts.keepTexture,
     keepPoints: opts.keepPoints,
   }
   const store = useEnvironmentStore.getState()
   store.setUnplacedAssets([...store.unplacedAssets, asset])
-  useSceneStore.getState().showNotice(`"${opts.name}" added to Unplaced`)
+  useSceneStore.getState().showNotice(reconstruction?.artifacts.some((item) => item.error)
+    ? `"${opts.name}" added to Unplaced. Some reconstruction files could not be saved.`
+    : `"${opts.name}" added to Unplaced`)
   return { assetId: id, objectName: opts.name }
 }
 
@@ -266,6 +273,7 @@ export async function instantiateUnplaced(assetId: string): Promise<string | nul
         ? {
             ...item,
             rigKind: asset.rigKind,
+            reconstruction: asset.reconstruction ? structuredClone(asset.reconstruction) : undefined,
             bufferKey: asset.bufferKey,
             playClips: false,
             keepTexture: asset.keepTexture,

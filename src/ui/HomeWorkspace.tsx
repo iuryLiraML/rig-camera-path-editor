@@ -1,15 +1,26 @@
 import { useEffect, useState } from 'react'
-import { goLibrary, goProjects, switchProject } from '../lib/projects'
+import { goLibrary, goProjects, startTutorial, switchProject } from '../lib/projects'
 import { useProjectCreationStore } from '../state/useProjectCreationStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useProjectStore } from '../state/useProjectStore'
+import { useSceneStore } from '../state/useSceneStore'
 import { useLibraryAssetPicker } from './LibraryAssetPicker'
 import { relativeTime } from './ProjectCard'
 import { WorkspaceChrome, WorkspacePage } from './WorkspaceChrome'
-import { CameraIcon, ImportIcon, ImageIcon, ListIcon, PlusIcon } from './icons'
+import { BookIcon, CameraIcon, ImportIcon, ImageIcon, ListIcon, PlusIcon } from './icons'
+import { TutorialWelcome } from './tutorial/TutorialWelcome'
 
 function newProjectFromHome() {
   useProjectCreationStore.getState().show()
+}
+
+function beginTutorial() {
+  // Guard against a double-click seeding two tutorial projects.
+  if (useProjectStore.getState().projectBusy) return
+  void startTutorial().catch((error) => {
+    console.error(error)
+    useSceneStore.getState().showNotice('The tutorial could not be started. Please try again.')
+  })
 }
 
 function ProjectThumb({ blob }: { blob: Blob }) {
@@ -30,6 +41,7 @@ function ProjectThumb({ blob }: { blob: Blob }) {
 }
 
 export function HomeWorkspace() {
+  const [tutorialPreviewOpen, setTutorialPreviewOpen] = useState(false)
   const picker = useLibraryAssetPicker()
   const projects = useProjectStore((state) => state.projectList)
   const recent = [...projects].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 3)
@@ -64,6 +76,14 @@ export function HomeWorkspace() {
       icon: <ListIcon size={22} />,
       onClick: () => void goProjects(),
     },
+    {
+      title: 'Tutorial',
+      body: 'Build a room, pose a Figure, and make your first six-second camera move.',
+      icon: <BookIcon size={22} />,
+      onClick: () => {
+        if (!useProjectStore.getState().projectBusy) setTutorialPreviewOpen(true)
+      },
+    },
   ]
 
   return (
@@ -73,6 +93,16 @@ export function HomeWorkspace() {
         description="Start work here without a project. New project starts with AI or a blank scene. Import assets lands in Library."
       />
       {picker.input}
+      {tutorialPreviewOpen && (
+        <TutorialWelcome
+          onClose={() => setTutorialPreviewOpen(false)}
+          onStart={() => {
+            if (useProjectStore.getState().projectBusy) return
+            setTutorialPreviewOpen(false)
+            beginTutorial()
+          }}
+        />
+      )}
       <section aria-label="Start" className="mt-10 grid gap-4 sm:grid-cols-2">
         {tiles.map((tile) => (
           <button

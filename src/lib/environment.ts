@@ -1,3 +1,4 @@
+import { reconstructionBufferKeys } from './bodyReconstruction'
 import type { Transform } from '../state/useSceneStore'
 
 export type EnvironmentSource = 'triposplat' | 'import'
@@ -21,6 +22,7 @@ export interface ProjectMeshAsset {
   name: string
   bufferKey: string
   rigKind: RigKind
+  reconstruction?: import('./bodyReconstruction').BodyReconstruction
   keepTexture?: boolean
   /** VGGT point-cloud GLB — Place keeps POINTS and never remeshes. */
   keepPoints?: boolean
@@ -189,6 +191,6 @@ export function collectProjectBufferKeys(
     keys.push(environment.bufferKey)
     if (environment.sourceImageKey) keys.push(environment.sourceImageKey)
   }
-  for (const asset of unplaced) keys.push(asset.bufferKey)
+  for (const asset of unplaced) keys.push(asset.bufferKey, ...reconstructionBufferKeys(asset.reconstruction))
   return keys
 }

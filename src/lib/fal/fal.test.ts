@@ -187,9 +187,9 @@ describe('lift', () => {
       input: {
         image_url: 'https://photo',
         mask_url: 'https://mask',
-        export_meshes: false,
+        export_meshes: true,
         include_3d_keypoints: false,
-        include_mhr_params: false,
+        include_mhr_params: true,
       },
     })
     expect(calls[1]).toEqual({
@@ -217,9 +217,9 @@ describe('lift', () => {
     )
     expect(calls[0]).toEqual({
       image_url: 'https://photo',
-      export_meshes: false,
+      export_meshes: true,
       include_3d_keypoints: false,
-      include_mhr_params: false,
+      include_mhr_params: true,
     })
   })
 
@@ -242,7 +242,7 @@ describe('lift', () => {
     })
   })
 
-  it('requests MHR params only on the video path', async () => {
+  it('requests MHR params when explicitly enabled', async () => {
     const calls: Record<string, unknown>[] = []
     configureFal('key-test')
     setFalTransportForTests({

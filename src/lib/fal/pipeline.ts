@@ -1,7 +1,8 @@
+import type { BodyReconstruction } from '../bodyReconstruction'
 import { getLiftAttachment, isVideoFile, peekLastLifts, recordLifts } from './attachment'
 import { serverHasKey } from '../agent/serverKeys'
 import { configureFal, uploadImage } from './client'
-import { downloadGlb, liftPerson, liftProp } from './lift'
+import { downloadGlb, liftPersonDetailed, liftProp } from './lift'
 import { layoutPeoplePositions, personObjectName } from './peopleLayout'
 import { segmentImageWithFallback } from './segment'
 import type { SamImageVersion } from './models'
@@ -17,6 +18,7 @@ export async function runMaskThenLift(opts: {
   signal?: AbortSignal
 }): Promise<{
   glbUrls: string[]
+  reconstructions?: (BodyReconstruction | undefined)[]
   maskUrl: string
   maskCount: number
   modelId: string
@@ -46,17 +48,18 @@ export async function runMaskThenLift(opts: {
   }
 
   const glbUrls: string[] = []
+  const reconstructions: (BodyReconstruction | undefined)[] = []
   for (const maskUrl of segmented.maskUrls) {
-    glbUrls.push(
-      await liftPerson({
-        imageUrl: opts.imageUrl,
-        maskUrl,
-        signal: opts.signal,
-      }),
-    )
+    const lifted = await liftPersonDetailed({
+      imageUrl: opts.imageUrl,
+      maskUrl,
+      signal: opts.signal,
+    })
+    glbUrls.push(lifted.glbUrl)
+    reconstructions.push(lifted.reconstruction)
   }
   return {
-    glbUrls,
+    glbUrls, reconstructions,
     maskUrl: segmented.maskUrl,
     maskCount,
     modelId: segmented.modelId,
@@ -73,6 +76,7 @@ export async function liftAttachedStill(opts: {
   importBuffer: (
     buffer: ArrayBuffer,
     name: string,
+    reconstruction?: BodyReconstruction,
   ) => Promise<{ objectId: string; objectName: string } | null>
   beginLift: (name: string, kind: LiftKind, objectId?: string) => string
   endLift: (id: string) => void
@@ -101,7 +105,7 @@ export async function liftAttachedStill(opts: {
   const liftId = opts.beginLift(liftLabel, opts.kind)
   try {
     const imageUrl = await uploadImage(file, signal, { storage: true })
-    const { glbUrls, boxes } = await runMaskThenLift({
+    const { glbUrls, boxes, reconstructions } = await runMaskThenLift({
       kind: opts.kind,
       prompt,
       imageUrl,
@@ -116,7 +120,7 @@ export async function liftAttachedStill(opts: {
       const buffer = await downloadGlb(glbUrl, signal)
       const objectName =
         opts.kind === 'person' ? personObjectName(i, glbUrls.length) : fileStem
-      const next = await opts.importBuffer(buffer, objectName)
+      const next = await opts.importBuffer(buffer, objectName, reconstructions?.[i])
       if (!next) continue
       const slot = slots[i] ?? [0, 0, 0]
       if (slot[0] !== 0 || slot[1] !== 0 || slot[2] !== 0) {

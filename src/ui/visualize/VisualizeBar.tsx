@@ -17,6 +17,7 @@ import {
   VISUALIZE_DOCK_HEIGHT,
   useViewportInsets,
   useWindowSize,
+  type PanelVariant,
 } from '../viewportInsets'
 
 const VIEW_MODES: { value: ViewMode; label: string }[] = [
@@ -280,7 +281,8 @@ function DepthRangeControls() {
   )
 }
 
-export function VisualizeBar() {
+export function VisualizeBar({ variant = 'rail' }: { variant?: PanelVariant } = {}) {
+  const sheet = variant === 'sheet'
   const [picker, setPicker] = useState<'shots' | 'cameras'>('shots')
   const shots = useProjectStore((s) => s.shots)
   const ordered = [...shots].sort((a, b) => a.order - b.order)
@@ -305,8 +307,10 @@ export function VisualizeBar() {
       <VisualizeLetterbox />
       <div
         data-visualize-bar
-        className="panel absolute z-20 flex flex-col gap-1 overflow-hidden px-3 py-2"
-        style={{
+        className={sheet
+          ? 'flex h-full min-h-0 w-full flex-col gap-1 overflow-y-auto px-3 py-2'
+          : 'panel absolute z-20 flex flex-col gap-1 overflow-hidden px-3 py-2'}
+        style={sheet ? undefined : {
           left: band.left,
           width: band.width,
           bottom: GUTTER,
@@ -385,7 +389,7 @@ export function VisualizeBar() {
 
         <VisualizeScrubber />
 
-        <div className="flex min-h-9 min-w-0 flex-1 items-center gap-3 overflow-x-auto">
+        <div data-tour="visualize-export-settings" className="flex min-h-9 min-w-0 flex-1 items-center gap-3 overflow-x-auto">
           <BarGroup label="Look">
             <div className="flex rounded-md bg-panel-2 p-0.5">
               {VIEW_MODES.map((mode) => (

@@ -699,6 +699,7 @@ export interface ObjectMeta {
   remeshed?: boolean
   modelFormat?: ModelFormat
   rigKind?: import('./environment').RigKind
+  reconstruction?: import('./bodyReconstruction').BodyReconstruction
   keepDenseMesh?: boolean
   keepTexture?: boolean
   keepPoints?: boolean
@@ -727,6 +728,7 @@ export function toMeta(o: SceneObject): ObjectMeta {
     remeshed: o.remeshed,
     modelFormat: o.modelFormat,
     rigKind: o.rigKind,
+    reconstruction: o.reconstruction,
     keepDenseMesh: o.keepDenseMesh,
     keepTexture: o.keepTexture,
     keepPoints: o.keepPoints,

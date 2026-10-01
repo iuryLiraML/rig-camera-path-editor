@@ -1,3 +1,4 @@
+import { persistReconstructionArtifacts, type BodyReconstruction } from './bodyReconstruction'
 import { useAgentStore } from '../state/useAgentStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
@@ -219,6 +220,7 @@ type LiftedBlock = {
   row: FindRow
   buffer: ArrayBuffer
   meta: unknown
+  reconstruction?: BodyReconstruction
   glbUrl: string
 }
 
@@ -251,7 +253,10 @@ async function instanceLifted(item: LiftedBlock): Promise<string | null> {
   })
   if (!imported) return null
   const live = useSceneStore.getState().objects.find((object) => object.id === imported.objectId)
-  if (live) live.root.userData.rigSkipNormalize = true
+  if (live) {
+    live.root.userData.rigSkipNormalize = true
+    live.reconstruction = await persistReconstructionArtifacts(item.reconstruction, undefined, item.buffer, imported.objectId)
+  }
   const transform = layoutBlockTransforms([parseSamPose(firstMeta(item.meta))])[0]
   if (transform) applyBlockPose(imported.objectId, item.row, transform)
   return imported.objectId
@@ -324,7 +329,7 @@ export async function commitSceneBlock(rows: FindRow[]): Promise<void> {
       scene.renameLift(liftId, `Lifting ${row.name}… (${index + 1} of ${queue.length})`)
       scene.setLiftProgress(liftId, null)
       try {
-        const next = await withLiveMask(row.maskUrl!, live.maskBytes[row.maskUrl!], signal, (maskUrl) =>
+        const next: import('./fal/lift').PersonLift = await withLiveMask(row.maskUrl!, live.maskBytes[row.maskUrl!], signal, (maskUrl) =>
           row.kind === 'person'
             ? liftPersonDetailed({
                 imageUrl: live.imageUrl,
@@ -345,6 +350,7 @@ export async function commitSceneBlock(rows: FindRow[]): Promise<void> {
           row,
           buffer,
           meta: next.metadata,
+          reconstruction: next.reconstruction,
           glbUrl: next.glbUrl,
         })
       } catch (error) {
@@ -375,7 +381,10 @@ export async function commitSceneBlock(rows: FindRow[]): Promise<void> {
               onQueueUpdate: trackLiftProgress(liftId),
             }),
         )
-        if (aligned.metadata) person.meta = aligned.metadata
+        if (aligned.metadata) {
+          person.meta = aligned.metadata
+          if (person.reconstruction) person.reconstruction.alignment = { model: 'fal-ai/sam-3/3d-align', metadata: aligned.metadata }
+        }
       } catch (error) {
         if (isFalAbortError(error)) throw error
         console.error(error)

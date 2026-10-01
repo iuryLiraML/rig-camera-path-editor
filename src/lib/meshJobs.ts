@@ -256,7 +256,7 @@ export async function generateSamBody(file: File): Promise<void> {
       onQueueUpdate: trackGenerateProgress(liftId),
     })
     const buffer = await downloadGlb(lifted.glbUrl, signal)
-    await parkUnplacedAsset({ buffer, name, rigKind: 'sam-person', keepTexture: true })
+    await parkUnplacedAsset({ buffer, name, rigKind: 'sam-person', keepTexture: true, reconstruction: lifted.reconstruction, signal })
   })
 }
 
@@ -303,7 +303,13 @@ export async function generateSamAlign(file: File, objectNoun?: string): Promise
     const glbUrl = aligned.glbUrl
     if (!glbUrl) throw new Error('SAM 3D Alignment returned no GLB.')
     const buffer = await downloadGlb(glbUrl, signal)
-    await parkUnplacedAsset({ buffer, name, rigKind: 'sam-person', keepTexture: true })
+    await parkUnplacedAsset({ buffer, name, rigKind: 'sam-person', keepTexture: true, signal,
+      reconstruction: body.reconstruction ? {
+        ...body.reconstruction,
+        alignment: { model: 'fal-ai/sam-3/3d-align', metadata: aligned.metadata ?? null },
+        artifacts: body.reconstruction.artifacts,
+      } : undefined,
+    })
     if (aligned.sceneGlbUrl) {
       const sceneBuffer = await downloadGlb(aligned.sceneGlbUrl, signal)
       await parkUnplacedAsset({

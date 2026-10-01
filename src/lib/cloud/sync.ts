@@ -59,6 +59,20 @@ export async function hydrateCloudProject(projectId: string): Promise<ProjectRec
     }
   }
 
+  const restoredArtifacts = new Set<string>()
+  for (const item of [...editorState.scenes.flatMap((scene) => scene.sceneMeta), ...(editorState.unplacedAssets ?? [])]) {
+    for (const artifact of item.reconstruction?.artifacts ?? []) {
+      if (!artifact.bufferKey || !artifact.cloudAssetId || restoredArtifacts.has(artifact.bufferKey)) continue
+      try {
+        await persistModelBuffer(artifact.bufferKey, await downloadCloudAsset(accessToken, artifact.cloudAssetId))
+        restoredArtifacts.add(artifact.bufferKey)
+        delete artifact.error
+      } catch {
+        artifact.error = 'Reconstruction file could not be restored from cloud storage'
+      }
+    }
+  }
+
   const createdAt = Date.parse(project.updatedAt) || Date.now()
   return fromCloudEditorState(editorState, {
     id: project.id,
@@ -78,6 +92,17 @@ async function uploadDirtyAssets(
   const assets: CloudAssetMap = {
     bufferAssets: { ...(record.bufferAssets ?? {}) },
     stillAssets: { ...(record.stillAssets ?? {}) },
+  }
+
+  for (const item of [...record.scenes.flatMap((scene) => scene.sceneMeta), ...(record.unplacedAssets ?? [])]) {
+    for (const artifact of item.reconstruction?.artifacts ?? []) {
+      if (!artifact.bufferKey) continue
+      const bytes = await idbGet<ArrayBuffer>(STORES.buffers, artifact.bufferKey)
+      if (!bytes) throw new Error(`A reconstruction file for “${item.name}” is missing from this browser cache.`)
+      const sha256 = await sha256Hex(bytes)
+      if (assets.bufferAssets[artifact.bufferKey]?.sha256 === sha256) continue
+      assets.bufferAssets[artifact.bufferKey] = await uploadCloudBytes(accessToken, projectId, bytes, `${artifact.role}.bin`, 'application/octet-stream', 'ingest-source')
+    }
   }
 
   for (const scene of record.scenes) {

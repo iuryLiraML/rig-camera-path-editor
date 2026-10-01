@@ -259,26 +259,50 @@ function exportAllowed() {
   return true
 }
 
-export async function exportVideo() {
-  if (!exportAllowed()) return
+export type VideoExportResult =
+  | { status: 'file-offered'; fileName: string; byteSize: number; mimeType: string }
+  | { status: 'failed' | 'unsupported' | 'cancelled' }
+
+function offeredFiles(files: EncodedPass[], extension: string, mimeType: string): VideoExportResult {
+  const valid = files.filter((file) => file.blob.size > 0)
+  if (!valid.length) return { status: 'failed' }
+  const names = valid.map((file) => `camera-animation_${file.pass}.${extension}`)
+  valid.forEach((file, index) => downloadBlob(file.blob, names[index]!))
+  return {
+    status: 'file-offered',
+    fileName: names.join(', '),
+    byteSize: valid.reduce((total, file) => total + file.blob.size, 0),
+    mimeType,
+  }
+}
+
+export async function exportVideo(): Promise<VideoExportResult> {
+  if (!exportAllowed()) return { status: 'unsupported' }
   if (typeof VideoEncoder === 'undefined') {
-    await recordRealtime()
-    return
+    return recordRealtime()
   }
-  const files = await encodePassVideos()
-  if (!files) {
-    if (cancelled) {
-      notice('Export cancelled')
-      return
+  try {
+    const files = await encodePassVideos()
+    if (!files || !files.length) {
+      if (cancelled) {
+        notice('Export cancelled')
+        return { status: 'cancelled' }
+      }
+      notice('MP4 export failed — trying browser recording instead')
+      return recordRealtime()
     }
+    const offered = offeredFiles(files, 'mp4', 'video/mp4')
+    if (offered.status !== 'file-offered') {
+      notice('Video export failed — please try again')
+      return offered
+    }
+    notice(files.length > 1 ? `${files.length} passes exported (.mp4)` : 'Video exported (.mp4)')
+    return offered
+  } catch (error) {
+    console.error('MP4 video export failed', error)
     notice('MP4 export failed — trying browser recording instead')
-    await recordRealtime()
-    return
+    return recordRealtime()
   }
-  for (const file of files) {
-    downloadBlob(file.blob, `camera-animation_${file.pass}.mp4`)
-  }
-  notice(files.length > 1 ? `${files.length} passes exported (.mp4)` : 'Video exported (.mp4)')
 }
 
 /**
@@ -358,19 +382,19 @@ export async function captureShotStill(maxWidth = 480): Promise<Blob | null> {
 }
 
 /** Browser recording fallback, using the same capture context and selected passes. */
-async function recordRealtime() {
-  if (isRecording()) return
+async function recordRealtime(): Promise<VideoExportResult> {
+  if (isRecording()) return { status: 'failed' }
   const { advance } = renderBridge
   if (!advance || !renderBridge.setFrameloop) {
     notice('The viewport is not ready to export')
-    return
+    return { status: 'failed' }
   }
   const mime = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4;codecs=avc1.42E01E', 'video/mp4'].find((m) =>
     typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(m),
   )
   if (!mime) {
     notice('Video recording is not supported in this browser')
-    return
+    return { status: 'unsupported' }
   }
   const passes = resolvePasses()
   const fps = normalizeShotFps(useRigStore.getState().fps)
@@ -435,14 +459,18 @@ async function recordRealtime() {
         stream.getTracks().forEach((track) => track.stop())
       }
     }
-    if (cancelled) notice('Export cancelled')
-    else {
-      for (const file of files) downloadBlob(file.blob, `camera-animation_${file.pass}.${extension}`)
-      notice(`${files.length} pass${files.length === 1 ? '' : 'es'} exported (.${extension})`)
+    if (cancelled) {
+      notice('Export cancelled')
+      return { status: 'cancelled' }
     }
+    const offered = offeredFiles(files, extension, mime.split(';')[0] ?? mime)
+    if (offered.status === 'file-offered') notice(`${files.length} pass${files.length === 1 ? '' : 'es'} exported (.${extension})`)
+    else notice('Video export failed — please try again')
+    return offered
   } catch (error) {
     console.error('Browser video export failed', error)
     notice('Video export failed — please try again')
+    return { status: 'failed' }
   } finally {
     restore()
   }

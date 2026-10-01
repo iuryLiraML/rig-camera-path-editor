@@ -56,6 +56,8 @@ import { CameraBar } from '../ui/CameraBar'
 import { ShortcutsOverlay } from '../ui/ShortcutsOverlay'
 import { VisualizeBar } from '../ui/visualize/VisualizeBar'
 import { PhoneShell } from '../ui/phone/PhoneShell'
+import { TutorialCoachmark } from '../ui/tutorial/TutorialCoachmark'
+import { isTutorialProgressV2 } from '../lib/tutorial/tutorialProgress'
 import { NewProjectDialog } from '../ui/NewProjectDialog'
 import { ProductionListDialog } from '../ui/ProductionListDialog'
 
@@ -254,6 +256,16 @@ function EditorWorkspace() {
   const composeDock = useEditorStore((s) => s.composeDock)
   const showOutliner = useEditorStore((s) => s.showOutliner)
   const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
+  // The guided tutorial owns onboarding while it runs — suppress the generic card.
+  const tutorialActive = useProjectStore((s) => {
+    const t = s.workflow.tutorial
+    return Boolean(t?.active && !t?.done)
+  })
+  const tutorialInspectorVisible = useProjectStore((s) => {
+    const t = s.workflow.tutorial
+    return isTutorialProgressV2(t) && t.active && !t.done
+      && ['room.scene-edit', 'figure.pose', 'camera.height', 'camera.frame', 'timing.lens'].includes(t.currentActionId)
+  })
   const { tier } = useChromeLayout()
   const chrome = editorChrome({
     playMode,
@@ -261,6 +273,8 @@ function EditorWorkspace() {
     composeDock,
     showOutliner,
     showAddDrawer,
+    tutorialActive,
+    tutorialInspectorVisible,
     tier,
   })
   const [dragging, setDragging] = useState(false)
@@ -304,7 +318,7 @@ function EditorWorkspace() {
       </KeepMounted>
       {chrome.navLegend && <NavLegend />}
       {chrome.visualizeRail && <VisualizeBar />}
-      {chrome.onboarding && <OnboardingCard />}
+      {chrome.onboarding && !tutorialActive && <OnboardingCard />}
       <KeepMounted show={chrome.pip}>
         <CameraPreviewFrame />
       </KeepMounted>
@@ -412,6 +426,7 @@ function SaveConflictDialog() {
 
 export function App() {
   const booted = useProjectStore((state) => state.booted)
+  const projectId = useProjectStore((state) => state.projectId)
   const appView = useEditorStore((state) => state.appView)
   const cloudStatus = useCloudAuthStore((state) => state.status)
   const publicEntered = useSyncExternalStore(subscribePublicEntered, hasPublicEntered, hasPublicEntered)
@@ -420,7 +435,7 @@ export function App() {
   const workspace = resolveWorkspace(appView)
   const showWelcome =
     (teamApp && !signedIn) ||
-    (!teamApp && !signedIn && !publicEntered && workspace !== 'editor')
+    (!teamApp && !signedIn && !publicEntered && !projectId && workspace !== 'editor')
 
   if (!booted) {
     return (
@@ -464,6 +479,7 @@ export function App() {
   return (
     <>
       {body}
+      <TutorialCoachmark />
       <SettingsDialog />
       <ProductionListDialog />
       <NewProjectDialog />

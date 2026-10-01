@@ -32,7 +32,7 @@ import { axisIndexOf, vec3GroupOf, type Vec3AxisChannel } from '../../lib/vec3Ax
 import { GraphEditor, buildGraphChannels } from '../GraphEditor'
 import { sampleOverTime } from '../TrackCurve'
 import { applyCameraPreset, PRESETS } from '../../lib/presets'
-import { GUTTER, chromeBand, useViewportInsets, useWindowSize } from '../viewportInsets'
+import { GUTTER, chromeBand, useViewportInsets, useWindowSize, type PanelVariant } from '../viewportInsets'
 import { DockResizeHandle } from './DockResizeHandle'
 import { ShotStrip } from './ShotStrip'
 import { TimelineRuler, TimeNavigator } from './TimelineRuler'
@@ -80,7 +80,8 @@ function EmptyPathBody() {
  * Hook order is fixed — plot memos run before the empty-path return so a path
  * appearing later cannot crash the editor.
  */
-export function ComposeDock() {
+export function ComposeDock({ variant = 'rail' }: { variant?: PanelVariant } = {}) {
+  const sheet = variant === 'sheet'
   const hasPath = useCameraReady()
   const playing = useRigStore((s) => s.playing)
   const t = useRigStore((s) => s.t)
@@ -293,11 +294,11 @@ export function ComposeDock() {
       <div
         ref={dockRef}
         data-timeline-dock
-        className="panel absolute z-20 flex flex-col overflow-hidden"
-        style={{ left: band.left, width: band.width, bottom: GUTTER, height: insets.timelineHeight }}
+        className={sheet ? 'flex min-h-0 w-full flex-1 flex-col overflow-hidden' : 'panel absolute z-20 flex flex-col overflow-hidden'}
+        style={sheet ? undefined : { left: band.left, width: band.width, bottom: GUTTER, height: insets.timelineHeight }}
         onWheel={(e) => applyWheelZoom(e)}
       >
-        <DockResizeHandle />
+        {!sheet && <DockResizeHandle />}
         <ShotStrip />
         {hasPath ? (
           <>

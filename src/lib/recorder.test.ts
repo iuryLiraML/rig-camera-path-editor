@@ -224,7 +224,7 @@ describe('browser recording fallback', () => {
       if (outcome === 'cancel') cancelRecording()
     })
     const error = vi.spyOn(console, 'error').mockImplementation(() => {})
-    await exportVideo()
+    const result = await exportVideo()
     expect(useEditorStore.getState().recording).toBe(false)
     expect(useEditorStore.getState().playMode).toBe(false)
     expect(useEditorStore.getState().selectionIds).toEqual(['path:camera-path'])
@@ -232,10 +232,14 @@ describe('browser recording fallback', () => {
     expect(capture).toHaveBeenCalledWith(24)
     expect(stopTrack).toHaveBeenCalledTimes(outcome === 'success' ? 2 : 1)
     if (outcome === 'success') {
+      expect(result).toMatchObject({ status: 'file-offered', fileName: 'camera-animation_clay.mp4, camera-animation_depth.mp4', byteSize: 10, mimeType: 'video/mp4' })
       expect(passes).toContain('clay')
       expect(passes).toContain('depth')
       expect(vi.mocked(downloadBlob).mock.calls.map((call) => call[1])).toEqual(['camera-animation_clay.mp4', 'camera-animation_depth.mp4'])
-    } else expect(downloadBlob).not.toHaveBeenCalled()
+    } else {
+      expect(downloadBlob).not.toHaveBeenCalled()
+      expect(result).toMatchObject({ status: outcome === 'cancel' ? 'cancelled' : 'failed' })
+    }
     error.mockRestore()
   })
 

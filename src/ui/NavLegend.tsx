@@ -20,6 +20,7 @@ export function NavLegend() {
     >
       <button
         type="button"
+        data-tour="navigation-help"
         title="Keyboard shortcuts (?)"
         className="flex h-7 w-7 items-center justify-center rounded-full bg-panel/90 text-[12px] text-ink-dim shadow-lg backdrop-blur hover:bg-panel-2 hover:text-ink"
         onClick={() => useEditorStore.getState().toggleShortcuts()}

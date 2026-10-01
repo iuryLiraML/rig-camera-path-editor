@@ -12,6 +12,7 @@ import { createPlan, planFromJSON, planToJSON, type PlanState } from './floorPla
 import { createPlanAsset, renamePlanAsset, resolveLibraryAsset, savePlanAsset } from './library'
 import { useEditorStore } from '../state/useEditorStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { useProjectStore } from '../state/useProjectStore'
 
 interface PlanEditorState {
   /** The live plan being edited. */
@@ -71,6 +72,7 @@ export async function goPlan(planId: string | null, signal?: AbortSignal): Promi
   if (flushed === false) return false
   if (signal?.aborted) return false
 
+  const creating = !planId
   let id = planId
   if (!id) {
     const { useLibraryStore } = await import('./library')
@@ -90,6 +92,15 @@ export async function goPlan(planId: string | null, signal?: AbortSignal): Promi
   plan.note = plan.walls.length ? 'Select a wall or corner to edit the room.' : 'Draw a room or start a wall.'
   editor.setPlan(plan)
   usePlanEditorStore.setState({ assetId: id, tool: 'select', sel: null })
+  const { registerTutorialPlanBaseline } = await import('./tutorial/tutorialObservation')
+  registerTutorialPlanBaseline(id, plan)
+  if (creating) {
+    const { bindTutorialArtifact, recordObservedTutorialAction } = await import('./tutorial/tutorialActions')
+    bindTutorialArtifact('planAssetId', id)
+    recordObservedTutorialAction('room.create', {
+      kind: 'created-and-opened-plan', sceneId: useProjectStore.getState().activeSceneId, subjectId: id,
+    })
+  }
   const ed = useEditorStore.getState()
   ed.setPlanId(id)
   ed.setAppView('plan')
@@ -102,6 +113,8 @@ export async function saveActivePlan(): Promise<void> {
   if (!assetId) return
   const json = planToJSON(plan)
   await savePlanAsset(assetId, { walls: json.walls, openings: json.openings })
+  const { observeTutorialPlanSaved } = await import('./tutorial/tutorialObservation')
+  observeTutorialPlanSaved(assetId, plan)
 }
 
 /** Rename the open plan from the title chip. */

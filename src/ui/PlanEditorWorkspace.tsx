@@ -35,7 +35,7 @@ import { PlanToolbar } from './PlanToolbar'
 type Drag =
   | { kind: 'pan' }
   | { kind: 'stamp'; from: PlanPoint }
-  | { kind: 'vertex'; key: string; started?: boolean }
+  | { kind: 'vertex'; key: string; offset: PlanPoint; started?: boolean }
   | { kind: 'wall'; id: string; last: PlanPoint; started?: boolean }
   | { kind: 'opening'; id: string; started?: boolean }
   | null
@@ -190,6 +190,9 @@ export function PlanEditorWorkspace() {
   const assetId = usePlanEditorStore((s) => s.assetId)
   const note = usePlanEditorStore((s) => s.note)
   const [saveMessage, setSaveMessage] = useState('')
+  useEffect(() => {
+    if (import.meta.env.DEV && typeof window !== 'undefined') Object.assign(window, { __planEditorStore: usePlanEditorStore })
+  }, [])
   useEffect(() => setSaveMessage(''), [plan.version, assetId])
   const save = async () => {
     setSaveMessage('Saving…')
@@ -384,7 +387,7 @@ export function PlanEditorWorkspace() {
         return
       }
       if (drag?.kind === 'vertex') {
-        const s = snapPoint(p, null, [], { snap: snapRef.current })
+        const s = snapPoint({ x: p.x + drag.offset.x, y: p.y + drag.offset.y }, null, [], { snap: snapRef.current })
         if (pointKey(s) === drag.key) return
         if (!drag.started) { planActions.beginEdit(plan); drag.started = true }
         planActions.moveVertex(plan, drag.key, s)
@@ -465,7 +468,10 @@ export function PlanEditorWorkspace() {
         redraw()
         return
       }
-      const hit = hitTest(plan, p)
+      const touchRadius = 22 / viewRef.current.scale
+      const hit = hitTest(plan, p, ev.pointerType === 'touch'
+        ? { vertex: touchRadius, wall: touchRadius }
+        : undefined)
       if (!hit) {
         setSel(null)
         redraw()
@@ -473,7 +479,11 @@ export function PlanEditorWorkspace() {
       }
       if (hit.kind === 'vertex') {
         setSel({ kind: 'vertex', key: hit.vertex.key })
-        dragRef.current = { kind: 'vertex', key: hit.vertex.key }
+        dragRef.current = {
+          kind: 'vertex',
+          key: hit.vertex.key,
+          offset: { x: hit.vertex.x - p.x, y: hit.vertex.y - p.y },
+        }
       } else if (hit.kind === 'wall') {
         setSel({ kind: 'wall', id: hit.wall.id })
         dragRef.current = { kind: 'wall', id: hit.wall.id, last: p }

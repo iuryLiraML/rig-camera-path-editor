@@ -7,6 +7,8 @@ import { useEditorStore } from '../state/useEditorStore'
 import { useEnvironmentStore } from '../state/useEnvironmentStore'
 import { useProjectStore } from '../state/useProjectStore'
 import { useSceneStore } from '../state/useSceneStore'
+import { createLegacyProjectWorkflow } from './projectWorkflow'
+import { isTutorialProgressV2, newTutorialProgressV2 } from './tutorial/tutorialProgress'
 
 const palcos = new Map<string, unknown>()
 const collections = new Map<string, unknown>()
@@ -113,6 +115,7 @@ import {
   renamePlanAsset,
   resolveLibraryAsset,
   savePlanAsset,
+  saveSceneModelToLibrary,
   useLibraryStore,
 } from './library'
 
@@ -655,6 +658,35 @@ describe('insertPlanIntoScene (FR-034 to FR-038)', () => {
     expect(useEditorStore.getState().appView).toBe('editor')
   })
 
+  it('binds the inserted Plan copy to the current tutorial action', async () => {
+    useProjectStore.setState({
+      projectId: 'proj-tutorial',
+      activeSceneId: 'scene-tutorial',
+      scenes: [{ id: 'scene-tutorial', name: 'Scene 1' }],
+      workflow: createLegacyProjectWorkflow('Tutorial'),
+    })
+    const id = await makePlan()
+    const workflow = useProjectStore.getState().workflow
+    workflow.tutorial = {
+      ...newTutorialProgressV2('scene-tutorial'),
+      currentActionId: 'room.insert',
+      artifacts: { planAssetId: id },
+      actions: {
+        'room.door': { status: 'practiced', evidence: { kind: 'saved-hosted-door', sceneId: 'scene-tutorial', subjectId: 'door-1' } },
+      },
+    }
+    useProjectStore.setState({ workflow })
+
+    const objectId = await insertLibraryAssetIntoScene(id)
+
+    const progress = useProjectStore.getState().workflow.tutorial
+    expect(isTutorialProgressV2(progress) && progress.artifacts.planObjectId).toBe(objectId)
+    expect(isTutorialProgressV2(progress) && progress.actions['room.insert']).toMatchObject({
+      status: 'practiced',
+      evidence: { kind: 'inserted-bound-plan', sceneId: 'scene-tutorial', subjectId: objectId },
+    })
+  })
+
   it('creates a project named after the plan when none is open', async () => {
     expect(useProjectStore.getState().projectId).toBe('')
     const id = await makePlan()
@@ -739,4 +771,24 @@ describe('insertPlanIntoScene (FR-034 to FR-038)', () => {
     expect(result).toBeNull()
     expect(useSceneStore.getState().notice).toMatch(/Only a Location/i)
   })
+})
+
+
+it('saves a reconstructed scene Model to Library with its source data and artifact references', async () => {
+  const { makeObject } = await import('../state/useSceneStore')
+  const { Group } = await import('three')
+  const object = makeObject('Person', new Group(), { bufferKey: 'body', rigKind: 'sam-person', reconstruction: {
+    version: 1, provider: 'fal', model: 'fal-ai/sam-3/3d-body', source: { imageUrl: 'https://source' }, metadata: { custom: 'retained' }, artifacts: [{ role: 'visualization', url: 'https://expired', bufferKey: 'diagnostic' }],
+  } })
+  buffers.set('body', new Uint8Array([0x67, 0x6c, 0x54, 0x46, 2, 0, 0, 0]).buffer)
+  buffers.set('diagnostic', new Uint8Array([8]).buffer)
+  useSceneStore.setState({ objects: [object] })
+  const id = await saveSceneModelToLibrary(object.id)
+  const stored = await resolveLibraryAsset(id)
+  expect(await saveSceneModelToLibrary(object.id)).toBe(id)
+  expect((await listLibraryAssets()).length).toBe(1)
+  expect(stored?.reconstruction).toEqual(object.reconstruction)
+  expect(stored?.bufferKey).not.toBe('body')
+  expect(libraryBufferKeys().has('diagnostic')).toBe(true)
+  expect(useSceneStore.getState().objects[0]).toBe(object)
 })

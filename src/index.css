@@ -60,6 +60,26 @@ input[type='range'] {
   background: var(--color-panel-3);
   outline: none;
 }
+/* Keep the visible track slim while preserving a full-size touch target. */
+input[type='range'].touch-range {
+  height: 44px;
+  background: transparent;
+  outline: none;
+}
+input[type='range']:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+input[type='range'].touch-range::-webkit-slider-runnable-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-panel-3);
+}
+input[type='range'].touch-range::-moz-range-track {
+  height: 3px;
+  border-radius: 2px;
+  background: var(--color-panel-3);
+}
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;

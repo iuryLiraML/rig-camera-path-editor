@@ -81,6 +81,7 @@ export function disposeAssetDisplayResources(
 function assignMaterial(root: THREE.Object3D, material: MeshMaterial) {
   root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return
+    if (child.userData.rigPlanHit) return
     child.material = material
     child.castShadow = true
     child.receiveShadow = true
@@ -90,6 +91,7 @@ function assignMaterial(root: THREE.Object3D, material: MeshMaterial) {
 function assignSourceMaterials(object: SceneObject) {
   object.root.traverse((child) => {
     if (!(child instanceof THREE.Mesh)) return
+    if (child.userData.rigPlanHit) return
     child.material = object.sourceMaterials.get(child) ?? object.material
     child.castShadow = true
     child.receiveShadow = true

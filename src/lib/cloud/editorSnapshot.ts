@@ -1,3 +1,4 @@
+import type { BodyReconstruction } from '../bodyReconstruction'
 import type {
   CustomSkill,
   DirectorChatEntry,
@@ -111,6 +112,23 @@ export function emptyAssetMap(): CloudAssetMap {
   return { bufferAssets: {}, stillAssets: {} }
 }
 
+
+function withReconstructionAssets(reconstruction: BodyReconstruction | undefined, assets: CloudAssetMap): BodyReconstruction | undefined {
+  if (!reconstruction) return undefined
+  // Provider URLs are signed/expiring and are not durable references. Cloud
+  // snapshots retain only the uploaded asset IDs; the local URL remains
+  // available until the next sync or reload.
+  return {
+    ...reconstruction,
+    source: { ...reconstruction.source, imageUrl: '', ...(reconstruction.source.maskUrl ? { maskUrl: '' } : {}) },
+    artifacts: reconstruction.artifacts.map((artifact) => ({
+      ...artifact,
+      url: '',
+      cloudAssetId: artifact.bufferKey ? assets.bufferAssets[artifact.bufferKey]?.assetId ?? artifact.cloudAssetId : undefined,
+    })),
+  }
+}
+
 export function toCloudEditorState(record: ProjectRecord, assets: CloudAssetMap): CloudEditorState {
   return {
     guidelines: record.guidelines,
@@ -135,6 +153,7 @@ export function toCloudEditorState(record: ProjectRecord, assets: CloudAssetMap)
       })),
       sceneMeta: scene.sceneMeta.map((meta) => ({
         ...meta,
+        reconstruction: withReconstructionAssets(meta.reconstruction, assets),
         bufferAssetId: meta.bufferKey ? (assets.bufferAssets[meta.bufferKey]?.assetId ?? null) : null,
       })),
       rig: scene.rig,
@@ -153,6 +172,7 @@ export function toCloudEditorState(record: ProjectRecord, assets: CloudAssetMap)
     })),
     unplacedAssets: (record.unplacedAssets ?? []).map((asset) => ({
       ...asset,
+      reconstruction: withReconstructionAssets(asset.reconstruction, assets),
       bufferAssetId: assets.bufferAssets[asset.bufferKey]?.assetId ?? null,
     })),
   }
@@ -199,6 +219,11 @@ export function fromCloudEditorState(
     environmentTransform: scene.environmentTransform,
   }))
   const bufferAssets: Record<string, { assetId: string; sha256: string }> = {}
+  for (const item of [...state.scenes.flatMap((scene) => scene.sceneMeta), ...(state.unplacedAssets ?? [])]) {
+    for (const artifact of item.reconstruction?.artifacts ?? []) {
+      if (artifact.bufferKey && artifact.cloudAssetId) bufferAssets[artifact.bufferKey] = { assetId: artifact.cloudAssetId, sha256: '' }
+    }
+  }
   for (const scene of state.scenes) {
     for (const meta of scene.sceneMeta) {
       if (meta.bufferKey && meta.bufferAssetId) {

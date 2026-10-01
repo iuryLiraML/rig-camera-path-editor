@@ -82,6 +82,7 @@ function capture() {
         figureSex: o.figureSex,
         activeClip: o.activeClip,
         displayMode: o.displayMode,
+        plan: o.plan,
       })),
     },
     environment: {

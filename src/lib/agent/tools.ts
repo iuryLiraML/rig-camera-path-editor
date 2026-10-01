@@ -868,8 +868,8 @@ const EXECUTORS: Record<string, Executor> = {
       prompt: 'person',
       falKey,
       version: samImageVersion,
-      importBuffer: async (buffer, name) =>
-        parkUnplacedAsset({ buffer, name, rigKind: 'sam-person' }).then((item) => ({
+      importBuffer: async (buffer, name, reconstruction) =>
+        parkUnplacedAsset({ buffer, name, rigKind: 'sam-person', reconstruction }).then((item) => ({
           objectId: item.assetId,
           objectName: item.objectName,
         })),

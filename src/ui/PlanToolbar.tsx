@@ -20,8 +20,8 @@ export function PlanToolbar({ tool, setTool, snap, toggleSnap, fit, undo, redo, 
   tool: Tool; setTool: (tool: Tool) => void; snap: boolean; toggleSnap: () => void
   fit: () => void; undo: () => void; redo: () => void; canUndo: boolean; canRedo: boolean
 }) {
-  const button = (label: string, shortcut: string, icon: ReactNode, onClick: () => void, pressed?: boolean, disabled = false) => (
-    <button key={label} type="button" aria-label={label} title={`${label} (${shortcut})`} aria-pressed={pressed} disabled={disabled} onClick={onClick}
+  const button = (label: string, shortcut: string, icon: ReactNode, onClick: () => void, pressed?: boolean, disabled = false, tour?: string) => (
+    <button key={label} type="button" data-tour={tour} aria-label={label} title={`${label} (${shortcut})`} aria-pressed={pressed} disabled={disabled} onClick={onClick}
       className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-30 ${pressed ? 'bg-accent text-white' : 'text-ink-dim hover:bg-panel-2 hover:text-ink'}`}>
       {icon}
     </button>
@@ -36,7 +36,7 @@ export function PlanToolbar({ tool, setTool, snap, toggleSnap, fit, undo, redo, 
       const index = buttons.indexOf(document.activeElement as HTMLButtonElement)
       buttons[(index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus()
     }}>
-    {tools.map((item) => button(item.label, item.key, item.icon, () => setTool(item.id), tool === item.id))}
+    {tools.map((item) => button(item.label, item.key, item.icon, () => setTool(item.id), tool === item.id, false, item.id === 'select' ? 'plan-select' : item.id === 'door' ? 'plan-door' : undefined))}
     {divider}
     {button('Snap', 'G', <Icon><path d="M3 3v6a5 5 0 0 0 10 0V3h-3v6a2 2 0 0 1-4 0V3zM3 6h3m4 0h3" /></Icon>, toggleSnap, snap)}
     {button('Fit', '0', <Icon><path d="M6 2H2v4m8-4h4v4M2 10v4h4m8-4v4h-4" /><rect x="5" y="5" width="6" height="6" /></Icon>, fit)}

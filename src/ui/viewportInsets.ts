@@ -4,12 +4,14 @@ import {
   type ComposeDock,
   type WorkspaceMode,
 } from '../state/useEditorStore'
+import { useProjectStore } from '../state/useProjectStore'
 import {
   directorIsCompact,
   isPhoneTier,
   layoutTier,
   type LayoutTier,
 } from '../lib/chromeLayout'
+import { isTutorialProgressV2 } from '../lib/tutorial/tutorialProgress'
 import { useSafeAreaInsets, ZERO_SAFE_AREA, type SafeAreaInsets } from './safeAreaInsets'
 
 /**
@@ -149,6 +151,7 @@ export interface ChromeSizeInput {
   timelineVisible: boolean
   requestedHeight?: number
   directorCompact?: boolean
+  directorVisible?: boolean
   /** Layout tier; the phone shell docks nothing and reserves no rail width. */
   tier?: LayoutTier
 }
@@ -166,7 +169,9 @@ export function chromeSizes(
   }
 
   const requestedHeight = input.requestedHeight ?? TIMELINE_HEIGHT_DEFAULT
-  const directorWidth = input.directorCompact ? COMPACT_DIRECTOR_DOCK_WIDTH : DIRECTOR_DOCK_WIDTH
+  const directorWidth = input.directorVisible === false
+    ? 0
+    : input.directorCompact ? COMPACT_DIRECTOR_DOCK_WIDTH : DIRECTOR_DOCK_WIDTH
   let leftWidth = 0
   let rightWidth = 0
   let timelineHeight = 0
@@ -239,11 +244,7 @@ export interface ViewportInsets {
   bottom: number
   /** centre of the free area (footer alignment) */
   centre: number
-  /**
-   * First free y from the bottom for floating content that must clear the
-   * timeline dock and the footer pill row (Compose). Build / Visualize only
-   * need to clear the window gutter — Director is a reserved right rail.
-   */
+  /** First free y for floating content; follows the panels currently shown. */
   contentBottom: number
   /**
    * Distance from the window bottom to the Director column. The rail is
@@ -269,6 +270,8 @@ export function viewportInsets(
     composeDock?: ComposeDock
     showOutliner?: boolean
     directorCompact?: boolean
+    directorVisible?: boolean
+    addDrawerVisible?: boolean
     tier?: LayoutTier
     safeArea?: SafeAreaInsets
   } = {},
@@ -306,6 +309,7 @@ export function viewportInsets(
     timelineVisible,
     requestedHeight,
     directorCompact: extras.directorCompact ?? false,
+    directorVisible: extras.directorVisible,
     tier,
   })
   const left = (leftWidth > 0 ? GUTTER + leftWidth + GUTTER : GUTTER) + safe.left
@@ -318,7 +322,7 @@ export function viewportInsets(
         ? GUTTER + visualizeDock + GUTTER
         : GUTTER) + safe.bottom
   const footerBand = mode === 'compose' && timelineVisible ? FOOTER_ROW_HEIGHT + GUTTER : 0
-  const addDrawerBand = mode === 'build' ? ADD_DRAWER_HEIGHT + GUTTER : 0
+  const addDrawerBand = mode === 'build' && (extras.addDrawerVisible ?? true) ? ADD_DRAWER_HEIGHT + GUTTER : 0
   const composeDocked = mode === 'compose' && timelineVisible
   const dockBottom = GUTTER + safe.bottom
   const contentBottom = composeDocked
@@ -434,15 +438,23 @@ export function useViewportInsets(windowWidth?: number, windowHeight?: number): 
   const showOutliner = useEditorStore((s) => s.showOutliner)
   const timelineHeight = useEditorStore((s) => s.timelineHeight)
   const directorPreference = useEditorStore((s) => s.directorPreference)
+  const showAddDrawer = useEditorStore((s) => s.showAddDrawer)
+  const tutorial = useProjectStore((s) => s.workflow.tutorial)
   const win = useWindowSize()
   const safeArea = useSafeAreaInsets()
   const w = windowWidth ?? win.w
   const h = windowHeight ?? win.h
   const timelineVisible = !playMode && workspaceMode === 'compose'
+  const tutorialActive = Boolean(tutorial?.active && !tutorial.done)
+  const tutorialInspectorVisible = isTutorialProgressV2(tutorial)
+    && tutorial.active && !tutorial.done
+    && ['room.scene-edit', 'figure.pose', 'camera.height', 'camera.frame', 'timing.lens'].includes(tutorial.currentActionId)
   return viewportInsets(workspaceMode, w, timelineVisible, h, timelineHeight, {
     composeDock,
     showOutliner,
     directorCompact: directorIsCompact(w, h, directorPreference),
+    directorVisible: !tutorialActive || tutorialInspectorVisible,
+    addDrawerVisible: !tutorialActive || showAddDrawer,
     tier: layoutTier(w, h),
     safeArea,
   })

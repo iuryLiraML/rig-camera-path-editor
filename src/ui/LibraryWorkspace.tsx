@@ -297,6 +297,7 @@ export function LibraryWorkspace() {
           <div className="flex items-center gap-2">
             <button
               type="button"
+              data-tour="library-new-plan"
               onClick={() => void goPlan(null)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-line bg-panel px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-panel-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             >
@@ -521,6 +522,7 @@ export function LibraryWorkspace() {
                     </button>
                     <button
                       type="button"
+                      data-tour="library-insert-plan"
                       onClick={() => void insertLibraryAssetIntoScene(selected.id)}
                       className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
                     >

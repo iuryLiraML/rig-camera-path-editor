@@ -114,7 +114,7 @@ describe('camera row remove control', () => {
       el.textContent?.trim().startsWith('Wide'),
     )!
     const button = Array.from(row.querySelectorAll('button')).find((b) =>
-      /camera/i.test(b.title),
+      b.title === 'The last camera cannot be deleted',
     )!
     // it used to be absent, which looked like "cameras cannot be deleted"
     expect(button.disabled).toBe(true)

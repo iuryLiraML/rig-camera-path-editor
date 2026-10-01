@@ -271,13 +271,18 @@ export function nearestOpening(state: PlanState, p: PlanPoint, maxDist = 0.3) {
   return best
 }
 
+export interface PlanHitTolerance {
+  vertex?: number
+  wall?: number
+}
+
 /** Smallest target wins: a corner is never stolen by the wall it sits on. */
-export function hitTest(state: PlanState, p: PlanPoint) {
-  const v = nearestVertex(state.walls, p)
+export function hitTest(state: PlanState, p: PlanPoint, tolerance: PlanHitTolerance = {}) {
+  const v = nearestVertex(state.walls, p, tolerance.vertex)
   if (v) return { kind: 'vertex' as const, vertex: v.vertex }
   const o = nearestOpening(state, p)
   if (o) return { kind: 'opening' as const, opening: o.opening }
-  const w = nearestWall(state.walls, p)
+  const w = nearestWall(state.walls, p, tolerance.wall)
   if (w) return { kind: 'wall' as const, wall: w.wall, along: w.along }
   return null
 }

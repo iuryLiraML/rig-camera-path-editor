@@ -1,4 +1,6 @@
-import { useEffect, useRef } from 'react'
+import { reconstructionMessage } from '../lib/bodyReconstruction'
+import { inspectCharacterRig } from '../lib/characterRig'
+import { useEffect, useRef, useState } from 'react'
 import { useSceneStore, type SceneObject } from '../state/useSceneStore'
 import { useEditorStore } from '../state/useEditorStore'
 import { beginHistoryTransaction } from '../lib/history'
@@ -38,14 +40,37 @@ function ControlRow({ object, bone, input }: { object: SceneObject; bone: DummyB
   </div>
 }
 
+function SaveCharacterSource({ objectId }: { objectId: string }) {
+  const [status, setStatus] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
+  return <div><button className={button} disabled={status === 'saving' || status === 'saved'} onClick={async () => {
+    setStatus('saving')
+    try {
+      const { saveSceneModelToLibrary } = await import('../lib/library')
+      setStatus(await saveSceneModelToLibrary(objectId) ? 'saved' : 'failed')
+    } catch { setStatus('failed') }
+  }}>{status === 'saving' ? 'Saving…' : status === 'saved' ? 'Saved to Library' : 'Save source to Library'}</button>{status === 'failed' && <p role="status" className="mt-1 text-[11px] text-ink-dim">Could not save. Your scene is unchanged. Try again.</p>}</div>
+}
+
 export function CharacterPosePanel({ objectId }: { objectId: string }) {
   const object = useSceneStore((state) => state.objects.find((item) => item.id === objectId))
   const handles = useEditorStore((state) => state.showPoseHandles)
   const workspace = useEditorStore((state) => state.workspaceMode)
-  if (!object || object.rigKind !== 'dummy' || workspace === 'visualize') return null
+  if (!object || workspace === 'visualize') return null
+  const rig = inspectCharacterRig(object.root)
+  if (object.rigKind !== 'dummy') {
+    if (object.rigKind !== 'sam-person' && !rig.skinned && !rig.issue) return null
+    return <section aria-label="Character pose" className="space-y-2 text-xs text-ink">
+      <div className="flex items-center justify-between gap-2"><h3 className="font-medium">Character</h3><span className="rounded bg-panel-2 px-2 py-1 text-[10px]">{rig.skinned ? 'Skinned rig' : 'Static mesh'}</span></div>
+      <p className="text-[11px] leading-4 text-ink-dim">{rig.issue ?? (rig.skinned ? 'A skeleton is present. Pose controls need a supported humanoid profile.' : 'This mesh has no editable skeleton. Pose sliders are unavailable.')}</p>
+      {object.rigKind === 'sam-person' && <p className="text-[11px] leading-4 text-ink-dim">{reconstructionMessage(object.reconstruction)}</p>}
+      {object.reconstruction && object.bufferKey && <SaveCharacterSource key={object.bufferKey} objectId={object.id} />}
+      {object.reconstruction?.artifacts.some((item) => item.error) && <p role="status" className="text-[11px] text-ink-dim">Some reconstruction files could not be saved. The body mesh is retained.</p>}
+    </section>
+  }
   if (!object.root.userData.dummyGltf) return <p className="text-xs text-ink-dim">Pose controls require the Figure model. Loading…</p>
-  return <section aria-label="Character pose" className="space-y-3 text-ink">
-    <div className="flex items-center justify-between"><h3 className="text-xs font-medium">Pose</h3><span className="text-[10px] text-ink-dim">Figure rig</span></div>
+  if (!rig.skinned) return <p className="text-xs text-ink-dim">{rig.issue ?? 'The Figure has no usable skinning data.'}</p>
+  return <section data-tour="figure-pose" aria-label="Character pose" className="space-y-3 text-ink">
+    <div className="flex items-center justify-between"><h3 className="text-xs font-medium">Pose</h3><span className="text-[10px] text-ink-dim">Supported humanoid</span></div>
     <div className="flex gap-2"><button className={button} aria-pressed={!object.playClips} onClick={() => edit(() => useSceneStore.getState().setPlayClips(object.id, false))}>Edit pose</button><button className={button} disabled={!object.clips.length} aria-pressed={object.playClips} onClick={() => edit(() => useSceneStore.getState().setPlayClips(object.id, true))}>Play clip</button></div>
     {object.playClips ? <label className="block text-xs">Clip<select aria-label="Character clip" value={object.activeClip ?? object.clips[0]?.name} onChange={(event) => edit(() => useSceneStore.getState().setActiveClip(object.id, event.target.value))} className="ml-2 rounded bg-panel-2 px-2 py-1">{object.clips.map((clip) => <option key={clip.uuid} value={clip.name}>{clip.name}</option>)}</select><p className="mt-2 text-ink-dim">Your manual pose is kept while this clip plays.</p></label> : <>
       {groups.map((group) => <details key={group.label} open={group.label === 'Left arm'} className="border-t border-line pt-2"><summary className="cursor-pointer text-xs">{group.label}</summary><div className="mt-2"><button className={button} onClick={() => edit(() => resetCharacterJoints(object.id, group.bones))}>Reset {group.label.toLowerCase()}</button>{group.bones.map((bone) => <div key={bone} className="mt-3"><div className="flex items-center justify-between"><h4 className="text-[10px] text-ink-dim">{DUMMY_BONE_LABELS[bone]}</h4><button className="text-[10px] text-ink-dim" aria-label={`Reset ${DUMMY_BONE_LABELS[bone]}`} onClick={() => edit(() => resetCharacterJoints(object.id, [bone]))}>Reset joint</button></div>{characterControls(bone).map((input) => <ControlRow key={input.id} object={object} bone={bone} input={input} />)}</div>)}</div></details>)}
